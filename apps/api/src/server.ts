@@ -5,7 +5,7 @@ import { runsRouter } from "./routes/runs.js";
 import { authRouter } from "./routes/auth.js";
 
 const app = express();
-app.use(cors({ origin: "http://localhost:3000" }));
+app.use(cors({ origin: process.env.WEB_APP_URL ?? "http://localhost:3000" }));
 app.use(express.json());
 app.use("/api", runsRouter);
 app.use("/auth", authRouter);
