@@ -1,0 +1,20 @@
+node_modules/
+dist/
+.next/
+*.log
+
+# Environment files — NEVER commit real secrets
+.env
+.env.local
+.env.*.local
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# Build outputs
+apps/api/dist/
+apps/web/.next/
+apps/web/out/
+
+eval-output.txt
