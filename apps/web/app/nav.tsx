@@ -16,16 +16,26 @@ export function Nav() {
           Scheduling Agent
         </Link>
         <Link
-          href="/runs"
-          className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition ${
-            isHistory
-              ? "bg-neutral-900 text-white"
-              : "text-neutral-600 hover:bg-neutral-100"
-          }`}
-        >
-          <Clock size={15} />
-          History
-        </Link>
+  href="/runs"
+  className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition ${
+    isHistory
+      ? "bg-neutral-900 text-white"
+      : "text-neutral-600 hover:bg-neutral-100"
+  }`}
+>
+  <Clock size={15} />
+  History
+</Link>
+<Link
+  href="/procurement"
+  className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition ${
+    pathname?.startsWith("/procurement")
+      ? "bg-neutral-900 text-white"
+      : "text-neutral-600 hover:bg-neutral-100"
+  }`}
+>
+  Procurement
+</Link>
       </div>
     </header>
   );
