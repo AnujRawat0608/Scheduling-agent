@@ -36,6 +36,19 @@ export function Nav() {
 >
   Procurement
 </Link>
+
+
+<Link
+  href="/supply-chain"
+  className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition ${
+    pathname?.startsWith("/supply-chain")
+      ? "bg-neutral-900 text-white"
+      : "text-neutral-600 hover:bg-neutral-100"
+  }`}
+>
+  Supply Chain
+</Link>
+
       </div>
     </header>
   );

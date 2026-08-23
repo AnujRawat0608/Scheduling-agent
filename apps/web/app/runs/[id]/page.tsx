@@ -36,10 +36,10 @@ export default function RunDetailPage({ params }: { params: { id: string } }) {
         <StatusBadge status={state.status} />
       </div>
 
-      {state.calendarErrors.length > 0 && (
+        {(state.calendarErrors?.length ?? 0) > 0 && ( 
         <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-          {state.calendarErrors.map((err, i) => (
-            <p key={i}>{err}</p>
+        {(state.calendarErrors ?? []).map((err, i) => (
+              <p key={i}>{err}</p>
           ))}
         </div>
       )}
