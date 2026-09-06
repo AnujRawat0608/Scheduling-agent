@@ -6,13 +6,6 @@ import { authRouter } from "./routes/auth.js";
 import { procurementRouter } from "./routes/procurement.js";
 import { supplyChainRouter } from "./routes/supplyChain.js";
 
-process.on("unhandledRejection", (err) => {
-  console.error("Unhandled rejection (server stays up):", err);
-});
-process.on("uncaughtException", (err) => {
-  console.error("Uncaught exception (server stays up):", err);
-});
-
 const app = express();
 app.use(cors({ origin: process.env.WEB_APP_URL ?? "http://localhost:3000" }));
 app.use(express.json());

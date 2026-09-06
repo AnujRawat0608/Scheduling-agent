@@ -22,7 +22,6 @@ export async function listSupplyChainOffers(): Promise<SupplierOffer[]> {
 export interface CreateOfferInput {
   item: string;
   supplierName: string;
-  supplierType: string;
   unitPrice: number;
   leadTimeDays: number;
   shippingCost: number;
