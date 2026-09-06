@@ -89,9 +89,9 @@ export function Dock() {
   const [hovered, setHovered] = useState<number | null>(null);
 
   // Match the Nav's own convention: no dock on the Metis marketing homepage.
-  if (pathname === "/") {
-    return null;
-  }
+  //if (pathname === "/") {
+   // return null;
+  //}
 
   return (
     <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-30">
