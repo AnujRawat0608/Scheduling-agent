@@ -8,6 +8,11 @@ export function Nav() {
   const pathname = usePathname();
   const isHistory = pathname === "/runs";
 
+  // Metis homepage has its own design and CTAs — don't render this nav there.
+  if (pathname === "/") {
+    return null;
+  }
+
   return (
     <header className="border-b border-neutral-200">
       <div className="mx-auto flex max-w-3xl items-center justify-between px-8 py-4">
