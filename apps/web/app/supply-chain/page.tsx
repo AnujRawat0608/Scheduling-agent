@@ -15,19 +15,21 @@ import {
   listSupplyChainOffers,
   createSupplyChainOffer,
   deleteSupplyChainOffer,
+  type SupplierOffer,
 } from "../../lib/supplyChainApi";
 
 // ---- Extended type ----------------------------------------------------
-// supplyChainApi.ts doesn't export a named "SupplyChainOffer" type, so we
-// derive the base shape directly from what listSupplyChainOffers actually
-// returns. This stays correct automatically if that function's return
-// type ever changes.
-// TODO(backend): category, description, aiScore, and dispatchStatus don't
-// exist on the API yet. Once the backend supports them, add them to the
-// real return type in supplyChainApi.ts and these can become required.
-type BaseSupplyChainOffer = Awaited<ReturnType<typeof listSupplyChainOffers>>[number];
-
-type SupplyChainOffer = BaseSupplyChainOffer & {
+// TODO(backend): SupplierOffer (what GET /supply-chain actually returns)
+// is missing several fields:
+//  - supplierType: accepted by CreateOfferInput on POST, but the GET
+//    response never sends it back — likely dropped somewhere in the
+//    backend's create/read path and worth checking.
+//  - category, description, aiScore, dispatchStatus: don't exist in the
+//    API at all yet.
+// All five are marked optional here so the UI can render gracefully
+// until the backend is updated; once it is, tighten these to required.
+type SupplyChainOffer = SupplierOffer & {
+  supplierType?: string;
   category?: string;
   description?: string;
   aiScore?: number;
@@ -78,7 +80,7 @@ function toCsv(offers: SupplyChainOffer[]): string {
   const rows = offers.map((o) =>
     headers
       .map((h) => {
-        const value = (o as Record<string, unknown>)[h];
+        const value = (o as unknown as Record<string, unknown>)[h];
         const cell = value === undefined || value === null ? "" : String(value);
         // Escape quotes/commas per basic CSV rules.
         return /[",\n]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell;
