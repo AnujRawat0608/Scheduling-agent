@@ -3,12 +3,17 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
 export interface SupplierOffer {
   id: string;
   item: string;
+  description: string | null;
+  category: string | null;
   supplierName: string;
+  supplierType: string | null;
   unitPrice: number;
   leadTimeDays: number;
+  dispatchStatus: string | null;
   shippingCost: number;
   moq: number;
   quantityAvailable: number;
+  aiScore: number | null;
   createdAt: string;
 }
 
@@ -21,13 +26,17 @@ export async function listSupplyChainOffers(): Promise<SupplierOffer[]> {
 
 export interface CreateOfferInput {
   item: string;
+  description?: string;
+  category?: string;
   supplierName: string;
   supplierType: string;
   unitPrice: number;
   leadTimeDays: number;
+  dispatchStatus?: string;
   shippingCost: number;
   moq: number;
   quantityAvailable: number;
+  aiScore?: number;
 }
 
 export async function createSupplyChainOffer(input: CreateOfferInput) {

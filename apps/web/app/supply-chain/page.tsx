@@ -18,23 +18,9 @@ import {
   type SupplierOffer,
 } from "../../lib/supplyChainApi";
 
-// ---- Extended type ----------------------------------------------------
-// TODO(backend): SupplierOffer (what GET /supply-chain actually returns)
-// is missing several fields:
-//  - supplierType: accepted by CreateOfferInput on POST, but the GET
-//    response never sends it back — likely dropped somewhere in the
-//    backend's create/read path and worth checking.
-//  - category, description, aiScore, dispatchStatus: don't exist in the
-//    API at all yet.
-// All five are marked optional here so the UI can render gracefully
-// until the backend is updated; once it is, tighten these to required.
-type SupplyChainOffer = SupplierOffer & {
-  supplierType?: string;
-  category?: string;
-  description?: string;
-  aiScore?: number;
-  dispatchStatus?: string;
-};
+// The backend now returns supplierType, category, description,
+// dispatchStatus, and aiScore directly — no extension needed.
+type SupplyChainOffer = SupplierOffer;
 
 type SortOption = "price-desc" | "price-asc" | "lead-asc" | "stock-desc";
 
@@ -169,10 +155,7 @@ export default function SupplyChainPage() {
       quantityAvailable: Number(quantityAvailable),
       dispatchStatus,
       aiScore: aiScore ? Number(aiScore) : undefined,
-      // TODO(backend): createSupplyChainOffer's signature needs to accept
-      // these fields once the API supports them — cast for now so the
-      // frontend isn't blocked on the backend change.
-    } as Parameters<typeof createSupplyChainOffer>[0]);
+    });
   }
 
   const categories = useMemo(() => {
@@ -555,7 +538,7 @@ export default function SupplyChainPage() {
                         <div className="text-xs text-neutral-400">MOQ: {o.moq}</div>
                       </td>
                       <td className="px-6 py-3">
-                        {o.aiScore !== undefined ? (
+                        {o.aiScore !== null ? (
                           <span className="inline-flex items-center gap-1 rounded-full bg-[#eef2ff] px-2 py-0.5 text-xs font-medium text-[#3d6bff]">
                             <Sparkles size={10} />
                             {o.aiScore}%

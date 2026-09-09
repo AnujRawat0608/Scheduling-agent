@@ -14,12 +14,17 @@ supplyChainRouter.post("/supply-chain", async (req, res) => {
   try {
     const {
       item,
+      description,
+      category,
       supplierName,
+      supplierType,
       unitPrice,
       leadTimeDays,
+      dispatchStatus,
       shippingCost,
       moq,
       quantityAvailable,
+      aiScore,
     } = req.body;
 
     if (!item || !supplierName || unitPrice == null || leadTimeDays == null || quantityAvailable == null) {
@@ -32,12 +37,17 @@ supplyChainRouter.post("/supply-chain", async (req, res) => {
       .insert(supplierOffers)
       .values({
         item,
+        description: description ?? null,
+        category: category ?? null,
         supplierName,
+        supplierType: supplierType ?? null,
         unitPrice,
         leadTimeDays,
+        dispatchStatus: dispatchStatus ?? "Dispatch ready",
         shippingCost: shippingCost ?? 0,
         moq: moq ?? 1,
         quantityAvailable,
+        aiScore: aiScore ?? null,
       })
       .returning();
 
