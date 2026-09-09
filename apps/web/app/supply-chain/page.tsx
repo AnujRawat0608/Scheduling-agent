@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import {
   Boxes,
   Search,
@@ -10,6 +11,7 @@ import {
   Sparkles,
   Pencil,
   Trash2,
+  UserPlus,
 } from "lucide-react";
 import {
   listSupplyChainOffers,
@@ -210,15 +212,25 @@ export default function SupplyChainPage() {
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-16 space-y-6">
-      <div className="flex items-center gap-2">
-        <Boxes size={22} className="text-[#3d6bff]" />
-        <div>
-          <h1 className="text-2xl font-semibold text-neutral-900">Supply chain catalog</h1>
-          <p className="mt-0.5 text-sm text-neutral-500">
-            Products and their supplier offers. Procurement requests match against this
-            catalog before falling back to simulated quotes.
-          </p>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Boxes size={22} className="text-[#3d6bff]" />
+          <div>
+            <h1 className="text-2xl font-semibold text-neutral-900">Supply chain catalog</h1>
+            <p className="mt-0.5 text-sm text-neutral-500">
+              Products and their supplier offers. Procurement requests match against this
+              catalog before falling back to simulated quotes.
+            </p>
+          </div>
         </div>
+
+        <Link
+          href="/suppliers/register"
+          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-900"
+        >
+          <UserPlus size={14} />
+          Register as a supplier
+        </Link>
       </div>
 
       <form
