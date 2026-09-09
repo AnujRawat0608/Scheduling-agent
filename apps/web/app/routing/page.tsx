@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Route, Plane, Ship, Truck, Check } from "lucide-react";
+import WorldMapPicker from "../../components/WorldMapPicker";
 
 type Method = "air" | "sea" | "road";
 
@@ -40,6 +41,20 @@ export default function RoutingPage() {
 
   const [results, setResults] = useState<ComparedOption[] | null>(null);
   const [selectedMethod, setSelectedMethod] = useState<Method | null>(null);
+
+  // Country-level selection from the map — independent of the free-text
+  // origin/destination fields above, since matching a clicked country
+  // name back to arbitrary city text isn't reliable.
+  const [originCountry, setOriginCountry] = useState<string | null>(null);
+  const [destCountry, setDestCountry] = useState<string | null>(null);
+
+  function handleMapSelect(mode: "origin" | "destination", countryName: string) {
+    if (mode === "origin") {
+      setOriginCountry(countryName);
+    } else {
+      setDestCountry(countryName);
+    }
+  }
 
   function handleCompare(e: React.FormEvent) {
     e.preventDefault();
@@ -230,6 +245,13 @@ export default function RoutingPage() {
           )}
         </div>
       )}
+
+      {/* Interactive world map — visually pick origin/destination countries. */}
+      <WorldMapPicker
+        originCountry={originCountry}
+        destCountry={destCountry}
+        onSelectCountry={handleMapSelect}
+      />
     </main>
   );
 }

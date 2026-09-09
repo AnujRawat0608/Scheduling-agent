@@ -2,6 +2,7 @@
 
 import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { Paperclip, ArrowUp, X, ExternalLink, Check } from "lucide-react";
 import {
   createProcurementTask,
@@ -32,6 +33,7 @@ const STATUS_STYLES: Record<string, string> = {
 
 export default function NewProcurementPage() {
   const queryClient = useQueryClient();
+  const router = useRouter();
   const [mode, setMode] = useState<SourceMode>("type");
   const [text, setText] = useState("");
   const [attachedFile, setAttachedFile] = useState<{ name: string; content: string } | null>(null);
@@ -64,8 +66,10 @@ export default function NewProcurementPage() {
   const approve = useMutation({
     mutationFn: (supplierName?: string) =>
       approveProcurementTask(activeTaskId as string, supplierName),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["procurement", activeTaskId] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["procurement", activeTaskId] });
+      router.push("/routing");
+    },
   });
 
   const reject = useMutation({
