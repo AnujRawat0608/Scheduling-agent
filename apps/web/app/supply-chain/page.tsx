@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import {
@@ -12,7 +12,10 @@ import {
   Pencil,
   Trash2,
   UserPlus,
+  LogIn,
+  LayoutDashboard,
 } from "lucide-react";
+import { fetchCurrentSupplier, type Supplier } from "../../lib/supplierAuthApi";
 import {
   listSupplyChainOffers,
   createSupplyChainOffer,
@@ -105,6 +108,26 @@ export default function SupplyChainPage() {
   const [dispatchStatus, setDispatchStatus] = useState("Dispatch ready");
   const [aiScore, setAiScore] = useState("");
 
+  // If a supplier is logged in, offers they create get tagged with their
+  // id (so they show up in their dashboard) and the supplier name field
+  // is pre-filled from their account — editable, in case they're adding
+  // an offer on behalf of someone else.
+  const [loggedInSupplier, setLoggedInSupplier] = useState<Supplier | null>(null);
+
+  useEffect(() => {
+    fetchCurrentSupplier()
+      .then((supplier) => {
+        if (supplier) {
+          setLoggedInSupplier(supplier);
+          setSupplierName((prev) => prev || supplier.businessName);
+        }
+      })
+      .catch(() => {
+        // Not logged in, or the check failed — either way, just leave the
+        // form as a normal anonymous entry. Not a blocking error.
+      });
+  }, []);
+
   // Toolbar / filter state
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
@@ -157,6 +180,7 @@ export default function SupplyChainPage() {
       quantityAvailable: Number(quantityAvailable),
       dispatchStatus,
       aiScore: aiScore ? Number(aiScore) : undefined,
+      supplierId: loggedInSupplier?.id,
     });
   }
 
@@ -224,13 +248,34 @@ export default function SupplyChainPage() {
           </div>
         </div>
 
-        <Link
-          href="/suppliers/register"
-          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-900"
-        >
-          <UserPlus size={14} />
-          Register as a supplier
-        </Link>
+        <div className="flex shrink-0 items-center gap-2">
+          {loggedInSupplier ? (
+            <Link
+              href="/suppliers/dashboard"
+              className="flex items-center gap-1.5 rounded-lg border border-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-900"
+            >
+              <LayoutDashboard size={14} />
+              {loggedInSupplier.businessName}
+            </Link>
+          ) : (
+            <>
+              <Link
+                href="/suppliers/login"
+                className="flex items-center gap-1.5 rounded-lg border border-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-900"
+              >
+                <LogIn size={14} />
+                Log in
+              </Link>
+              <Link
+                href="/suppliers/register"
+                className="flex items-center gap-1.5 rounded-lg border border-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-900"
+              >
+                <UserPlus size={14} />
+                Register as a supplier
+              </Link>
+            </>
+          )}
+        </div>
       </div>
 
       <form

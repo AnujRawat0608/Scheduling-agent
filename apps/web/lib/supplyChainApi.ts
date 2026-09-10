@@ -14,6 +14,7 @@ export interface SupplierOffer {
   moq: number;
   quantityAvailable: number;
   aiScore: number | null;
+  supplierId: string | null;
   createdAt: string;
 }
 
@@ -37,6 +38,7 @@ export interface CreateOfferInput {
   moq: number;
   quantityAvailable: number;
   aiScore?: number;
+  supplierId?: string;
 }
 
 export async function createSupplyChainOffer(input: CreateOfferInput) {

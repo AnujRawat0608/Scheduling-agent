@@ -25,6 +25,7 @@ supplyChainRouter.post("/supply-chain", async (req, res) => {
       moq,
       quantityAvailable,
       aiScore,
+      supplierId,
     } = req.body;
 
     if (!item || !supplierName || unitPrice == null || leadTimeDays == null || quantityAvailable == null) {
@@ -48,6 +49,11 @@ supplyChainRouter.post("/supply-chain", async (req, res) => {
         moq: moq ?? 1,
         quantityAvailable,
         aiScore: aiScore ?? null,
+        // Optional — set when a logged-in supplier creates the offer from
+        // their own session, so it shows up in their dashboard's product
+        // list. Offers created without being logged in simply have no
+        // owner, same as before this field existed.
+        supplierId: supplierId ?? null,
       })
       .returning();
 

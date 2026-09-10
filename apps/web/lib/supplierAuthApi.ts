@@ -1,19 +1,9 @@
+import type { SupplierProfile } from "./supplierProfileApi";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
 
-export interface Supplier {
-  id: string;
-  email: string;
-  businessName: string;
-  contactName: string | null;
-  phone: string | null;
-  gstNumber: string | null;
-  address: string | null;
-  city: string | null;
-  state: string | null;
-  pincode: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
+// Re-exported so existing imports of `Supplier` from this file keep working.
+export type Supplier = SupplierProfile;
 
 export interface RegisterSupplierInput {
   email: string;

@@ -6,6 +6,7 @@ export default defineConfig({
     "./src/db/procurementSchema.ts",
     "./src/db/supplyChainSchema.ts",
     "./src/db/suppliersSchema.ts",
+    "./src/db/supplierMessagesSchema.ts",
   ],
   dialect: "postgresql",
   dbCredentials: {

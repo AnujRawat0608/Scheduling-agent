@@ -7,6 +7,7 @@ import { authRouter } from "./routes/auth.js";
 import { procurementRouter } from "./routes/procurement.js";
 import { supplyChainRouter } from "./routes/supplyChain.js";
 import { supplierAuthRouter } from "./routes/supplierAuth.js";
+import { supplierProfileRouter } from "./routes/supplierProfile.js";
 
 process.on("unhandledRejection", (err) => {
   console.error("Unhandled rejection (server stays up):", err);
@@ -17,10 +18,6 @@ process.on("uncaughtException", (err) => {
 
 const app = express();
 
-// `credentials: true` is required for the supplier login cookie
-// (httpOnly) to actually be sent/received across origins — without it,
-// the browser silently drops the Set-Cookie header on cross-origin
-// responses even though the request itself succeeds.
 app.use(
   cors({
     origin: process.env.WEB_APP_URL ?? "http://localhost:3000",
@@ -35,6 +32,7 @@ app.use("/auth", authRouter);
 app.use("/api", procurementRouter);
 app.use("/api", supplyChainRouter);
 app.use("/api/supplier-auth", supplierAuthRouter);
+app.use("/api/suppliers", supplierProfileRouter);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
