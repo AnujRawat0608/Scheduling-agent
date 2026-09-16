@@ -18,3 +18,7 @@ apps/web/.next/
 apps/web/out/
 
 eval-output.txt
+# Python (risk-agent service)
+apps/risk-agent/venv/
+apps/risk-agent/__pycache__/
+apps/risk-agent/**/__pycache__/
