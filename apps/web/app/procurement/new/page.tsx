@@ -3,6 +3,8 @@
 import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
+import { GlobalRiskOverview } from "../../../components/GlobalRiskOverview";
+import { RiskAssessmentBadge } from "../../../components/RiskAssessmentBadge";
 import { Paperclip, ArrowUp, X, ExternalLink, Check } from "lucide-react";
 import {
   createProcurementTask,
@@ -37,6 +39,7 @@ export default function NewProcurementPage() {
   const [mode, setMode] = useState<SourceMode>("type");
   const [text, setText] = useState("");
   const [attachedFile, setAttachedFile] = useState<{ name: string; content: string } | null>(null);
+  const [useRiskAnalysis, setUseRiskAnalysis] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // The task we just created — once set, the results panel below starts polling.
@@ -96,7 +99,7 @@ export default function NewProcurementPage() {
 
     if (!requestText) return;
 
-    create.mutate({ text: requestText, requesterEmail: DEFAULT_REQUESTER_EMAIL });
+    create.mutate({ text: requestText, requesterEmail: DEFAULT_REQUESTER_EMAIL, useRiskAnalysis });
   }
 
   const canSubmit = mode === "bom" ? Boolean(attachedFile) : Boolean(text.trim());
@@ -107,7 +110,9 @@ export default function NewProcurementPage() {
   const activeSelection = selectedSupplier ?? state?.recommendedSupplier?.supplierName ?? null;
 
   return (
-    <main className="mx-auto max-w-2xl px-6 py-16">
+    <main className="m-full px-6 py-16">
+      <GlobalRiskOverview />
+
       <div className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
         <div className="mb-5 flex items-start justify-between">
           <div>
@@ -129,6 +134,16 @@ export default function NewProcurementPage() {
             />
           </div>
         </div>
+
+        <label className="mb-4 flex items-center gap-2 text-xs text-neutral-500">
+          <input
+            type="checkbox"
+            checked={useRiskAnalysis}
+            onChange={(e) => setUseRiskAnalysis(e.target.checked)}
+            className="h-3.5 w-3.5 rounded border-neutral-300 text-blue-600 focus:ring-blue-500"
+          />
+          Use supply chain risk analysis
+        </label>
 
         {mode === "type" && (
           <button
@@ -231,8 +246,8 @@ export default function NewProcurementPage() {
               )}
             </div>
 
-            <a
-              href={`/procurement/${activeTaskId}`}
+            
+              <a href={`/procurement/${activeTaskId}`}
               target="_blank"
               rel="noopener noreferrer"
               className="flex shrink-0 items-center gap-1 text-xs font-medium text-neutral-500 hover:text-neutral-800"
@@ -241,6 +256,13 @@ export default function NewProcurementPage() {
               <ExternalLink size={12} />
             </a>
           </div>
+
+          {state?.riskCheckStatus && (
+            <RiskAssessmentBadge
+              riskCheckStatus={state.riskCheckStatus}
+              riskAssessment={state.riskAssessment}
+            />
+          )}
 
           {isLoadingResult && !state && (
             <p className="text-sm text-neutral-500">Sourcing has started — this updates automatically.</p>

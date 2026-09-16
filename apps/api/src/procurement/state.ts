@@ -11,6 +11,8 @@ export interface ProcurementRequest {
 
 export interface SupplierQuote {
   supplierName: string;
+  supplierId: string | null;       // links to suppliers table when the offer has a registered owner
+  supplierRegion: string | null;   // from suppliers.region — null for mock/unowned quotes
   unitPrice: number; // in smallest reasonable unit, e.g. INR
   quantityAvailable: number;
   leadTimeDays: number;
@@ -71,6 +73,26 @@ export const ProcurementState = Annotation.Root({
   failureReason: Annotation<string | null>({
     reducer: (_e, u) => u,
     default: () => null,
+  }),
+
+  taskId: Annotation<string | null>({
+    reducer: (_e, u) => u,
+    default: () => null,
+  }),
+
+  useRiskAnalysis: Annotation<boolean>({
+    reducer: (_e, u) => u,
+    default: () => false,
+  }),
+
+  riskAssessment: Annotation<Record<string, unknown> | null>({
+    reducer: (_e, u) => u,
+    default: () => null,
+  }),
+
+  riskCheckStatus: Annotation<"skipped" | "ok" | "unavailable">({
+    reducer: (_e, u) => u,
+    default: () => "skipped",
   }),
 });
 

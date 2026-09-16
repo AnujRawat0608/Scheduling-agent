@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check } from "lucide-react";
+import { RiskAssessmentBadge } from "../../../components/RiskAssessmentBadge";
 import {
   fetchProcurementTask,
   approveProcurementTask,
@@ -45,7 +46,7 @@ export default function ProcurementDetailPage({ params }: { params: { id: string
 
   if (error) {
     return (
-      <main className="mx-auto max-w-2xl p-8">
+      <main className="mx-full max-w-2xl p-8">
         <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           Failed to load task: {(error as Error).message}
         </div>
@@ -62,7 +63,7 @@ export default function ProcurementDetailPage({ params }: { params: { id: string
   const activeSelection = selectedSupplier ?? state.recommendedSupplier?.supplierName ?? null;
 
   return (
-    <main className="mx-auto max-w-3xl p-8 space-y-6">
+  <main className="w-full px-6 py-16">
       <div>
         <h1 className="text-lg font-medium text-neutral-900">
           {state.request?.quantity}x {task.item}
@@ -80,6 +81,13 @@ export default function ProcurementDetailPage({ params }: { params: { id: string
           )}
         </div>
       </div>
+
+      {state.riskCheckStatus && (
+        <RiskAssessmentBadge
+          riskCheckStatus={state.riskCheckStatus}
+          riskAssessment={state.riskAssessment}
+        />
+      )}
 
       {state.rfqEmail && (
         <details className="rounded-lg border border-neutral-200 p-4">

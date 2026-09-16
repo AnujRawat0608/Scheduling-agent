@@ -11,6 +11,7 @@ export const suppliers = pgTable("suppliers", {
   address: text("address"),
   city: text("city"),
   state: text("state"),
+  region: text("region"), 
   pincode: text("pincode"),
 
   // --- Company profile fields ---

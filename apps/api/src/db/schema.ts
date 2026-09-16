@@ -77,3 +77,21 @@ export const runEvents = pgTable("run_events", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+/**
+ * Risk assessment for a run's selected supplier/route, from the
+ * Supply Chain Risk Agent (separate service). One row per check —
+ * a run can accumulate several if risk is re-checked before approval.
+ */
+export const riskAssessments = pgTable("risk_assessments", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  runId: uuid("run_id")
+    .references(() => schedulingRuns.id)
+    .notNull(),
+  supplierRegion: text("supplier_region").notNull(),
+  destinationRegion: text("destination_region"),
+  overallStatus: text("overall_status").notNull(), // "green" | "yellow" | "red" | "unknown"
+  recommendation: text("recommendation").notNull(),
+  rawResponse: jsonb("raw_response").notNull(), // full RouteRiskResponse payload for drill-down
+  wasAvailable: boolean("was_available").default(true).notNull(), // false if risk agent was unreachable
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});

@@ -170,14 +170,14 @@ export default function RoutingPage() {
       </form>
 
       {results && (
-        <div className="rounded-2xl border border-neutral-200 bg-white overflow-hidden">
-          <div className="px-6 py-4 border-b border-neutral-200">
+        <div className="rounded-2xl border border-neutral-300 bg-white overflow-hidden shadow-[0_2px_6px_rgba(0,0,0,0.08)]">
+          <div className="px-6 py-4 border-b border-neutral-300">
             <h2 className="text-sm font-medium text-neutral-700">
               {origin} → {destination} · {weightKg}kg
             </h2>
           </div>
 
-          <div className="divide-y divide-neutral-100">
+          <div className="divide-y divide-neutral-200">
             {results.map((option) => {
               const isSelected = selectedMethod === option.method;
               const isRecommended = recommendedMethod === option.method;

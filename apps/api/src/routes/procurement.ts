@@ -21,11 +21,12 @@ procurementRouter.get("/procurement", async (_req, res) => {
 
 procurementRouter.post("/procurement", async (req, res) => {
   try {
-    const { text, requesterEmail, requesterName } = req.body as {
-      text: string;
-      requesterEmail: string;
-      requesterName?: string;
-    };
+    const { text, requesterEmail, requesterName, useRiskAnalysis } = req.body as {
+  text: string;
+  requesterEmail: string;
+  requesterName?: string;
+  useRiskAnalysis?: boolean;
+};
 
     if (!text || !requesterEmail) {
       return res.status(400).json({ error: "text and requesterEmail are required" });
@@ -58,9 +59,9 @@ procurementRouter.post("/procurement", async (req, res) => {
       .returning();
 
     const result = await graph.invoke(
-      { request },
-      { configurable: { thread_id: threadId } }
-    );
+  { request, taskId: task.id, useRiskAnalysis: useRiskAnalysis ?? false },
+  { configurable: { thread_id: threadId } }
+);
 
     await db
       .update(procurementTasks)
@@ -72,7 +73,7 @@ procurementRouter.post("/procurement", async (req, res) => {
       })
       .where(eq(procurementTasks.id, task.id));
 
-    res.status(201).json({ taskId: task.id, threadId, ...result });
+    res.status(201).json({ threadId, ...result, taskId: task.id });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: String((err as Error)?.message ?? err) });

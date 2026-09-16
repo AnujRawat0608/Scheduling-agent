@@ -2,6 +2,8 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
 
 export interface SupplierQuote {
   supplierName: string;
+  supplierId: string | null;
+  supplierRegion: string | null;
   unitPrice: number;
   quantityAvailable: number;
   leadTimeDays: number;
@@ -34,6 +36,16 @@ export interface ProcurementTaskSummary {
   createdAt: string;
 }
 
+export interface RiskAssessment {
+  supplier_region: string;
+  destination_region?: string | null;
+  known_route: boolean;
+  overall_status: "green" | "yellow" | "red" | "unknown";
+  chokepoints: Array<{ name: string; status: string | null; score: number | null }>;
+  driving_events: Array<{ headline: string; summary: string | null; severity: number; chokepoint_name: string }>;
+  recommendation: string;
+}
+
 export interface ProcurementSnapshot {
   task: {
     id: string;
@@ -50,6 +62,8 @@ export interface ProcurementSnapshot {
     recommendedSupplier: QuoteScore | null;
     status: string;
     failureReason: string | null;
+    riskCheckStatus?: "skipped" | "ok" | "unavailable";
+    riskAssessment?: RiskAssessment | null;
   };
   next: string[];
 }
@@ -65,6 +79,7 @@ export async function createProcurementTask(input: {
   text: string;
   requesterEmail: string;
   requesterName?: string;
+  useRiskAnalysis?: boolean;
 }): Promise<{ taskId: string }> {
   const res = await fetch(`${API_BASE}/procurement`, {
     method: "POST",

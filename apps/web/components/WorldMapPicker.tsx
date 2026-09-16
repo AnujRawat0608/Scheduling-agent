@@ -29,7 +29,7 @@ export default function WorldMapPicker({
   const [hoveredCountry, setHoveredCountry] = useState<string | null>(null);
 
   return (
-    <div className="rounded-2xl border border-neutral-200 bg-white p-6 space-y-4">
+    <div className="rounded-2xl border border-neutral-300 bg-white p-6 space-y-4 shadow-[0_2px_6px_rgba(0,0,0,0.08)]">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-sm font-medium text-neutral-700">Pick lanes on the map</h2>
@@ -45,7 +45,7 @@ export default function WorldMapPicker({
             className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
               pickMode === "origin"
                 ? "bg-[#3d6bff] text-white"
-                : "border border-neutral-200 text-neutral-600 hover:border-neutral-300"
+                : "border border-neutral-300 text-neutral-600 hover:border-neutral-400"
             }`}
           >
             Set Origin
@@ -64,7 +64,7 @@ export default function WorldMapPicker({
         </div>
       </div>
 
-      <div className="relative overflow-hidden rounded-xl border border-neutral-100 bg-neutral-50">
+      <div className="relative overflow-hidden rounded-xl border border-neutral-300 bg-neutral-100">
         <ComposableMap
           projectionConfig={{ scale: 140 }}
           style={{ width: "100%", height: "auto" }}
@@ -78,10 +78,10 @@ export default function WorldMapPicker({
                 const isDestination = name === destCountry;
                 const isHovered = name === hoveredCountry;
 
-                let fill = "#e5e5e5"; // neutral-200, default
+                let fill = "#a3a3a3"; // neutral-400, default
                 if (isOrigin) fill = "#3d6bff";
                 else if (isDestination) fill = "#e11d48"; // rose-600
-                else if (isHovered) fill = "#cbd5e1"; // slate-300 hover
+                else if (isHovered) fill = "#94a3b8"; // slate-400 hover
 
                 return (
                   <Geography
