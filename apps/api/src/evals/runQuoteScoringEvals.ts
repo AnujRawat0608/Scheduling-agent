@@ -8,9 +8,9 @@ export function runQuoteScoringEvals() {
 
   {
     const quotes: SupplierQuote[] = [
-      { supplierName: "A", unitPrice: 4800, quantityAvailable: 100, leadTimeDays: 7, shippingCost: 200, moq: 1, respondedAt: "" },
-      { supplierName: "B", unitPrice: 4550, quantityAvailable: 100, leadTimeDays: 14, shippingCost: 200, moq: 1, respondedAt: "" },
-      { supplierName: "C", unitPrice: 4700, quantityAvailable: 100, leadTimeDays: 5, shippingCost: 200, moq: 1, respondedAt: "" },
+      { supplierName: "A", supplierId: null, supplierRegion: null, unitPrice: 4800, quantityAvailable: 100, leadTimeDays: 7, shippingCost: 200, moq: 1, respondedAt: "" },
+      { supplierName: "B", supplierId: null, supplierRegion: null, unitPrice: 4550, quantityAvailable: 100, leadTimeDays: 14, shippingCost: 200, moq: 1, respondedAt: "" },
+      { supplierName: "C", supplierId: null, supplierRegion: null, unitPrice: 4700, quantityAvailable: 100, leadTimeDays: 5, shippingCost: 200, moq: 1, respondedAt: "" },
     ];
     const scored = scoreQuotes(quotes, 50);
     const top = scored[0];
@@ -26,8 +26,8 @@ export function runQuoteScoringEvals() {
 
   {
     const quotes: SupplierQuote[] = [
-      { supplierName: "TooSmall", unitPrice: 100, quantityAvailable: 10, leadTimeDays: 1, shippingCost: 0, moq: 1, respondedAt: "" },
-      { supplierName: "CanFulfill", unitPrice: 500, quantityAvailable: 200, leadTimeDays: 10, shippingCost: 50, moq: 1, respondedAt: "" },
+      { supplierName: "TooSmall", supplierId: null, supplierRegion: null, unitPrice: 100, quantityAvailable: 10, leadTimeDays: 1, shippingCost: 0, moq: 1, respondedAt: "" },
+      { supplierName: "CanFulfill", supplierId: null, supplierRegion: null, unitPrice: 500, quantityAvailable: 200, leadTimeDays: 10, shippingCost: 50, moq: 1, respondedAt: "" },
     ];
     const scored = scoreQuotes(quotes, 100);
     const top = scored[0];
@@ -43,8 +43,8 @@ export function runQuoteScoringEvals() {
 
   {
     const quotes: SupplierQuote[] = [
-      { supplierName: "X", unitPrice: 1000, quantityAvailable: 50, leadTimeDays: 5, shippingCost: 100, moq: 1, respondedAt: "" },
-      { supplierName: "Y", unitPrice: 1000, quantityAvailable: 50, leadTimeDays: 5, shippingCost: 100, moq: 1, respondedAt: "" },
+      { supplierName: "X", supplierId: null, supplierRegion: null, unitPrice: 1000, quantityAvailable: 50, leadTimeDays: 5, shippingCost: 100, moq: 1, respondedAt: "" },
+      { supplierName: "Y", supplierId: null, supplierRegion: null, unitPrice: 1000, quantityAvailable: 50, leadTimeDays: 5, shippingCost: 100, moq: 1, respondedAt: "" },
     ];
     const scored = scoreQuotes(quotes, 10);
     if (scored[0].score === scored[1].score) {

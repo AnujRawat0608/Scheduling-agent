@@ -22,6 +22,8 @@ export function fetchSimulatedSupplierQuotes(
 
   return suppliers.map((s) => ({
     supplierName: s.name,
+    supplierId: null,
+    supplierRegion: null,
     unitPrice: Math.round(basePrice * s.priceMultiplier),
     quantityAvailable: quantity + (seed % 50),
     leadTimeDays: s.leadTime,
