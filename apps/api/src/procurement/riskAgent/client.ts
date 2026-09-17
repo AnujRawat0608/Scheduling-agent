@@ -1,7 +1,7 @@
 import { RouteRiskResponseSchema, type RouteRiskResponse } from "./types.js";
 
 const RISK_AGENT_URL = process.env.RISK_AGENT_URL ?? "http://localhost:8000";
-const RISK_AGENT_TIMEOUT_MS = 5000; // advisory data — fail fast, never block the order flow
+const RISK_AGENT_TIMEOUT_MS = 20000; // advisory data — fail fast, never block the order flow
 
 export class RiskAgentUnavailableError extends Error {
   constructor(cause?: unknown) {
