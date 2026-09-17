@@ -39,7 +39,7 @@ export function setSupplierSessionCookie(res: Response, token: string) {
   res.cookie(SUPPLIER_SESSION_COOKIE, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
     maxAge: SESSION_MAX_AGE_MS,
   });
 }
