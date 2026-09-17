@@ -64,7 +64,9 @@ declare global {
  * 401 and does not call next().
  */
 export function requireSupplierAuth(req: Request, res: Response, next: NextFunction) {
-  const token = req.cookies?.[SUPPLIER_SESSION_COOKIE];
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+
   if (!token) {
     return res.status(401).json({ error: "Not logged in" });
   }

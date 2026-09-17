@@ -6,8 +6,6 @@ import {
   hashPassword,
   verifyPassword,
   signSupplierToken,
-  setSupplierSessionCookie,
-  clearSupplierSessionCookie,
   requireSupplierAuth,
 } from "../agent/lib/supplierAuth.js";
 
@@ -22,8 +20,9 @@ function publicSupplier(row: typeof suppliers.$inferSelect) {
 /**
  * POST /api/supplier-auth/register
  * Creates a supplier account with their business details, then logs them
- * in immediately. Product listings are added separately from the supply
- * chain catalog page after registration — not part of this flow.
+ * in immediately by returning a bearer token. Product listings are added
+ * separately from the supply chain catalog page after registration — not
+ * part of this flow.
  */
 supplierAuthRouter.post("/register", async (req, res) => {
   try {
@@ -76,10 +75,10 @@ supplierAuthRouter.post("/register", async (req, res) => {
       .returning();
 
     const token = signSupplierToken({ supplierId: supplier.id, email: supplier.email });
-    setSupplierSessionCookie(res, token);
 
     res.status(201).json({
       supplier: publicSupplier(supplier),
+      token,
     });
   } catch (err) {
     console.error(err);
@@ -115,9 +114,8 @@ supplierAuthRouter.post("/login", async (req, res) => {
     }
 
     const token = signSupplierToken({ supplierId: supplier.id, email: supplier.email });
-    setSupplierSessionCookie(res, token);
 
-    res.json({ supplier: publicSupplier(supplier) });
+    res.json({ supplier: publicSupplier(supplier), token });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: String((err as Error)?.message ?? err) });
@@ -126,15 +124,19 @@ supplierAuthRouter.post("/login", async (req, res) => {
 
 /**
  * POST /api/supplier-auth/logout
+ * With bearer tokens there's nothing server-side to clear (no cookie to
+ * unset) — the frontend just discards its stored token. This endpoint is
+ * kept as a no-op for backward compatibility / future server-side session
+ * tracking (e.g. a token blocklist) if you ever add it.
  */
 supplierAuthRouter.post("/logout", (_req, res) => {
-  clearSupplierSessionCookie(res);
   res.status(204).send();
 });
 
 /**
  * GET /api/supplier-auth/me
- * Lets the frontend check "am I logged in" on page load.
+ * Lets the frontend check "am I logged in" on page load. Reads the
+ * Authorization: Bearer <token> header via requireSupplierAuth.
  */
 supplierAuthRouter.get("/me", requireSupplierAuth, async (req, res) => {
   const [supplier] = await db
