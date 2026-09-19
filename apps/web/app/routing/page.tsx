@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { Route, Plane, Ship, Truck, Check } from "lucide-react";
+import { useState, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Route, Plane, Ship, Truck, Check, AlertTriangle } from "lucide-react";
 import WorldMapPicker from "../../components/WorldMapPicker";
+import { assessRouteRisk } from "../../lib/riskApi";
 
 type Method = "air" | "sea" | "road";
 
@@ -33,6 +35,16 @@ function formatINR(value: number) {
   return `₹${value.toLocaleString("en-IN")}`;
 }
 
+// SUPPLIER_REGION_ROUTES on the risk-agent is keyed by country name
+// (lowercase). The map picker gives us a clean country name directly;
+// free-text origin/destination is a fallback (take the text after the
+// last comma, e.g. "Shenzhen, China" -> "China").
+function deriveRegion(freeText: string, mapCountry: string | null) {
+  if (mapCountry) return mapCountry;
+  const parts = freeText.split(",");
+  return parts[parts.length - 1]?.trim() ?? "";
+}
+
 export default function RoutingPage() {
   const [origin, setOrigin] = useState("");
   const [destination, setDestination] = useState("");
@@ -41,6 +53,7 @@ export default function RoutingPage() {
 
   const [results, setResults] = useState<ComparedOption[] | null>(null);
   const [selectedMethod, setSelectedMethod] = useState<Method | null>(null);
+  const [hasCompared, setHasCompared] = useState(false);
 
   // Country-level selection from the map — independent of the free-text
   // origin/destination fields above, since matching a clicked country
@@ -55,6 +68,15 @@ export default function RoutingPage() {
       setDestCountry(countryName);
     }
   }
+
+  const supplierRegion = deriveRegion(origin, originCountry);
+  const destRegion = deriveRegion(destination, destCountry);
+
+  const { data: riskAssessment, isLoading: isLoadingRisk } = useQuery({
+    queryKey: ["route-risk", supplierRegion, destRegion],
+    queryFn: () => assessRouteRisk(supplierRegion, destRegion),
+    enabled: hasCompared && Boolean(supplierRegion),
+  });
 
   function handleCompare(e: React.FormEvent) {
     e.preventDefault();
@@ -72,33 +94,40 @@ export default function RoutingPage() {
       return { ...profile, totalCost, arrivalDate, meetsDeadline };
     });
 
-    // Recommend the cheapest option that meets the deadline; if none do,
-    // recommend the fastest one instead.
-    const eligible = computed.filter((c) => c.meetsDeadline);
-    const recommended =
-      eligible.length > 0
-        ? eligible.reduce((best, c) => (c.totalCost < best.totalCost ? c : best))
-        : computed.reduce((fastest, c) => (c.transitDays < fastest.transitDays ? c : fastest));
-
     setResults(computed);
-    setSelectedMethod(recommended.method);
+    setSelectedMethod(null); // let the recommendation below drive the default
+    setHasCompared(true);
   }
 
-  const recommendedMethod = results
-    ? (() => {
-        const eligible = results.filter((r) => r.meetsDeadline);
-        const pool = eligible.length > 0 ? eligible : results;
-        return pool.reduce((best, r) =>
-          eligible.length > 0
-            ? r.totalCost < best.totalCost
-              ? r
-              : best
-            : r.transitDays < best.transitDays
-              ? r
-              : best
-        ).method;
-      })()
-    : null;
+  const recommendedMethod = useMemo(() => {
+    if (!results) return null;
+
+    const withRisk = results.map((r) =>
+      r.method === "sea" && riskAssessment?.known_route
+        ? { ...r, riskStatus: riskAssessment.overall_status }
+        : r
+    );
+
+    // Sea disrupted (red) -> treat it as not viable, same as missing the deadline
+    const viable = withRisk.filter((r) => {
+      if (r.method === "sea" && (r as any).riskStatus === "red") return false;
+      return true;
+    });
+
+    const eligible = viable.filter((r) => r.meetsDeadline);
+    const pool = eligible.length > 0 ? eligible : viable.length > 0 ? viable : withRisk;
+
+    // Elevated (yellow) sea risk -> add a 10% buffer to cost so it competes
+    // fairly against air/road rather than winning purely on being cheapest
+    const scored = pool.map((r) => ({
+      ...r,
+      adjustedCost: r.method === "sea" && (r as any).riskStatus === "yellow" ? r.totalCost * 1.1 : r.totalCost,
+    }));
+
+    return scored.reduce((best, r) => (r.adjustedCost < best.adjustedCost ? r : best)).method;
+  }, [results, riskAssessment]);
+
+  const displayedMethod = selectedMethod ?? recommendedMethod;
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-16 space-y-6">
@@ -179,8 +208,9 @@ export default function RoutingPage() {
 
           <div className="divide-y divide-neutral-200">
             {results.map((option) => {
-              const isSelected = selectedMethod === option.method;
+              const isSelected = displayedMethod === option.method;
               const isRecommended = recommendedMethod === option.method;
+              const showRiskInfo = option.method === "sea";
               return (
                 <button
                   key={option.method}
@@ -200,7 +230,7 @@ export default function RoutingPage() {
                       {option.icon}
                     </span>
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-sm font-medium text-neutral-900">{option.label}</span>
                         {isRecommended && (
                           <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
@@ -211,6 +241,23 @@ export default function RoutingPage() {
                         {!option.meetsDeadline && deadline && (
                           <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
                             Misses deadline
+                          </span>
+                        )}
+                        {showRiskInfo && isLoadingRisk && (
+                          <span className="text-xs text-neutral-400">checking route risk…</span>
+                        )}
+                        {showRiskInfo && riskAssessment?.known_route && (
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
+                              riskAssessment.overall_status === "red"
+                                ? "bg-red-100 text-red-700"
+                                : riskAssessment.overall_status === "yellow"
+                                  ? "bg-amber-100 text-amber-700"
+                                  : "bg-green-100 text-green-700"
+                            }`}
+                          >
+                            {riskAssessment.overall_status === "red" && <AlertTriangle size={10} />}
+                            {riskAssessment.overall_status} route risk
                           </span>
                         )}
                       </div>
@@ -229,16 +276,41 @@ export default function RoutingPage() {
             })}
           </div>
 
-          {selectedMethod && (
+          {riskAssessment?.known_route && (
+            <div
+              className={`px-6 py-4 border-t text-sm ${
+                riskAssessment.overall_status === "red"
+                  ? "bg-red-50 border-red-100 text-red-800"
+                  : riskAssessment.overall_status === "yellow"
+                    ? "bg-amber-50 border-amber-100 text-amber-800"
+                    : "bg-green-50 border-green-100 text-green-800"
+              }`}
+            >
+              <p className="font-medium mb-1">Geopolitical route risk — sea freight</p>
+              <p>{riskAssessment.recommendation}</p>
+              {riskAssessment.chokepoints.length > 0 && (
+                <p className="mt-1.5 text-xs opacity-80">
+                  Affected chokepoints:{" "}
+                  {riskAssessment.chokepoints.map((c) => `${c.name} (${c.status ?? "unknown"})`).join(", ")}
+                </p>
+              )}
+            </div>
+          )}
+          {hasCompared && riskAssessment && !riskAssessment.known_route && (
+            <div className="px-6 py-3 border-t text-xs text-neutral-500 bg-neutral-50">
+              {riskAssessment.message ?? "No chokepoint risk data mapped for this origin yet."}
+            </div>
+          )}
+
+          {displayedMethod && (
             <div className="px-6 py-4 bg-neutral-50 border-t border-neutral-200 flex items-center justify-between">
               <span className="text-sm text-neutral-600">
-                Selected: <span className="font-medium text-neutral-900">
-                  {results.find((r) => r.method === selectedMethod)?.label}
+                Selected:{" "}
+                <span className="font-medium text-neutral-900">
+                  {results.find((r) => r.method === displayedMethod)?.label}
                 </span>
               </span>
-              <button
-                className="rounded-lg bg-[#3d6bff] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#3d6bff]/90"
-              >
+              <button className="rounded-lg bg-[#3d6bff] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#3d6bff]/90">
                 Book this shipment
               </button>
             </div>
@@ -247,11 +319,7 @@ export default function RoutingPage() {
       )}
 
       {/* Interactive world map — visually pick origin/destination countries. */}
-      <WorldMapPicker
-        originCountry={originCountry}
-        destCountry={destCountry}
-        onSelectCountry={handleMapSelect}
-      />
+      <WorldMapPicker originCountry={originCountry} destCountry={destCountry} onSelectCountry={handleMapSelect} />
     </main>
   );
 }

@@ -1,3 +1,5 @@
+import { authHeaders } from "./supplierAuthApi";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
 
 export interface MainMarket {
@@ -69,8 +71,10 @@ export async function fetchSupplierProfile(supplierId: string) {
 export async function updateMyProfile(updates: Partial<SupplierProfile>) {
   const res = await fetch(`${API_BASE}/suppliers/me`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(),
+    },
     body: JSON.stringify(updates),
   });
   return parseErrorOr<{ supplier: SupplierProfile }>(res, "Failed to update profile");

@@ -45,6 +45,7 @@ export default function NewProcurementPage() {
   // The task we just created — once set, the results panel below starts polling.
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [selectedSupplier, setSelectedSupplier] = useState<string | null>(null);
+  const [hasSubmitted, setHasSubmitted] = useState(false);
 
   const create = useMutation({
     mutationFn: createProcurementTask,
@@ -93,14 +94,20 @@ export default function NewProcurementPage() {
   }
 
   function handleSubmit() {
-    const requestText = attachedFile
-      ? `${attachedFile.content}${text.trim() ? `\n\nAdditional instructions: ${text.trim()}` : ""}`
-      : text.trim();
+  const requestText = attachedFile
+    ? `${attachedFile.content}${text.trim() ? `\n\nAdditional instructions: ${text.trim()}` : ""}`
+    : text.trim();
 
-    if (!requestText) return;
+  if (!requestText) return;
 
-    create.mutate({ text: requestText, requesterEmail: DEFAULT_REQUESTER_EMAIL, useRiskAnalysis });
-  }
+  setHasSubmitted(true); // animation starts here, same tick as the click
+
+  create.mutate({
+    text: requestText,
+    requesterEmail: DEFAULT_REQUESTER_EMAIL,
+    useRiskAnalysis,
+  });
+}
 
   const canSubmit = mode === "bom" ? Boolean(attachedFile) : Boolean(text.trim());
 
@@ -264,9 +271,10 @@ export default function NewProcurementPage() {
             />
           )}
 
-          {isLoadingResult && !state && (
-            <p className="text-sm text-neutral-500">Sourcing has started — this updates automatically.</p>
-          )}
+  {hasSubmitted && state?.status !== "done" && state?.status !== "failed" && (
+  <ProcessTracker currentIndex={toStageIndex(hasSubmitted, state?.status)} />
+)}
+
 
           {state?.scoredQuotes && state.scoredQuotes.length > 0 && (
             <div className="space-y-2">
@@ -337,31 +345,7 @@ export default function NewProcurementPage() {
             </div>
           )}
 
-          {isAwaitingApproval && state?.recommendedSupplier && (
-            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 space-y-3">
-              <p className="text-sm text-blue-900">
-                Select a supplier above (recommendation is pre-selected), then confirm.
-              </p>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => activeSelection && approve.mutate(activeSelection)}
-                  disabled={approve.isPending || reject.isPending || !activeSelection}
-                  className="rounded-md bg-[#3d6bff] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#3d6bff]/90 disabled:opacity-50"
-                >
-                  {approve.isPending
-                    ? "Confirming…"
-                    : `Approve purchase from ${activeSelection ?? "…"}`}
-                </button>
-                <button
-                  onClick={() => reject.mutate(undefined)}
-                  disabled={approve.isPending || reject.isPending}
-                  className="rounded-md border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-700 transition hover:border-neutral-400 disabled:opacity-50"
-                >
-                  Reject entirely
-                </button>
-              </div>
-            </div>
-          )}
+          
 
           {state?.status === "done" && (
             <div className="rounded-md border border-green-200 bg-green-50 p-4 text-sm text-green-800">
@@ -419,4 +403,69 @@ function SourceTab({
       {label}
     </button>
   );
+}
+
+const STAGES = [
+  { key: "extracting", label: "Reviewing your prompt" },
+  { key: "sourcing", label: "Finding supplier" },
+  { key: "comparing", label: "Matching data" },
+  { key: "result", label: "Result" },
+] as const;
+
+function ProcessTracker({ currentIndex }: { currentIndex: number }) {
+  if (currentIndex < 0) return null;
+
+  return (
+    <div className="flex items-center">
+      {STAGES.map((stage, i) => {
+        const done = i < currentIndex;
+        const active = i === currentIndex;
+        const isLast = i === STAGES.length - 1;
+        return (
+          <div key={stage.key} className="flex flex-1 items-center last:flex-none">
+            <div className="flex flex-col items-center gap-1.5">
+              <div
+                className={`relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 text-[10px] font-semibold transition-all duration-500 ${
+                  done
+                    ? "border-green-500 bg-green-500 text-white scale-100"
+                    : active
+                      ? "border-blue-600 bg-white text-blue-600 scale-110"
+                      : "border-neutral-200 bg-white text-neutral-300 scale-100"
+                }`}
+              >
+                {active && (
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-40" />
+                )}
+                <span className={`transition-all duration-300 ${done ? "animate-[pop_0.3s_ease-out]" : ""}`}>
+                  {done ? <Check size={12} strokeWidth={3} /> : i + 1}
+                </span>
+              </div>
+              <span
+                className={`whitespace-nowrap text-[11px] font-medium transition-colors duration-500 ${
+                  done || active ? "text-neutral-700" : "text-neutral-400"
+                }`}
+              >
+                {stage.label}
+              </span>
+            </div>
+            {!isLast && (
+              <div className="mx-1.5 h-0.5 flex-1 rounded-full bg-neutral-200 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-green-500 transition-all duration-700 ease-out"
+                  style={{ width: done ? "100%" : "0%" }}
+                />
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+function toStageIndex(hasSubmitted: boolean, status?: string) {
+  if (!hasSubmitted) return -1;
+  if (!status || status === "extracting") return 0;
+  if (status === "sourcing") return 1;
+  if (status === "comparing") return 2;
+  return 3; // awaiting_approval, purchasing, done
 }
