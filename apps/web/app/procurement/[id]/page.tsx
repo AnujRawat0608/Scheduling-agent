@@ -134,11 +134,21 @@ export default function ProcurementDetailPage({ params }: { params: { id: string
                           />
                         </td>
                       )}
-                      <td className="px-4 py-2 font-medium text-neutral-900">
-                        {q.supplierName}
-                        {isRecommended && (
+                     <td className="px-4 py-2 font-medium text-neutral-900">
+  {q.supplierId ? (
+    
+      <a href={`/suppliers/${q.supplierId}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-[#3d6bff] hover:underline"
+    >
+      {q.supplierName}
+    </a>
+  ) : (
+    q.supplierName
+  )}
+  {isRecommended && (
                           <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
-                            <Check size={10} strokeWidth={3} />
                             Recommended
                           </span>
                         )}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   Building2,
@@ -11,13 +11,12 @@ import {
   BarChart3,
   Send,
   MapPin,
-  Phone,
-  Mail,
 } from "lucide-react";
 import {
   fetchSupplierProfile,
   sendMessageToSupplier,
 } from "../../../lib/supplierProfileApi";
+import { createSupplierOrder } from "../../../lib/supplierOrdersApi";
 
 type Tab = "overview" | "products" | "rd" | "trade" | "performance";
 
@@ -45,6 +44,7 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
 export default function SupplierProfilePage() {
   const params = useParams();
   const supplierId = params.id as string;
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>("overview");
 
   const { data, isLoading, error } = useQuery({
@@ -63,6 +63,33 @@ export default function SupplierProfilePage() {
       setSenderName("");
       setSenderEmail("");
       setMessage("");
+    },
+  });
+
+  const [orderProductId, setOrderProductId] = useState<string>("");
+  const [orderQuantity, setOrderQuantity] = useState("");
+  const [orderAddress, setOrderAddress] = useState("");
+  const [orderRequesterName, setOrderRequesterName] = useState("");
+  const [orderRequesterEmail, setOrderRequesterEmail] = useState("");
+  const [orderNotes, setOrderNotes] = useState("");
+
+  const placeOrder = useMutation({
+    mutationFn: () => {
+      const selectedProduct = data?.products.find((p) => p.id === orderProductId);
+      return createSupplierOrder({
+        supplierId,
+        productId: orderProductId || undefined,
+        itemName: selectedProduct?.item ?? "Custom item",
+        unitPrice: selectedProduct?.unitPrice,
+        quantity: Number(orderQuantity),
+        deliveryAddress: orderAddress,
+        requesterName: orderRequesterName,
+        requesterEmail: orderRequesterEmail,
+        notes: orderNotes || undefined,
+      });
+    },
+    onSuccess: () => {
+      router.push("/billing");
     },
   });
 
@@ -336,6 +363,106 @@ export default function SupplierProfilePage() {
             </button>
           </form>
         )}
+      </div>
+
+      {/* Place an order */}
+      <div className="rounded-2xl border border-neutral-200 bg-white p-6 space-y-4">
+        <h2 className="text-sm font-medium text-neutral-700">Place an order</h2>
+
+        {placeOrder.isError && (
+          <p className="text-sm text-red-600">{(placeOrder.error as Error).message}</p>
+        )}
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            placeOrder.mutate();
+          }}
+          className="space-y-3"
+        >
+          <label className="block space-y-1.5">
+            <span className="text-xs font-medium text-neutral-600">Product</span>
+            <select
+              required
+              value={orderProductId}
+              onChange={(e) => setOrderProductId(e.target.value)}
+              className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
+            >
+              <option value="" disabled>
+                Select a product…
+              </option>
+              {products.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.item} — {formatINR(p.unitPrice)}/unit
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block space-y-1.5">
+              <span className="text-xs font-medium text-neutral-600">Quantity</span>
+              <input
+                required
+                type="number"
+                min="1"
+                value={orderQuantity}
+                onChange={(e) => setOrderQuantity(e.target.value)}
+                className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
+              />
+            </label>
+            <label className="block space-y-1.5">
+              <span className="text-xs font-medium text-neutral-600">Your name</span>
+              <input
+                required
+                value={orderRequesterName}
+                onChange={(e) => setOrderRequesterName(e.target.value)}
+                className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
+              />
+            </label>
+          </div>
+
+          <label className="block space-y-1.5">
+            <span className="text-xs font-medium text-neutral-600">Your email</span>
+            <input
+              required
+              type="email"
+              value={orderRequesterEmail}
+              onChange={(e) => setOrderRequesterEmail(e.target.value)}
+              className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
+            />
+          </label>
+
+          <label className="block space-y-1.5">
+            <span className="text-xs font-medium text-neutral-600">Delivery address</span>
+            <textarea
+              required
+              value={orderAddress}
+              onChange={(e) => setOrderAddress(e.target.value)}
+              rows={2}
+              className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
+            />
+          </label>
+
+          <label className="block space-y-1.5">
+            <span className="text-xs font-medium text-neutral-600">Notes (optional)</span>
+            <textarea
+              value={orderNotes}
+              onChange={(e) => setOrderNotes(e.target.value)}
+              rows={2}
+              placeholder="Any delivery instructions or special requirements…"
+              className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
+            />
+          </label>
+
+          <button
+            type="submit"
+            disabled={placeOrder.isPending}
+            className="rounded-lg bg-[#3d6bff] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#3d6bff]/90 disabled:opacity-50"
+          >
+            {placeOrder.isPending ? "Placing order…" : "Place order"}
+          </button>
+        </form>
       </div>
     </main>
   );

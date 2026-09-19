@@ -8,6 +8,7 @@ import { procurementRouter } from "./routes/procurement.js";
 import { supplyChainRouter } from "./routes/supplyChain.js";
 import { supplierAuthRouter } from "./routes/supplierAuth.js";
 import { supplierProfileRouter } from "./routes/supplierProfile.js";
+import { supplierOrdersRouter } from "./routes/supplierOrders.js";
 
 process.on("unhandledRejection", (err) => {
   console.error("Unhandled rejection (server stays up):", err);
@@ -33,6 +34,7 @@ app.use("/api", procurementRouter);
 app.use("/api", supplyChainRouter);
 app.use("/api/supplier-auth", supplierAuthRouter);
 app.use("/api/suppliers", supplierProfileRouter);
+app.use("/api", supplierOrdersRouter);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 

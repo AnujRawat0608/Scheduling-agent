@@ -116,7 +116,7 @@ export default function NewProcurementPage() {
       <div className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
         <div className="mb-5 flex items-start justify-between">
           <div>
-            <p className="text-xs text-neutral-400">Your team</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-neutral-400">Your team</p>
             <h1 className="mt-0.5 text-xl font-semibold text-neutral-900">New request</h1>
           </div>
 
@@ -270,10 +270,10 @@ export default function NewProcurementPage() {
 
           {state?.scoredQuotes && state.scoredQuotes.length > 0 && (
             <div className="space-y-2">
-              <h3 className="text-sm font-medium text-neutral-700">Supplier quotes</h3>
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500">Supplier quotes</h3>
               <div className="overflow-hidden rounded-lg border border-neutral-200">
                 <table className="w-full text-sm">
-                  <thead className="bg-neutral-50 text-left text-xs text-neutral-500">
+                  <thead className="bg-neutral-50 text-left text-xs font-semibold uppercase tracking-wider text-neutral-500">
                     <tr>
                       {isAwaitingApproval && <th className="px-4 py-2"></th>}
                       <th className="px-4 py-2">Supplier</th>
@@ -305,14 +305,25 @@ export default function NewProcurementPage() {
                             </td>
                           )}
                           <td className="px-4 py-2 font-medium text-neutral-900">
-                            {q.supplierName}
-                            {isRecommended && (
-                              <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
-                                <Check size={10} strokeWidth={3} />
-                                Recommended
-                              </span>
-                            )}
-                          </td>
+  {q.supplierId ? (
+    
+      <a href={`/suppliers/${q.supplierId}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-[#3d6bff] hover:underline"
+    >
+      {q.supplierName}
+    </a>
+  ) : (
+    q.supplierName
+  )}
+  {isRecommended && (
+    <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
+      <Check size={10} strokeWidth={3} />
+      Recommended
+    </span>
+  )}
+</td>
                           <td className="px-4 py-2">₹{q.unitPrice.toLocaleString("en-IN")}</td>
                           <td className="px-4 py-2">{q.leadTimeDays}d</td>
                           <td className="px-4 py-2">₹{q.totalCost.toLocaleString("en-IN")}</td>

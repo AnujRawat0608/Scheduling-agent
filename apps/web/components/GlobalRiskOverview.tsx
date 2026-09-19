@@ -44,7 +44,7 @@ export function GlobalRiskOverview() {
         className="flex w-full items-center justify-between px-5 py-3.5 text-left"
       >
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-neutral-900">Global route risk</span>
+          <span className="text-xs font-semibold uppercase tracking-wider text-neutral-500">Global route risk</span>
           {!isLoading && !error && (
             <span className="flex items-center gap-1.5 text-xs text-neutral-500">
               {redCount > 0 && (

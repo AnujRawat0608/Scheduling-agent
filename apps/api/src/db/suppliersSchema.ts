@@ -11,35 +11,63 @@ export const suppliers = pgTable("suppliers", {
   address: text("address"),
   city: text("city"),
   state: text("state"),
-  region: text("region"), 
+  region: text("region"),
   pincode: text("pincode"),
 
   // --- Company profile fields ---
   companyOverview: text("company_overview"),
-  businessType: text("business_type"), // e.g. "Trading Company", "Manufacturer"
+  businessType: text("business_type"),
   yearEstablished: integer("year_established"),
-  totalEmployees: text("total_employees"), // range string, e.g. "11-50 People"
-  totalAnnualRevenue: text("total_annual_revenue"), // range string
-  mainProducts: text("main_products"), // short comma-separated description
+  totalEmployees: text("total_employees"),
+  totalAnnualRevenue: text("total_annual_revenue"),
+  mainProducts: text("main_products"),
   certifications: text("certifications"),
 
   // --- R&D capacity ---
-  rdCapacity: text("rd_capacity"), // free-text description of R&D capabilities
+  rdCapacity: text("rd_capacity"),
 
   // --- Trade capacity ---
-  // mainMarkets: [{ region: "Southern Europe", percentage: 30 }, ...]
   mainMarkets: jsonb("main_markets"),
-  languagesSpoken: text("languages_spoken"), // comma-separated
-  tradeDeptEmployees: text("trade_dept_employees"), // range string
+  languagesSpoken: text("languages_spoken"),
+  tradeDeptEmployees: text("trade_dept_employees"),
   averageLeadTimeDays: integer("average_lead_time_days"),
 
   // --- Business performance ---
-  responseRate: integer("response_rate"), // percentage, 0-100
-  responseTimeHours: text("response_time_hours"), // e.g. "≤4h"
+  responseRate: integer("response_rate"),
+  responseTimeHours: text("response_time_hours"),
   transactionsCount: integer("transactions_count"),
-  totalTransactionAmount: text("total_transaction_amount"), // e.g. "60,000+"
-  quotationPerformance: integer("quotation_performance"), // count of quotes given
+  totalTransactionAmount: text("total_transaction_amount"),
+  quotationPerformance: integer("quotation_performance"),
 
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/**
+ * A direct purchase order placed against a specific supplier from their
+ * profile page — separate from procurementTasks (the AI-driven multi-quote
+ * comparison flow).
+ *
+ * Defined in this file (not its own supplierOrdersSchema.ts) because
+ * drizzle-kit's config loader doesn't reliably resolve cross-schema-file
+ * .js imports the way tsx does at runtime — same issue we hit with
+ * risk_assessments last night. productId is deliberately a plain uuid
+ * (no .references()) to avoid a cross-file import to supplyChainSchema.ts;
+ * the relationship is enforced at the application level instead.
+ */
+export const supplierOrders = pgTable("supplier_orders", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  supplierId: uuid("supplier_id")
+    .references(() => suppliers.id)
+    .notNull(),
+  productId: uuid("product_id"),
+  itemName: text("item_name").notNull(),
+  unitPrice: integer("unit_price"), // denormalized from the product at order time, so Billing has a real total even if the listing changes later
+  quantity: integer("quantity").notNull(),
+  deliveryAddress: text("delivery_address").notNull(),
+  requesterName: text("requester_name").notNull(),
+  requesterEmail: text("requester_email").notNull(),
+  notes: text("notes"),
+  status: text("status").notNull().default("pending"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });

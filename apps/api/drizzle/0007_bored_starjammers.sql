@@ -1,0 +1,1 @@
+ALTER TABLE "supplier_orders" ADD COLUMN "unit_price" integer;
