@@ -30,6 +30,7 @@ supplierAuthRouter.post("/register", async (req, res) => {
       email,
       password,
       businessName,
+      region,
       contactName,
       phone,
       gstNumber,
@@ -71,6 +72,7 @@ supplierAuthRouter.post("/register", async (req, res) => {
         city: city ?? null,
         state: state ?? null,
         pincode: pincode ?? null,
+        region: region ?? null,
       })
       .returning();
 

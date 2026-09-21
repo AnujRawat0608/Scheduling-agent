@@ -50,6 +50,7 @@ supplierProfileRouter.patch("/me", requireSupplierAuth, async (req, res) => {
   try {
     const allowedFields = [
       "businessName",
+      "region",
       "contactName",
       "phone",
       "gstNumber",

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Building2,
   Package,
@@ -28,8 +28,16 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: "performance", label: "Business Performance", icon: <BarChart3 size={16} /> },
 ];
 
-function formatINR(value: number) {
-  return `₹${value.toLocaleString("en-IN")}`;
+/** API decimals often arrive as strings ("250.00"). Always coerce before doing maths. */
+function toNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const n = typeof value === "number" ? value : Number(String(value).replace(/[₹,\s]/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
+
+function formatINR(value: unknown) {
+  const n = toNumber(value);
+  return n === null ? "—" : `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 }
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
@@ -45,6 +53,7 @@ export default function SupplierProfilePage() {
   const params = useParams();
   const supplierId = params.id as string;
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<Tab>("overview");
 
   const { data, isLoading, error } = useQuery({
@@ -73,23 +82,44 @@ export default function SupplierProfilePage() {
   const [orderRequesterEmail, setOrderRequesterEmail] = useState("");
   const [orderNotes, setOrderNotes] = useState("");
 
+  // Derived order figures, used by both the live total and the submit handler,
+  // so what the user sees is exactly what gets sent.
+  const selectedProduct = data?.products.find((p) => p.id === orderProductId);
+  const unitPrice = toNumber(selectedProduct?.unitPrice);
+  const quantity = Number(orderQuantity);
+  const moq = toNumber(selectedProduct?.moq) ?? 1;
+  const hasQuantity = Number.isInteger(quantity) && quantity > 0;
+  const belowMoq = !!selectedProduct && hasQuantity && quantity < moq;
+  const orderTotal =
+    unitPrice !== null && hasQuantity ? Math.round(unitPrice * quantity * 100) / 100 : null;
+
   const placeOrder = useMutation({
     mutationFn: () => {
-      const selectedProduct = data?.products.find((p) => p.id === orderProductId);
+      if (!selectedProduct) throw new Error("Select a product first.");
+      if (unitPrice === null) throw new Error("This product has no price, so it can't be ordered online.");
+      if (!hasQuantity) throw new Error("Enter a whole-number quantity.");
+      if (quantity < moq) throw new Error(`The minimum order for this product is ${moq} units.`);
+
       return createSupplierOrder({
         supplierId,
-        productId: orderProductId || undefined,
-        itemName: selectedProduct?.item ?? "Custom item",
-        unitPrice: selectedProduct?.unitPrice,
-        quantity: Number(orderQuantity),
+        productId: orderProductId,
+        itemName: selectedProduct.item,
+        unitPrice, // always a number, never a string or undefined
+        quantity,
         deliveryAddress: orderAddress,
         requesterName: orderRequesterName,
         requesterEmail: orderRequesterEmail,
         notes: orderNotes || undefined,
       });
     },
-    onSuccess: () => {
-      router.push("/billing");
+    onSuccess: (result) => {
+      // Make sure billing never shows a cached list without the new order.
+      queryClient.invalidateQueries({ queryKey: ["supplier-orders"] });
+
+      // Pass the new order id so billing can highlight it (works if the API returns it).
+      const r = result as { id?: string | number; order?: { id?: string | number } } | undefined;
+      const id = r?.id ?? r?.order?.id;
+      router.push(id != null ? `/billing?highlight=${id}` : "/billing");
     },
   });
 
@@ -369,100 +399,144 @@ export default function SupplierProfilePage() {
       <div className="rounded-2xl border border-neutral-200 bg-white p-6 space-y-4">
         <h2 className="text-sm font-medium text-neutral-700">Place an order</h2>
 
-        {placeOrder.isError && (
-          <p className="text-sm text-red-600">{(placeOrder.error as Error).message}</p>
-        )}
+        {products.length === 0 ? (
+          <p className="text-sm text-neutral-400">
+            This supplier hasn&apos;t listed any products, so you can&apos;t order online. Send them a message
+            above to request a quote.
+          </p>
+        ) : (
+          <>
+            {placeOrder.isError && (
+              <p role="alert" className="text-sm text-red-600">
+                {(placeOrder.error as Error).message}
+              </p>
+            )}
 
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            placeOrder.mutate();
-          }}
-          className="space-y-3"
-        >
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-neutral-600">Product</span>
-            <select
-              required
-              value={orderProductId}
-              onChange={(e) => setOrderProductId(e.target.value)}
-              className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                placeOrder.mutate();
+              }}
+              className="space-y-3"
             >
-              <option value="" disabled>
-                Select a product…
-              </option>
-              {products.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.item} — {formatINR(p.unitPrice)}/unit
-                </option>
-              ))}
-            </select>
-          </label>
+              <label className="block space-y-1.5">
+                <span className="text-xs font-medium text-neutral-600">Product</span>
+                <select
+                  required
+                  value={orderProductId}
+                  onChange={(e) => setOrderProductId(e.target.value)}
+                  className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
+                >
+                  <option value="" disabled>
+                    Select a product…
+                  </option>
+                  {products.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.item} — {formatINR(p.unitPrice)}/unit
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block space-y-1.5">
-              <span className="text-xs font-medium text-neutral-600">Quantity</span>
-              <input
-                required
-                type="number"
-                min="1"
-                value={orderQuantity}
-                onChange={(e) => setOrderQuantity(e.target.value)}
-                className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
-              />
-            </label>
-            <label className="block space-y-1.5">
-              <span className="text-xs font-medium text-neutral-600">Your name</span>
-              <input
-                required
-                value={orderRequesterName}
-                onChange={(e) => setOrderRequesterName(e.target.value)}
-                className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
-              />
-            </label>
-          </div>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block space-y-1.5">
+                  <span className="text-xs font-medium text-neutral-600">Quantity</span>
+                  <input
+                    required
+                    type="number"
+                    min={moq}
+                    step="1"
+                    value={orderQuantity}
+                    onChange={(e) => setOrderQuantity(e.target.value)}
+                    aria-invalid={belowMoq}
+                    className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
+                  />
+                  {selectedProduct && (
+                    <span className={`block text-xs ${belowMoq ? "text-red-600" : "text-neutral-400"}`}>
+                      Minimum order: {moq} {moq === 1 ? "unit" : "units"}
+                    </span>
+                  )}
+                </label>
+                <label className="block space-y-1.5">
+                  <span className="text-xs font-medium text-neutral-600">Your name</span>
+                  <input
+                    required
+                    value={orderRequesterName}
+                    onChange={(e) => setOrderRequesterName(e.target.value)}
+                    className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
+                  />
+                </label>
+              </div>
 
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-neutral-600">Your email</span>
-            <input
-              required
-              type="email"
-              value={orderRequesterEmail}
-              onChange={(e) => setOrderRequesterEmail(e.target.value)}
-              className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
-            />
-          </label>
+              <label className="block space-y-1.5">
+                <span className="text-xs font-medium text-neutral-600">Your email</span>
+                <input
+                  required
+                  type="email"
+                  value={orderRequesterEmail}
+                  onChange={(e) => setOrderRequesterEmail(e.target.value)}
+                  className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
+                />
+              </label>
 
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-neutral-600">Delivery address</span>
-            <textarea
-              required
-              value={orderAddress}
-              onChange={(e) => setOrderAddress(e.target.value)}
-              rows={2}
-              className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
-            />
-          </label>
+              <label className="block space-y-1.5">
+                <span className="text-xs font-medium text-neutral-600">Delivery address</span>
+                <textarea
+                  required
+                  value={orderAddress}
+                  onChange={(e) => setOrderAddress(e.target.value)}
+                  rows={2}
+                  className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
+                />
+              </label>
 
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-neutral-600">Notes (optional)</span>
-            <textarea
-              value={orderNotes}
-              onChange={(e) => setOrderNotes(e.target.value)}
-              rows={2}
-              placeholder="Any delivery instructions or special requirements…"
-              className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
-            />
-          </label>
+              <label className="block space-y-1.5">
+                <span className="text-xs font-medium text-neutral-600">Notes (optional)</span>
+                <textarea
+                  value={orderNotes}
+                  onChange={(e) => setOrderNotes(e.target.value)}
+                  rows={2}
+                  placeholder="Any delivery instructions or special requirements…"
+                  className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
+                />
+              </label>
 
-          <button
-            type="submit"
-            disabled={placeOrder.isPending}
-            className="rounded-lg bg-[#3d6bff] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#3d6bff]/90 disabled:opacity-50"
-          >
-            {placeOrder.isPending ? "Placing order…" : "Place order"}
-          </button>
-        </form>
+              {/* Live order summary: the same numbers that are sent to the API */}
+              <div aria-live="polite" className="rounded-lg bg-neutral-50 p-4 text-sm">
+                <div className="flex justify-between text-neutral-600">
+                  <span>Unit price</span>
+                  <span className="tabular-nums">{selectedProduct ? formatINR(unitPrice) : "—"}</span>
+                </div>
+                <div className="mt-1 flex justify-between text-neutral-600">
+                  <span>Quantity</span>
+                  <span className="tabular-nums">{hasQuantity ? quantity.toLocaleString("en-IN") : "—"}</span>
+                </div>
+                {selectedProduct?.leadTimeDays != null && (
+                  <div className="mt-1 flex justify-between text-neutral-600">
+                    <span>Lead time</span>
+                    <span className="tabular-nums">{selectedProduct.leadTimeDays} days</span>
+                  </div>
+                )}
+                <div className="mt-3 flex justify-between border-t border-neutral-200 pt-3 font-semibold text-neutral-900">
+                  <span>Order total</span>
+                  <span className="tabular-nums">{orderTotal !== null ? formatINR(orderTotal) : "—"}</span>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={placeOrder.isPending || belowMoq || (!!selectedProduct && unitPrice === null)}
+                className="rounded-lg bg-[#3d6bff] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#3d6bff]/90 disabled:opacity-50"
+              >
+                {placeOrder.isPending
+                  ? "Placing order…"
+                  : orderTotal !== null
+                    ? `Place order · ${formatINR(orderTotal)}`
+                    : "Place order"}
+              </button>
+            </form>
+          </>
+        )}
       </div>
     </main>
   );

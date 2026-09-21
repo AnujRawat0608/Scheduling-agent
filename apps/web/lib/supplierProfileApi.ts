@@ -11,6 +11,7 @@ export interface SupplierProfile {
   id: string;
   email: string;
   businessName: string;
+  region: string;
   contactName: string | null;
   phone: string | null;
   gstNumber: string | null;

@@ -186,6 +186,7 @@ function CertificateDropzone({
 // numbers/null on save.
 type FormState = {
   businessName: string;
+  region: string;
   contactName: string;
   phone: string;
   gstNumber: string;
@@ -214,6 +215,7 @@ type FormState = {
 function profileToForm(p: SupplierProfile): FormState {
   return {
     businessName: p.businessName ?? "",
+    region: p.region ?? "",
     contactName: p.contactName ?? "",
     phone: p.phone ?? "",
     gstNumber: p.gstNumber ?? "",
@@ -406,6 +408,7 @@ export default function SupplierDashboardPage() {
     try {
       const updated = await updateMyProfile({
         businessName: form.businessName,
+        region: form.region,
         contactName: form.contactName || null,
         phone: form.phone || null,
         gstNumber: form.gstNumber || null,
@@ -616,6 +619,15 @@ export default function SupplierDashboardPage() {
                 className={inputClass}
               />
             </Field>
+            <Field label="Region">
+              <input
+                required
+                value={form.region}
+                onChange={(e) => updateField("region", e.target.value)}
+                className={inputClass}
+              />
+            </Field>
+            
             <Field label="GST number">
               <input
                 value={form.gstNumber}
