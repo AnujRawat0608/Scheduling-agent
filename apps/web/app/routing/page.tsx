@@ -2,11 +2,12 @@
 
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Route, Plane, Ship, Truck, Check, AlertTriangle } from "lucide-react";
+import { MapPin, Calendar, Plane, Ship, Truck, Check, AlertTriangle, Radio } from "lucide-react";
 import WorldMapPicker from "../../components/WorldMapPicker";
 import { assessRouteRisk } from "../../lib/riskApi";
 
 type Method = "air" | "sea" | "road";
+type PickMode = "origin" | "destination";
 
 type ShippingQuote = {
   method: Method;
@@ -17,12 +18,10 @@ type ShippingQuote = {
   transitDays: number;
 };
 
-// Mock per-method rate model. Swap for real carrier rates (or a
-// lanes catalog, similar to Supply Chain) once available.
 const METHOD_PROFILES: ShippingQuote[] = [
-  { method: "air", label: "Air Freight", icon: <Plane size={16} />, costPerKg: 45, baseCost: 2000, transitDays: 2 },
-  { method: "road", label: "Road Freight", icon: <Truck size={16} />, costPerKg: 14, baseCost: 800, transitDays: 6 },
-  { method: "sea", label: "Sea Freight", icon: <Ship size={16} />, costPerKg: 4, baseCost: 500, transitDays: 18 },
+  { method: "air", label: "Air Freight", icon: <Plane size={14} />, costPerKg: 45, baseCost: 2000, transitDays: 2 },
+  { method: "sea", label: "Sea Freight", icon: <Ship size={14} />, costPerKg: 4, baseCost: 500, transitDays: 18 },
+  { method: "road", label: "Road Freight", icon: <Truck size={14} />, costPerKg: 14, baseCost: 800, transitDays: 6 },
 ];
 
 type ComparedOption = ShippingQuote & {
@@ -35,10 +34,6 @@ function formatINR(value: number) {
   return `₹${value.toLocaleString("en-IN")}`;
 }
 
-// SUPPLIER_REGION_ROUTES on the risk-agent is keyed by country name
-// (lowercase). The map picker gives us a clean country name directly;
-// free-text origin/destination is a fallback (take the text after the
-// last comma, e.g. "Shenzhen, China" -> "China").
 function deriveRegion(freeText: string, mapCountry: string | null) {
   if (mapCountry) return mapCountry;
   const parts = freeText.split(",");
@@ -55,11 +50,13 @@ export default function RoutingPage() {
   const [selectedMethod, setSelectedMethod] = useState<Method | null>(null);
   const [hasCompared, setHasCompared] = useState(false);
 
-  // Country-level selection from the map — independent of the free-text
-  // origin/destination fields above, since matching a clicked country
-  // name back to arbitrary city text isn't reliable.
   const [originCountry, setOriginCountry] = useState<string | null>(null);
   const [destCountry, setDestCountry] = useState<string | null>(null);
+
+  // Map controls — lifted up so the buttons can sit above the map card,
+  // matching the reference layout, while WorldMapPicker stays presentational.
+  const [pickMode, setPickMode] = useState<PickMode>("origin");
+  const [showRisk, setShowRisk] = useState(true);
 
   function handleMapSelect(mode: "origin" | "destination", countryName: string) {
     if (mode === "origin") {
@@ -95,7 +92,7 @@ export default function RoutingPage() {
     });
 
     setResults(computed);
-    setSelectedMethod(null); // let the recommendation below drive the default
+    setSelectedMethod(null);
     setHasCompared(true);
   }
 
@@ -108,7 +105,6 @@ export default function RoutingPage() {
         : r
     );
 
-    // Sea disrupted (red) -> treat it as not viable, same as missing the deadline
     const viable = withRisk.filter((r) => {
       if (r.method === "sea" && (r as any).riskStatus === "red") return false;
       return true;
@@ -117,8 +113,6 @@ export default function RoutingPage() {
     const eligible = viable.filter((r) => r.meetsDeadline);
     const pool = eligible.length > 0 ? eligible : viable.length > 0 ? viable : withRisk;
 
-    // Elevated (yellow) sea risk -> add a 10% buffer to cost so it competes
-    // fairly against air/road rather than winning purely on being cheapest
     const scored = pool.map((r) => ({
       ...r,
       adjustedCost: r.method === "sea" && (r as any).riskStatus === "yellow" ? r.totalCost * 1.1 : r.totalCost,
@@ -130,147 +124,251 @@ export default function RoutingPage() {
   const displayedMethod = selectedMethod ?? recommendedMethod;
 
   return (
-    <main className="mx-auto max-w-3xl px-6 py-16 space-y-6">
-      <div className="flex items-center gap-2">
-        <Route size={22} className="text-[#3d6bff]" />
-        <div>
-          <h1 className="text-2xl font-semibold text-neutral-900">Routing</h1>
-          <p className="mt-0.5 text-sm text-neutral-500">
-            Compare Air, Sea, and Road freight for a shipment and see which one actually fits your deadline.
-          </p>
+    <main className="mx-auto max-w-6xl px-6 py-12 space-y-6">
+      <div>
+        <h1 className="text-2xl font-semibold text-neutral-900">Routing</h1>
+        <p className="mt-0.5 text-sm text-neutral-500">
+          Compare Air, Sea, and Road freight for a shipment and see which one actually fits your deadline.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6 items-start">
+        {/* Left: dark route summary panel */}
+        <div className="rounded-2xl bg-[#0f1b3d] p-6 text-white space-y-5">
+          <h2 className="text-base font-semibold">Route Summary</h2>
+
+          <form onSubmit={handleCompare} className="space-y-4">
+            <label className="block space-y-1.5">
+              <span className="text-xs text-white/60">Origin</span>
+              <div className="relative">
+                <MapPin size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#5b82ff]" />
+                <input
+                  required
+                  value={origin}
+                  onChange={(e) => setOrigin(e.target.value)}
+                  placeholder="Shenzhen, China"
+                  className="w-full rounded-lg border border-white/10 bg-white/5 py-2.5 pl-9 pr-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-[#5b82ff]"
+                />
+              </div>
+            </label>
+
+            <label className="block space-y-1.5">
+              <span className="text-xs text-white/60">Destination</span>
+              <div className="relative">
+                <MapPin size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-rose-400" />
+                <input
+                  required
+                  value={destination}
+                  onChange={(e) => setDestination(e.target.value)}
+                  placeholder="Pune, India"
+                  className="w-full rounded-lg border border-rose-400/40 bg-white/5 py-2.5 pl-9 pr-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-rose-400"
+                />
+              </div>
+            </label>
+
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block space-y-1.5">
+                <span className="text-xs text-white/60">Weight</span>
+                <input
+                  required
+                  type="number"
+                  min="0"
+                  value={weightKg}
+                  onChange={(e) => setWeightKg(e.target.value)}
+                  placeholder="120 kg"
+                  className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white outline-none placeholder:text-white/30 focus:border-[#5b82ff]"
+                />
+              </label>
+              <label className="block space-y-1.5">
+                <span className="text-xs text-white/60">Needed By</span>
+                <div className="relative">
+                  <Calendar size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-white/40" />
+                  <input
+                    type="date"
+                    value={deadline}
+                    onChange={(e) => setDeadline(e.target.value)}
+                    className="w-full rounded-lg border border-white/10 bg-white/5 py-2.5 pl-8 pr-2 text-sm text-white outline-none focus:border-[#5b82ff] [color-scheme:dark]"
+                  />
+                </div>
+              </label>
+            </div>
+
+            <button
+              type="submit"
+              className="w-full rounded-lg bg-[#3d6bff] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#3d6bff]/90"
+            >
+              Compare Methods
+            </button>
+          </form>
+        </div>
+
+        {/* Right: map controls + map */}
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPickMode("origin")}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-medium transition ${
+                pickMode === "origin"
+                  ? "bg-[#3d6bff] text-white"
+                  : "border border-neutral-200 text-neutral-600 hover:border-neutral-300"
+              }`}
+            >
+              <MapPin size={13} />
+              Set Origin
+            </button>
+            <button
+              type="button"
+              onClick={() => setPickMode("destination")}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-medium transition ${
+                pickMode === "destination"
+                  ? "bg-rose-600 text-white"
+                  : "border border-neutral-200 text-neutral-600 hover:border-neutral-300"
+              }`}
+            >
+              <MapPin size={13} />
+              Set Destination
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowRisk((v) => !v)}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-medium transition ${
+                showRisk
+                  ? "bg-neutral-900 text-white"
+                  : "border border-neutral-200 text-neutral-600 hover:border-neutral-300"
+              }`}
+            >
+              <Radio size={13} />
+              Show/Hide Route Risk
+            </button>
+          </div>
+
+          <WorldMapPicker
+            originCountry={originCountry}
+            destCountry={destCountry}
+            onSelectCountry={handleMapSelect}
+            pickMode={pickMode}
+            showRisk={showRisk}
+          />
         </div>
       </div>
 
-      <form
-        onSubmit={handleCompare}
-        className="grid grid-cols-2 gap-4 rounded-2xl border border-neutral-200 bg-white p-6 shadow-[0_1px_2px_rgba(0,0,0,0.04)]"
-      >
-        <label className="space-y-1.5">
-          <span className="text-xs font-medium text-neutral-600">Origin</span>
-          <input
-            required
-            value={origin}
-            onChange={(e) => setOrigin(e.target.value)}
-            placeholder="Shenzhen, China"
-            className="w-full rounded-lg border border-neutral-200 bg-white px-3.5 py-2.5 text-sm text-neutral-900 outline-none transition placeholder:text-neutral-400 focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
-          />
-        </label>
-
-        <label className="space-y-1.5">
-          <span className="text-xs font-medium text-neutral-600">Destination</span>
-          <input
-            required
-            value={destination}
-            onChange={(e) => setDestination(e.target.value)}
-            placeholder="Pune, India"
-            className="w-full rounded-lg border border-neutral-200 bg-white px-3.5 py-2.5 text-sm text-neutral-900 outline-none transition placeholder:text-neutral-400 focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
-          />
-        </label>
-
-        <label className="space-y-1.5">
-          <span className="text-xs font-medium text-neutral-600">Weight (kg)</span>
-          <input
-            required
-            type="number"
-            min="0"
-            value={weightKg}
-            onChange={(e) => setWeightKg(e.target.value)}
-            placeholder="120"
-            className="w-full rounded-lg border border-neutral-200 bg-white px-3.5 py-2.5 text-sm text-neutral-900 outline-none transition placeholder:text-neutral-400 focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
-          />
-        </label>
-
-        <label className="space-y-1.5">
-          <span className="text-xs font-medium text-neutral-600">Needed by (optional)</span>
-          <input
-            type="date"
-            value={deadline}
-            onChange={(e) => setDeadline(e.target.value)}
-            className="w-full rounded-lg border border-neutral-200 bg-white px-3.5 py-2.5 text-sm text-neutral-900 outline-none transition focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
-          />
-        </label>
-
-        <button
-          type="submit"
-          className="col-span-2 rounded-lg bg-[#3d6bff] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#3d6bff]/90"
-        >
-          Compare shipping methods
-        </button>
-      </form>
-
+      {/* Comparison table */}
       {results && (
-        <div className="rounded-2xl border border-neutral-300 bg-white overflow-hidden shadow-[0_2px_6px_rgba(0,0,0,0.08)]">
-          <div className="px-6 py-4 border-b border-neutral-300">
+        <div className="rounded-2xl border border-neutral-200 bg-white overflow-hidden">
+          <div className="px-6 py-4 border-b border-neutral-200">
             <h2 className="text-sm font-medium text-neutral-700">
               {origin} → {destination} · {weightKg}kg
             </h2>
           </div>
 
-          <div className="divide-y divide-neutral-200">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-neutral-200 bg-neutral-50 text-left">
+                  <th className="px-6 py-3 text-xs font-medium text-neutral-500">Method</th>
+                  {results.map((r) => (
+                    <th key={r.method} className="px-6 py-3">
+                      <span className="inline-flex items-center gap-1.5 text-sm font-medium text-neutral-900">
+                        {r.icon}
+                        {r.label}
+                      </span>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-100">
+                <tr>
+                  <td className="px-6 py-3 text-xs font-medium text-neutral-500">ETA</td>
+                  {results.map((r) => (
+                    <td key={r.method} className="px-6 py-3 text-neutral-700">
+                      {r.transitDays}-{r.transitDays + (r.method === "sea" ? 12 : r.method === "road" ? 6 : 3)} Days
+                    </td>
+                  ))}
+                </tr>
+                <tr>
+                  <td className="px-6 py-3 text-xs font-medium text-neutral-500">Cost</td>
+                  {results.map((r) => (
+                    <td key={r.method} className="px-6 py-3 font-medium text-neutral-900">
+                      {formatINR(r.totalCost)}
+                    </td>
+                  ))}
+                </tr>
+                <tr>
+                  <td className="px-6 py-3 text-xs font-medium text-neutral-500">Risk</td>
+                  {results.map((r) => {
+                    const risk =
+                      r.method === "sea" && riskAssessment?.known_route
+                        ? riskAssessment.overall_status
+                        : null;
+                    return (
+                      <td key={r.method} className="px-6 py-3">
+                        {r.method === "sea" ? (
+                          isLoadingRisk ? (
+                            <span className="text-xs text-neutral-400">checking…</span>
+                          ) : risk ? (
+                            <span
+                              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium capitalize ${
+                                risk === "red"
+                                  ? "bg-red-100 text-red-700"
+                                  : risk === "yellow"
+                                  ? "bg-amber-100 text-amber-700"
+                                  : "bg-green-100 text-green-700"
+                              }`}
+                            >
+                              {risk === "red" && <AlertTriangle size={10} />}
+                              {risk}
+                            </span>
+                          ) : (
+                            <span className="text-neutral-400">—</span>
+                          )
+                        ) : (
+                          <span className="text-neutral-600">Low</span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          {/* Method selector + recommendation, kept from the original flow */}
+          <div className="divide-y divide-neutral-100 border-t border-neutral-200">
             {results.map((option) => {
               const isSelected = displayedMethod === option.method;
               const isRecommended = recommendedMethod === option.method;
-              const showRiskInfo = option.method === "sea";
               return (
                 <button
                   key={option.method}
                   onClick={() => setSelectedMethod(option.method)}
-                  className={`flex w-full items-center justify-between px-6 py-4 text-left transition ${
+                  className={`flex w-full items-center justify-between px-6 py-3 text-left transition ${
                     isSelected ? "bg-[#eef2ff]" : "hover:bg-neutral-50"
                   }`}
                 >
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2.5">
                     <input
                       type="radio"
                       checked={isSelected}
                       onChange={() => setSelectedMethod(option.method)}
                       className="accent-[#3d6bff]"
                     />
-                    <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#eef2ff] text-[#3d6bff]">
-                      {option.icon}
-                    </span>
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-medium text-neutral-900">{option.label}</span>
-                        {isRecommended && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
-                            <Check size={10} strokeWidth={3} />
-                            Recommended
-                          </span>
-                        )}
-                        {!option.meetsDeadline && deadline && (
-                          <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
-                            Misses deadline
-                          </span>
-                        )}
-                        {showRiskInfo && isLoadingRisk && (
-                          <span className="text-xs text-neutral-400">checking route risk…</span>
-                        )}
-                        {showRiskInfo && riskAssessment?.known_route && (
-                          <span
-                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
-                              riskAssessment.overall_status === "red"
-                                ? "bg-red-100 text-red-700"
-                                : riskAssessment.overall_status === "yellow"
-                                  ? "bg-amber-100 text-amber-700"
-                                  : "bg-green-100 text-green-700"
-                            }`}
-                          >
-                            {riskAssessment.overall_status === "red" && <AlertTriangle size={10} />}
-                            {riskAssessment.overall_status} route risk
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-xs text-neutral-400 mt-0.5">
-                        Arrives {option.arrivalDate.toLocaleDateString("en-IN", { month: "short", day: "numeric" })}
-                      </div>
-                    </div>
+                    <span className="text-sm text-neutral-800">{option.label}</span>
+                    {isRecommended && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
+                        <Check size={10} strokeWidth={3} />
+                        Recommended
+                      </span>
+                    )}
+                    {!option.meetsDeadline && deadline && (
+                      <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
+                        Misses deadline
+                      </span>
+                    )}
                   </div>
-
-                  <div className="text-right shrink-0 ml-4">
-                    <div className="text-sm font-medium text-neutral-900">{formatINR(option.totalCost)}</div>
-                    <div className="text-xs text-neutral-400">{option.transitDays}d transit</div>
-                  </div>
+                  <span className="text-xs text-neutral-400">
+                    Arrives {option.arrivalDate.toLocaleDateString("en-IN", { month: "short", day: "numeric" })}
+                  </span>
                 </button>
               );
             })}
@@ -282,8 +380,8 @@ export default function RoutingPage() {
                 riskAssessment.overall_status === "red"
                   ? "bg-red-50 border-red-100 text-red-800"
                   : riskAssessment.overall_status === "yellow"
-                    ? "bg-amber-50 border-amber-100 text-amber-800"
-                    : "bg-green-50 border-green-100 text-green-800"
+                  ? "bg-amber-50 border-amber-100 text-amber-800"
+                  : "bg-green-50 border-green-100 text-green-800"
               }`}
             >
               <p className="font-medium mb-1">Geopolitical route risk — sea freight</p>
@@ -294,11 +392,6 @@ export default function RoutingPage() {
                   {riskAssessment.chokepoints.map((c) => `${c.name} (${c.status ?? "unknown"})`).join(", ")}
                 </p>
               )}
-            </div>
-          )}
-          {hasCompared && riskAssessment && !riskAssessment.known_route && (
-            <div className="px-6 py-3 border-t text-xs text-neutral-500 bg-neutral-50">
-              {riskAssessment.message ?? "No chokepoint risk data mapped for this origin yet."}
             </div>
           )}
 
@@ -317,9 +410,6 @@ export default function RoutingPage() {
           )}
         </div>
       )}
-
-      {/* Interactive world map — visually pick origin/destination countries. */}
-      <WorldMapPicker originCountry={originCountry} destCountry={destCountry} onSelectCountry={handleMapSelect} />
     </main>
   );
 }

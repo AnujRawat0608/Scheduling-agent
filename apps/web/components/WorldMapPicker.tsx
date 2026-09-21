@@ -10,7 +10,6 @@ import {
 } from "react-simple-maps";
 import { fetchChokepointStatuses, type ChokepointStatus } from "../lib/riskAgentApi";
 
-// Public, free-to-use topojson world map data — no API key needed.
 const GEO_URL = "https://unpkg.com/world-atlas@2/countries-110m.json";
 
 type PickMode = "origin" | "destination";
@@ -29,14 +28,16 @@ export default function WorldMapPicker({
   originCountry,
   destCountry,
   onSelectCountry,
+  pickMode,
+  showRisk,
 }: {
   originCountry: string | null;
   destCountry: string | null;
   onSelectCountry: (mode: PickMode, countryName: string) => void;
+  pickMode: PickMode;
+  showRisk: boolean;
 }) {
-  const [pickMode, setPickMode] = useState<PickMode>("origin");
   const [hoveredCountry, setHoveredCountry] = useState<string | null>(null);
-  const [showRisk, setShowRisk] = useState(true);
   const [hoveredChokepoint, setHoveredChokepoint] = useState<ChokepointStatus | null>(null);
 
   const { data: chokepoints } = useQuery({
@@ -47,53 +48,8 @@ export default function WorldMapPicker({
   });
 
   return (
-    <div className="rounded-2xl border border-neutral-300 bg-white p-6 space-y-4 shadow-[0_2px_6px_rgba(0,0,0,0.08)]">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-medium text-neutral-700">Pick lanes on the map</h2>
-          <p className="mt-0.5 text-xs text-neutral-400">
-            Choose whether you're setting the origin or destination, then click a country.
-          </p>
-        </div>
-
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => setPickMode("origin")}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-              pickMode === "origin"
-                ? "bg-[#3d6bff] text-white"
-                : "border border-neutral-300 text-neutral-600 hover:border-neutral-400"
-            }`}
-          >
-            Set Origin
-          </button>
-          <button
-            type="button"
-            onClick={() => setPickMode("destination")}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-              pickMode === "destination"
-                ? "bg-rose-600 text-white"
-                : "border border-neutral-200 text-neutral-600 hover:border-neutral-300"
-            }`}
-          >
-            Set Destination
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowRisk((v) => !v)}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-              showRisk
-                ? "bg-neutral-900 text-white"
-                : "border border-neutral-200 text-neutral-600 hover:border-neutral-300"
-            }`}
-          >
-            {showRisk ? "Hide route risk" : "Show route risk"}
-          </button>
-        </div>
-      </div>
-
-      <div className="relative overflow-hidden rounded-xl border border-neutral-300 bg-neutral-100">
+    <div className="space-y-3">
+      <div className="relative overflow-hidden rounded-2xl border border-neutral-200 bg-neutral-50">
         <ComposableMap
           projectionConfig={{ scale: 140 }}
           style={{ width: "100%", height: "auto" }}
@@ -107,10 +63,10 @@ export default function WorldMapPicker({
                 const isDestination = name === destCountry;
                 const isHovered = name === hoveredCountry;
 
-                let fill = "#a3a3a3"; // neutral-400, default
+                let fill = "#a3a3a3";
                 if (isOrigin) fill = "#3d6bff";
-                else if (isDestination) fill = "#e11d48"; // rose-600
-                else if (isHovered) fill = "#94a3b8"; // slate-400 hover
+                else if (isDestination) fill = "#e11d48";
+                else if (isHovered) fill = "#94a3b8";
 
                 return (
                   <Geography
@@ -169,33 +125,17 @@ export default function WorldMapPicker({
 
       <div className="flex flex-wrap items-center gap-4 text-xs text-neutral-500">
         <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-sm bg-[#3d6bff]" />
-          Origin{originCountry ? `: ${originCountry}` : " (none selected)"}
+          <span className="h-2.5 w-2.5 rounded-full bg-[#3d6bff]" />
+          Low Risk
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-sm bg-rose-600" />
-          Destination{destCountry ? `: ${destCountry}` : " (none selected)"}
+          <span className="h-2.5 w-2.5 rounded-full bg-yellow-500" />
+          Elevated Risk
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-sm bg-neutral-200" />
-          Unselected
+          <span className="h-2.5 w-2.5 rounded-full bg-red-500" />
+          Critical Risk
         </span>
-        {showRisk && (
-          <>
-            <span className="flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-full bg-green-500" />
-              Low risk
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-full bg-yellow-500" />
-              Elevated
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-full bg-red-500" />
-              Critical
-            </span>
-          </>
-        )}
       </div>
     </div>
   );
