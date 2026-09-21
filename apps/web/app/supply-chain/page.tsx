@@ -5,6 +5,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import {
   Boxes,
+  CheckCircle2,
+  Timer,
   Search,
   Upload,
   Download,
@@ -14,6 +16,11 @@ import {
   UserPlus,
   LogIn,
   LayoutDashboard,
+  Plus,
+  X,
+  MoreHorizontal,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { fetchCurrentSupplier, type Supplier } from "../../lib/supplierAuthApi";
 import {
@@ -23,11 +30,12 @@ import {
   type SupplierOffer,
 } from "../../lib/supplyChainApi";
 
-// The backend now returns supplierType, category, description,
-// dispatchStatus, and aiScore directly — no extension needed.
 type SupplyChainOffer = SupplierOffer;
 
-type SortOption = "price-desc" | "price-asc" | "lead-asc" | "stock-desc";
+type SortOption = "ai-desc" | "price-desc" | "price-asc" | "lead-asc" | "stock-desc";
+
+const inputClass =
+  "w-full rounded-lg border border-neutral-200 bg-white px-3.5 py-2.5 text-sm text-neutral-900 outline-none transition placeholder:text-neutral-400 focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]";
 
 function Field({
   label,
@@ -46,11 +54,55 @@ function Field({
   );
 }
 
-const inputClass =
-  "w-full rounded-lg border border-neutral-200 bg-white px-3.5 py-2.5 text-sm text-neutral-900 outline-none transition placeholder:text-neutral-400 focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]";
+function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition ${
+        checked ? "bg-[#3d6bff]" : "bg-neutral-200"
+      }`}
+    >
+      <span
+        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition ${
+          checked ? "translate-x-[18px]" : "translate-x-[3px]"
+        }`}
+      />
+    </button>
+  );
+}
 
-function formatINR(value: number) {
-  return `₹${value.toLocaleString("en-IN")}`;
+function StatCard({
+  icon,
+  label,
+  value,
+  sub,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  sub: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-neutral-200 bg-white p-5">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+          {label}
+        </span>
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#eef2ff] text-[#3d6bff]">
+          {icon}
+        </span>
+      </div>
+      <div className="mt-2 text-2xl font-semibold text-neutral-900">{value}</div>
+      <div className="mt-0.5 text-xs text-neutral-400">{sub}</div>
+    </div>
+  );
+}
+
+function formatUSD(value: number) {
+  return `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function toCsv(offers: SupplyChainOffer[]): string {
@@ -73,7 +125,6 @@ function toCsv(offers: SupplyChainOffer[]): string {
       .map((h) => {
         const value = (o as unknown as Record<string, unknown>)[h];
         const cell = value === undefined || value === null ? "" : String(value);
-        // Escape quotes/commas per basic CSV rules.
         return /[",\n]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell;
       })
       .join(",")
@@ -93,8 +144,13 @@ function downloadCsv(csv: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+const ROWS_PER_PAGE_OPTIONS = [10, 25, 50];
+
 export default function SupplyChainPage() {
   const queryClient = useQueryClient();
+
+  // ---- Add Offer modal form state ----
+  const [showAddModal, setShowAddModal] = useState(false);
   const [item, setItem] = useState("");
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("");
@@ -108,10 +164,6 @@ export default function SupplyChainPage() {
   const [dispatchStatus, setDispatchStatus] = useState("Dispatch ready");
   const [aiScore, setAiScore] = useState("");
 
-  // If a supplier is logged in, offers they create get tagged with their
-  // id (so they show up in their dashboard) and the supplier name field
-  // is pre-filled from their account — editable, in case they're adding
-  // an offer on behalf of someone else.
   const [loggedInSupplier, setLoggedInSupplier] = useState<Supplier | null>(null);
 
   useEffect(() => {
@@ -123,16 +175,21 @@ export default function SupplyChainPage() {
         }
       })
       .catch(() => {
-        // Not logged in, or the check failed — either way, just leave the
-        // form as a normal anonymous entry. Not a blocking error.
+        // Not logged in — leave form as anonymous entry.
       });
   }, []);
 
-  // Toolbar / filter state
+  // ---- Toolbar / filter state ----
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
-  const [sortOption, setSortOption] = useState<SortOption>("price-desc");
-  const [inStockOnly, setInStockOnly] = useState(true);
+  const [sortOption, setSortOption] = useState<SortOption>("ai-desc");
+  const [inStockOnly, setInStockOnly] = useState(false);
+  const [myOffersOnly, setMyOffersOnly] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
+
+  // ---- Pagination ----
+  const [page, setPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["supply-chain"],
@@ -148,7 +205,7 @@ export default function SupplyChainPage() {
       setItem("");
       setDescription("");
       setCategory("");
-      setSupplierName("");
+      setSupplierName(loggedInSupplier?.businessName ?? "");
       setSupplierType("");
       setUnitPrice("");
       setLeadTimeDays("");
@@ -157,6 +214,7 @@ export default function SupplyChainPage() {
       setQuantityAvailable("");
       setDispatchStatus("Dispatch ready");
       setAiScore("");
+      setShowAddModal(false);
     },
   });
 
@@ -192,6 +250,10 @@ export default function SupplyChainPage() {
   const filteredOffers = useMemo(() => {
     let result = [...offers];
 
+    if (myOffersOnly && loggedInSupplier) {
+      result = result.filter((o) => o.supplierId === loggedInSupplier.id);
+    }
+
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
       result = result.filter(
@@ -213,6 +275,8 @@ export default function SupplyChainPage() {
 
     result.sort((a, b) => {
       switch (sortOption) {
+        case "ai-desc":
+          return (b.aiScore ?? -1) - (a.aiScore ?? -1);
         case "price-desc":
           return b.unitPrice - a.unitPrice;
         case "price-asc":
@@ -227,32 +291,71 @@ export default function SupplyChainPage() {
     });
 
     return result;
-  }, [offers, searchQuery, categoryFilter, inStockOnly, sortOption]);
+  }, [offers, searchQuery, categoryFilter, inStockOnly, sortOption, myOffersOnly, loggedInSupplier]);
+
+  // Reset to page 1 whenever filters change so we never land on an empty page.
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery, categoryFilter, inStockOnly, myOffersOnly, sortOption, rowsPerPage]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredOffers.length / rowsPerPage));
+  const pageSafe = Math.min(page, totalPages);
+  const pageStart = (pageSafe - 1) * rowsPerPage;
+  const paginatedOffers = filteredOffers.slice(pageStart, pageStart + rowsPerPage);
 
   function handleExportCsv() {
     const csv = toCsv(filteredOffers.length > 0 ? filteredOffers : offers);
     downloadCsv(csv, `supply-chain-offers-${new Date().toISOString().slice(0, 10)}.csv`);
+    setShowMoreMenu(false);
   }
 
+  // ---- Stat cards: computed live from the offers data ----
+  const stats = useMemo(() => {
+    const totalOffers = offers.length;
+    const categoryCount = categories.length;
+
+    const inStockCount = offers.filter((o) => o.quantityAvailable > 0).length;
+    const inStockPct = totalOffers === 0 ? 0 : Math.round((inStockCount / totalOffers) * 100);
+
+    const avgLeadTime =
+      totalOffers === 0
+        ? 0
+        : Math.round(offers.reduce((sum, o) => sum + o.leadTimeDays, 0) / totalOffers);
+
+    const aiMatchedCount = offers.filter((o) => o.aiScore !== null && o.aiScore >= 85).length;
+
+    return {
+      totalOffers: String(totalOffers),
+      totalOffersSub: `${categoryCount} categor${categoryCount === 1 ? "y" : "ies"}`,
+      inStock: String(inStockCount),
+      inStockSub: `${inStockPct}% of catalog`,
+      avgLeadTime: `${avgLeadTime}d`,
+      avgLeadTimeSub: "Across active offers",
+      aiMatched: String(aiMatchedCount),
+      aiMatchedSub: "Score ≥ 85%",
+    };
+  }, [offers, categories]);
+
   return (
-    <main className="mx-auto max-w-5xl px-6 py-16 space-y-6">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Boxes size={22} className="text-[#3d6bff]" />
-          <div>
-            <h1 className="text-2xl font-semibold text-neutral-900">Supply chain catalog</h1>
-            <p className="mt-0.5 text-sm text-neutral-500">
-              Products and their supplier offers. Procurement requests match against this
-              catalog before falling back to simulated quotes.
-            </p>
-          </div>
+    <main className="mx-auto max-w-6xl px-6 py-16 space-y-6">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <span className="text-xs font-semibold uppercase tracking-wide text-[#3d6bff]">
+            Catalog
+          </span>
+          <h1 className="mt-1 text-3xl font-bold text-neutral-900">Supply Chain Catalog</h1>
+          <p className="mt-1 max-w-xl text-sm text-neutral-500">
+            Manage every supplier offer in one place — filter by category, sort by AI match, and
+            keep procurement moving.
+          </p>
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
           {loggedInSupplier ? (
             <Link
               href="/suppliers/dashboard"
-              className="flex items-center gap-1.5 rounded-lg border border-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-900"
+              className="flex items-center gap-1.5 rounded-full border border-neutral-200 bg-white px-3.5 py-2 text-xs font-medium text-neutral-700 transition hover:border-neutral-300"
             >
               <LayoutDashboard size={14} />
               {loggedInSupplier.businessName}
@@ -261,161 +364,59 @@ export default function SupplyChainPage() {
             <>
               <Link
                 href="/suppliers/login"
-                className="flex items-center gap-1.5 rounded-lg border border-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-900"
+                className="flex items-center gap-1.5 rounded-full border border-neutral-200 bg-white px-3.5 py-2 text-xs font-medium text-neutral-700 transition hover:border-neutral-300"
               >
                 <LogIn size={14} />
                 Log in
               </Link>
               <Link
                 href="/suppliers/register"
-                className="flex items-center gap-1.5 rounded-lg border border-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-900"
+                className="flex items-center gap-1.5 rounded-full border border-neutral-200 bg-white px-3.5 py-2 text-xs font-medium text-neutral-700 transition hover:border-neutral-300"
               >
                 <UserPlus size={14} />
-                Register as a supplier
+                Register
               </Link>
             </>
           )}
+
+          <button
+            type="button"
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-1.5 rounded-full bg-[#3d6bff] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#3d6bff]/90"
+          >
+            <Plus size={15} />
+            Add Offer
+          </button>
         </div>
       </div>
 
-      <form
-        onSubmit={handleSubmit}
-        className="grid grid-cols-2 gap-4 rounded-2xl border border-neutral-200 bg-white p-6 shadow-[0_1px_2px_rgba(0,0,0,0.04)]"
-      >
-        <Field label="Product / item" span2>
-          <input
-            required
-            value={item}
-            onChange={(e) => setItem(e.target.value)}
-            placeholder="Raspberry Pi 5 (8GB RAM)"
-            className={inputClass}
-          />
-        </Field>
-
-        <Field label="Description" span2>
-          <input
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Broadcom BCM2712 2.4GHz quad-core 64-bit Arm Cortex-A76"
-            className={inputClass}
-          />
-        </Field>
-
-        <Field label="Category">
-          <input
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            placeholder="Single Board Computers"
-            className={inputClass}
-          />
-        </Field>
-
-        <Field label="Supplier name">
-          <input
-            required
-            value={supplierName}
-            onChange={(e) => setSupplierName(e.target.value)}
-            placeholder="Acme Electronics"
-            className={inputClass}
-          />
-        </Field>
-
-        <Field label="Supplier type">
-          <input
-            required
-            value={supplierType}
-            onChange={(e) => setSupplierType(e.target.value)}
-            placeholder="Distributor"
-            className={inputClass}
-          />
-        </Field>
-
-        <Field label="Unit price (₹)">
-          <input
-            required
-            type="number"
-            value={unitPrice}
-            onChange={(e) => setUnitPrice(e.target.value)}
-            className={inputClass}
-          />
-        </Field>
-
-        <Field label="Shipping cost (₹)">
-          <input
-            type="number"
-            value={shippingCost}
-            onChange={(e) => setShippingCost(e.target.value)}
-            className={inputClass}
-          />
-        </Field>
-
-        <Field label="Lead time (days)">
-          <input
-            required
-            type="number"
-            value={leadTimeDays}
-            onChange={(e) => setLeadTimeDays(e.target.value)}
-            className={inputClass}
-          />
-        </Field>
-
-        <Field label="Dispatch status">
-          <select
-            value={dispatchStatus}
-            onChange={(e) => setDispatchStatus(e.target.value)}
-            className={inputClass}
-          >
-            <option>Dispatch ready</option>
-            <option>Backordered</option>
-            <option>Made to order</option>
-          </select>
-        </Field>
-
-        <Field label="Quantity available">
-          <input
-            required
-            type="number"
-            value={quantityAvailable}
-            onChange={(e) => setQuantityAvailable(e.target.value)}
-            className={inputClass}
-          />
-        </Field>
-
-        <Field label="MOQ">
-          <input
-            type="number"
-            value={moq}
-            onChange={(e) => setMoq(e.target.value)}
-            className={inputClass}
-          />
-        </Field>
-
-        <Field label="AI score (%, optional)">
-          <input
-            type="number"
-            min="0"
-            max="100"
-            value={aiScore}
-            onChange={(e) => setAiScore(e.target.value)}
-            placeholder="Leave blank until AI matching is wired up"
-            className={inputClass}
-          />
-        </Field>
-
-        {create.isError && (
-          <div className="col-span-2 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
-            {(create.error as Error).message}
-          </div>
-        )}
-
-        <button
-          type="submit"
-          disabled={create.isPending}
-          className="col-span-2 rounded-lg bg-[#3d6bff] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#3d6bff]/90 disabled:opacity-50"
-        >
-          {create.isPending ? "Adding…" : "Add offer"}
-        </button>
-      </form>
+      {/* Stat cards */}
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <StatCard
+          icon={<Boxes size={16} />}
+          label="Total Offers"
+          value={stats.totalOffers}
+          sub={stats.totalOffersSub}
+        />
+        <StatCard
+          icon={<CheckCircle2 size={16} />}
+          label="In Stock"
+          value={stats.inStock}
+          sub={stats.inStockSub}
+        />
+        <StatCard
+          icon={<Timer size={16} />}
+          label="Avg Lead Time"
+          value={stats.avgLeadTime}
+          sub={stats.avgLeadTimeSub}
+        />
+        <StatCard
+          icon={<Sparkles size={16} />}
+          label="AI Matched"
+          value={stats.aiMatched}
+          sub={stats.aiMatchedSub}
+        />
+      </div>
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -425,63 +426,10 @@ export default function SupplyChainPage() {
 
       {isLoading && <p className="text-sm text-neutral-500">Loading…</p>}
 
-      {data && offers.length === 0 && (
-        <div className="rounded-2xl border border-dashed border-neutral-300 bg-white p-8 text-center">
-          <p className="text-sm text-neutral-500">
-            No offers yet. Add some above — procurement requests will match against them.
-          </p>
-        </div>
-      )}
-
-      {data && offers.length > 0 && (
+      {data && (
         <div className="rounded-2xl border border-neutral-200 bg-white overflow-hidden">
-          {/* Header row: title, count, toolbar */}
-          <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-neutral-200">
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-sm font-medium text-neutral-700">Current offers</h2>
-                <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-500">
-                  {filteredOffers.length} item{filteredOffers.length === 1 ? "" : "s"}
-                </span>
-              </div>
-              <p className="mt-0.5 text-xs text-neutral-400">
-                Live active quotes and supplier product listings indexed for AI automated
-                procurement.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                disabled
-                title="Bulk CSV import needs a backend endpoint — coming soon"
-                className="flex items-center gap-1.5 rounded-lg border border-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-400 cursor-not-allowed"
-              >
-                <Upload size={13} />
-                Bulk CSV Import
-              </button>
-              <button
-                type="button"
-                onClick={handleExportCsv}
-                className="flex items-center gap-1.5 rounded-lg border border-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-900"
-              >
-                <Download size={13} />
-                Export CSV
-              </button>
-              <button
-                type="button"
-                disabled
-                title="AI matching needs a backend endpoint — coming soon"
-                className="flex items-center gap-1.5 rounded-lg bg-[#3d6bff]/50 px-3 py-1.5 text-xs font-medium text-white cursor-not-allowed"
-              >
-                <Sparkles size={13} />
-                Test AI Matching
-              </button>
-            </div>
-          </div>
-
           {/* Search + filters */}
-          <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b border-neutral-200 bg-neutral-50/50">
+          <div className="flex flex-wrap items-center gap-3 px-6 py-4">
             <div className="relative flex-1 min-w-[220px]">
               <Search
                 size={14}
@@ -491,16 +439,16 @@ export default function SupplyChainPage() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search product, supplier, specs…"
-                className="w-full rounded-lg border border-neutral-200 bg-white py-2 pl-8 pr-3 text-sm text-neutral-900 outline-none transition placeholder:text-neutral-400 focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
+                className="w-full rounded-lg border border-neutral-200 bg-white py-2.5 pl-8 pr-3 text-sm text-neutral-900 outline-none transition placeholder:text-neutral-400 focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
               />
             </div>
 
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
-              className="rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700 outline-none transition focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
+              className="rounded-lg border border-neutral-200 bg-white px-3 py-2.5 text-sm text-neutral-700 outline-none transition focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
             >
-              <option value="all">All Categories</option>
+              <option value="all">All</option>
               {categories.map((c) => (
                 <option key={c} value={c}>
                   {c}
@@ -511,124 +459,396 @@ export default function SupplyChainPage() {
             <select
               value={sortOption}
               onChange={(e) => setSortOption(e.target.value as SortOption)}
-              className="rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700 outline-none transition focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
+              className="rounded-lg border border-neutral-200 bg-white px-3 py-2.5 text-sm text-neutral-700 outline-none transition focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
             >
+              <option value="ai-desc">AI Score · High → Low</option>
               <option value="price-desc">Price: High to Low</option>
               <option value="price-asc">Price: Low to High</option>
               <option value="lead-asc">Lead time: Fastest</option>
               <option value="stock-desc">Stock: Most available</option>
             </select>
 
-            <label className="flex items-center gap-2 text-sm text-neutral-600 whitespace-nowrap">
-              <input
-                type="checkbox"
-                checked={inStockOnly}
-                onChange={(e) => setInStockOnly(e.target.checked)}
-                className="accent-[#3d6bff]"
-              />
+            <label className="flex items-center gap-2 rounded-lg border border-neutral-200 px-3 py-2 text-sm text-neutral-600 whitespace-nowrap">
               In-Stock Only
+              <Toggle checked={inStockOnly} onChange={setInStockOnly} />
             </label>
+
+            {loggedInSupplier && (
+              <label className="flex items-center gap-2 rounded-lg border border-neutral-200 px-3 py-2 text-sm text-neutral-600 whitespace-nowrap">
+                My offers only
+                <Toggle checked={myOffersOnly} onChange={setMyOffersOnly} />
+              </label>
+            )}
+
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowMoreMenu((v) => !v)}
+                className="flex h-[38px] w-[38px] items-center justify-center rounded-lg border border-neutral-200 text-neutral-500 transition hover:border-neutral-300 hover:text-neutral-900"
+                aria-label="More actions"
+              >
+                <MoreHorizontal size={16} />
+              </button>
+              {showMoreMenu && (
+                <div className="absolute right-0 z-10 mt-2 w-52 rounded-lg border border-neutral-200 bg-white py-1 shadow-lg">
+                  <button
+                    type="button"
+                    disabled
+                    title="Bulk CSV import needs a backend endpoint — coming soon"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-neutral-400 cursor-not-allowed"
+                  >
+                    <Upload size={13} />
+                    Bulk CSV Import
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleExportCsv}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-neutral-600 hover:bg-neutral-50"
+                  >
+                    <Download size={13} />
+                    Export CSV
+                  </button>
+                  <button
+                    type="button"
+                    disabled
+                    title="AI matching needs a backend endpoint — coming soon"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-neutral-400 cursor-not-allowed"
+                  >
+                    <Sparkles size={13} />
+                    Test AI Matching
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
-          {filteredOffers.length === 0 ? (
-            <p className="px-6 py-10 text-center text-sm text-neutral-400">
+          {offers.length === 0 ? (
+            <div className="border-t border-neutral-200 p-8 text-center">
+              <p className="text-sm text-neutral-500">
+                No offers yet. Click &ldquo;Add Offer&rdquo; above to get started.
+              </p>
+            </div>
+          ) : filteredOffers.length === 0 ? (
+            <p className="border-t border-neutral-200 px-6 py-10 text-center text-sm text-neutral-400">
               No offers match your filters.
             </p>
           ) : (
-            <table className="w-full text-sm">
-              <thead className="bg-neutral-50 text-left text-xs text-neutral-500">
-                <tr>
-                  <th className="px-6 py-2.5">Product / Item</th>
-                  <th className="px-6 py-2.5">Supplier</th>
-                  <th className="px-6 py-2.5">Unit price</th>
-                  <th className="px-6 py-2.5">Lead time</th>
-                  <th className="px-6 py-2.5">Stock &amp; MOQ</th>
-                  <th className="px-6 py-2.5">AI Score</th>
-                  <th className="px-6 py-2.5"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredOffers.map((o) => {
-                  const inStock = o.quantityAvailable > 0;
-                  return (
-                    <tr key={o.id} className="border-t border-neutral-100 align-top">
-                      <td className="px-6 py-3">
-                        <div className="font-medium text-neutral-900">{o.item}</div>
-                        {o.description && (
-                          <div className="mt-0.5 max-w-xs text-xs text-neutral-400 line-clamp-1">
-                            {o.description}
+            <>
+              <table className="w-full text-sm">
+                <thead className="border-t border-neutral-200 bg-neutral-50 text-left text-xs text-neutral-500">
+                  <tr>
+                    <th className="px-6 py-2.5">Product / Item</th>
+                    <th className="px-6 py-2.5">Supplier</th>
+                    <th className="px-6 py-2.5">Unit price</th>
+                    <th className="px-6 py-2.5">Lead time</th>
+                    <th className="px-6 py-2.5">Stock &amp; MOQ</th>
+                    <th className="px-6 py-2.5">AI Score</th>
+                    <th className="px-6 py-2.5"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedOffers.map((o) => {
+                    const inStock = o.quantityAvailable > 0;
+                    const isMine = loggedInSupplier && o.supplierId === loggedInSupplier.id;
+                    return (
+                      <tr key={o.id} className="border-t border-neutral-100 align-top">
+                        <td className="px-6 py-3">
+                          <div className="font-medium text-neutral-900">{o.item}</div>
+                          {o.description && (
+                            <div className="mt-0.5 max-w-xs text-xs text-neutral-400 line-clamp-1">
+                              {o.description}
+                            </div>
+                          )}
+                          {o.category && (
+                            <span className="mt-1.5 inline-block rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-500">
+                              {o.category}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-6 py-3">
+                          <div className="text-neutral-900">{o.supplierName}</div>
+                          {o.supplierType && (
+                            <div className="text-xs text-neutral-400">{o.supplierType}</div>
+                          )}
+                        </td>
+                        <td className="px-6 py-3">
+                          <div className="text-neutral-900">{formatUSD(o.unitPrice)}</div>
+                          <div className="text-xs text-neutral-400">
+                            {o.shippingCost ? `+ ${formatUSD(o.shippingCost)} ship` : "Free shipping"}
                           </div>
-                        )}
-                        {o.category && (
-                          <span className="mt-1.5 inline-block rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-500">
-                            {o.category}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-6 py-3">
-                        <div className="text-neutral-900">{o.supplierName}</div>
-                        {o.supplierType && (
-                          <div className="text-xs text-neutral-400">{o.supplierType}</div>
-                        )}
-                      </td>
-                      <td className="px-6 py-3">
-                        <div className="text-neutral-900">{formatINR(o.unitPrice)}</div>
-                        <div className="text-xs text-neutral-400">
-                          {o.shippingCost ? `+ ${formatINR(o.shippingCost)} ship` : "Free shipping"}
-                        </div>
-                      </td>
-                      <td className="px-6 py-3">
-                        <div className="text-neutral-900">{o.leadTimeDays}d</div>
-                        <div className="text-xs text-neutral-400">
-                          {o.dispatchStatus ?? "—"}
-                        </div>
-                      </td>
-                      <td className="px-6 py-3">
-                        <div className="flex items-center gap-1.5 text-neutral-900">
-                          <span
-                            className={`h-1.5 w-1.5 rounded-full ${
-                              inStock ? "bg-green-500" : "bg-red-400"
-                            }`}
-                          />
-                          {o.quantityAvailable} units
-                        </div>
-                        <div className="text-xs text-neutral-400">MOQ: {o.moq}</div>
-                      </td>
-                      <td className="px-6 py-3">
-                        {o.aiScore !== null ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-[#eef2ff] px-2 py-0.5 text-xs font-medium text-[#3d6bff]">
-                            <Sparkles size={10} />
-                            {o.aiScore}%
-                          </span>
-                        ) : (
-                          <span className="text-xs text-neutral-300">—</span>
-                        )}
-                      </td>
-                      <td className="px-6 py-3">
-                        <div className="flex items-center justify-end gap-3">
-                          <button
-                            disabled
-                            title="Editing offers is coming soon"
-                            className="text-neutral-300 cursor-not-allowed"
-                            aria-label="Edit offer"
-                          >
-                            <Pencil size={14} />
-                          </button>
-                          <button
-                            onClick={() => remove.mutate(o.id)}
-                            className="text-neutral-400 hover:text-red-600 transition"
-                            aria-label="Remove offer"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        </td>
+                        <td className="px-6 py-3">
+                          <div className="text-neutral-900">{o.leadTimeDays}d</div>
+                          <div className="text-xs text-neutral-400">{o.dispatchStatus ?? "—"}</div>
+                        </td>
+                        <td className="px-6 py-3">
+                          <div className="flex items-center gap-1.5 text-neutral-900">
+                            <span
+                              className={`h-1.5 w-1.5 rounded-full ${
+                                inStock ? "bg-green-500" : "bg-amber-400"
+                              }`}
+                            />
+                            {inStock ? `${o.quantityAvailable} avail` : "Backorder"}
+                          </div>
+                          <div className="text-xs text-neutral-400">MOQ: {o.moq}</div>
+                        </td>
+                        <td className="px-6 py-3">
+                          {o.aiScore !== null ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-[#eef2ff] px-2 py-0.5 text-xs font-medium text-[#3d6bff]">
+                              <Sparkles size={10} />
+                              {o.aiScore}%
+                            </span>
+                          ) : (
+                            <span className="text-xs text-neutral-300">—</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-3">
+                          <div className="flex items-center justify-end gap-3">
+                            <button
+                              disabled={!isMine}
+                              title={isMine ? "Edit offer" : "You can only edit your own offers"}
+                              className={
+                                isMine
+                                  ? "text-neutral-400 hover:text-[#3d6bff] transition"
+                                  : "text-neutral-200 cursor-not-allowed"
+                              }
+                              aria-label="Edit offer"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                            <button
+                              onClick={() => remove.mutate(o.id)}
+                              className="text-neutral-400 hover:text-red-600 transition"
+                              aria-label="Remove offer"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+
+              {/* Pagination */}
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-neutral-200 px-6 py-4">
+                <p className="text-xs text-neutral-500">
+                  Showing{" "}
+                  <span className="font-medium text-neutral-700">
+                    {filteredOffers.length === 0 ? 0 : pageStart + 1}–
+                    {Math.min(pageStart + rowsPerPage, filteredOffers.length)}
+                  </span>{" "}
+                  of <span className="font-medium text-neutral-700">{filteredOffers.length}</span>
+                </p>
+
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPage((p) => Math.max(1, p - 1))}
+                      disabled={pageSafe <= 1}
+                      className="flex h-7 w-7 items-center justify-center rounded-md border border-neutral-200 text-neutral-500 transition hover:border-neutral-300 disabled:opacity-40"
+                      aria-label="Previous page"
+                    >
+                      <ChevronLeft size={14} />
+                    </button>
+                    <span className="flex h-7 w-7 items-center justify-center rounded-md bg-[#3d6bff] text-xs font-medium text-white">
+                      {pageSafe}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                      disabled={pageSafe >= totalPages}
+                      className="flex h-7 w-7 items-center justify-center rounded-md border border-neutral-200 text-neutral-500 transition hover:border-neutral-300 disabled:opacity-40"
+                      aria-label="Next page"
+                    >
+                      <ChevronRight size={14} />
+                    </button>
+                  </div>
+
+                  <label className="flex items-center gap-2 text-xs text-neutral-500">
+                    Rows per page:
+                    <select
+                      value={rowsPerPage}
+                      onChange={(e) => setRowsPerPage(Number(e.target.value))}
+                      className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs text-neutral-700 outline-none"
+                    >
+                      {ROWS_PER_PAGE_OPTIONS.map((n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </div>
+            </>
           )}
+        </div>
+      )}
+
+      {/* Add Offer modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-neutral-200 px-6 py-4">
+              <h2 className="text-base font-semibold text-neutral-900">Add Offer</h2>
+              <button
+                type="button"
+                onClick={() => setShowAddModal(false)}
+                className="text-neutral-400 hover:text-neutral-700"
+                aria-label="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="grid grid-cols-2 gap-4 p-6">
+              <Field label="Product / item" span2>
+                <input
+                  required
+                  value={item}
+                  onChange={(e) => setItem(e.target.value)}
+                  placeholder="Raspberry Pi 5 (8GB RAM)"
+                  className={inputClass}
+                />
+              </Field>
+
+              <Field label="Description" span2>
+                <input
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Broadcom BCM2712 2.4GHz quad-core 64-bit Arm Cortex-A76"
+                  className={inputClass}
+                />
+              </Field>
+
+              <Field label="Category">
+                <input
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  placeholder="Single Board Computers"
+                  className={inputClass}
+                />
+              </Field>
+
+              <Field label="Supplier name">
+                <input
+                  required
+                  value={supplierName}
+                  onChange={(e) => setSupplierName(e.target.value)}
+                  placeholder="Acme Electronics"
+                  className={inputClass}
+                />
+              </Field>
+
+              <Field label="Supplier type">
+                <input
+                  required
+                  value={supplierType}
+                  onChange={(e) => setSupplierType(e.target.value)}
+                  placeholder="Distributor"
+                  className={inputClass}
+                />
+              </Field>
+
+              <Field label="Unit price ($)">
+                <input
+                  required
+                  type="number"
+                  value={unitPrice}
+                  onChange={(e) => setUnitPrice(e.target.value)}
+                  className={inputClass}
+                />
+              </Field>
+
+              <Field label="Shipping cost ($)">
+                <input
+                  type="number"
+                  value={shippingCost}
+                  onChange={(e) => setShippingCost(e.target.value)}
+                  className={inputClass}
+                />
+              </Field>
+
+              <Field label="Lead time (days)">
+                <input
+                  required
+                  type="number"
+                  value={leadTimeDays}
+                  onChange={(e) => setLeadTimeDays(e.target.value)}
+                  className={inputClass}
+                />
+              </Field>
+
+              <Field label="Dispatch status">
+                <select
+                  value={dispatchStatus}
+                  onChange={(e) => setDispatchStatus(e.target.value)}
+                  className={inputClass}
+                >
+                  <option>Dispatch ready</option>
+                  <option>Backordered</option>
+                  <option>Made to order</option>
+                </select>
+              </Field>
+
+              <Field label="Quantity available">
+                <input
+                  required
+                  type="number"
+                  value={quantityAvailable}
+                  onChange={(e) => setQuantityAvailable(e.target.value)}
+                  className={inputClass}
+                />
+              </Field>
+
+              <Field label="MOQ">
+                <input
+                  type="number"
+                  value={moq}
+                  onChange={(e) => setMoq(e.target.value)}
+                  className={inputClass}
+                />
+              </Field>
+
+              <Field label="AI score (%, optional)">
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={aiScore}
+                  onChange={(e) => setAiScore(e.target.value)}
+                  placeholder="Leave blank until AI matching is wired up"
+                  className={inputClass}
+                />
+              </Field>
+
+              {create.isError && (
+                <div className="col-span-2 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                  {(create.error as Error).message}
+                </div>
+              )}
+
+              <div className="col-span-2 flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(false)}
+                  className="rounded-lg border border-neutral-200 px-4 py-2.5 text-sm font-medium text-neutral-600 transition hover:border-neutral-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={create.isPending}
+                  className="rounded-lg bg-[#3d6bff] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#3d6bff]/90 disabled:opacity-50"
+                >
+                  {create.isPending ? "Adding…" : "Add offer"}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </main>
