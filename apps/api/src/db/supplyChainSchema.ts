@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, integer, timestamp, jsonb } from "drizzle-orm/pg-core";
 
 export const supplierOffers = pgTable("supplier_offers", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -24,4 +24,7 @@ export const supplierOffers = pgTable("supplier_offers", {
   aiScore: integer("ai_score"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  specs: jsonb("specs"),
+  unitOfMeasure: text("unit_of_measure").notNull().default("piece"), // "piece" | "box_of_10" | "kg" | "meter"
+
 });

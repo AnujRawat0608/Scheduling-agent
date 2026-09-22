@@ -2,13 +2,31 @@ import { Router } from "express";
 import { db } from "../db/client.js";
 import { supplierOffers } from "../db/supplyChainSchema.js";
 import { eq, asc } from "drizzle-orm";
+import { suppliers } from "../db/suppliersSchema.js";
+
 
 export const supplyChainRouter = Router();
 
 supplyChainRouter.get("/supply-chain", async (_req, res) => {
-  const offers = await db.select().from(supplierOffers).orderBy(asc(supplierOffers.item));
+  const rows = await db
+    .select({
+      offer: supplierOffers,
+      verificationStatus: suppliers.verificationStatus,
+      gstVerified: suppliers.gstVerified,
+    })
+    .from(supplierOffers)
+    .leftJoin(suppliers, eq(supplierOffers.supplierId, suppliers.id))
+    .orderBy(asc(supplierOffers.item));
+
+  const offers = rows.map((r) => ({
+    ...r.offer,
+    verificationStatus: r.verificationStatus ?? null,
+    gstVerified: r.gstVerified ?? false,
+  }));
+
   res.json({ offers });
 });
+
 
 supplyChainRouter.post("/supply-chain", async (req, res) => {
   try {
@@ -19,12 +37,14 @@ supplyChainRouter.post("/supply-chain", async (req, res) => {
       supplierName,
       supplierType,
       unitPrice,
+      unitOfMeasure,
       leadTimeDays,
       dispatchStatus,
       shippingCost,
       moq,
       quantityAvailable,
       aiScore,
+      specs,
       supplierId,
     } = req.body;
 
@@ -43,12 +63,14 @@ supplyChainRouter.post("/supply-chain", async (req, res) => {
         supplierName,
         supplierType: supplierType ?? null,
         unitPrice,
+        unitOfMeasure: unitOfMeasure ?? "piece",
         leadTimeDays,
         dispatchStatus: dispatchStatus ?? "Dispatch ready",
         shippingCost: shippingCost ?? 0,
         moq: moq ?? 1,
         quantityAvailable,
         aiScore: aiScore ?? null,
+        specs: specs ?? null,
         // Optional — set when a logged-in supplier creates the offer from
         // their own session, so it shows up in their dashboard's product
         // list. Offers created without being logged in simply have no

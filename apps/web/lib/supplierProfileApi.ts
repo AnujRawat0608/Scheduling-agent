@@ -36,6 +36,8 @@ export interface SupplierProfile {
   transactionsCount: number | null;
   totalTransactionAmount: string | null;
   quotationPerformance: number | null;
+  verificationStatus: "pending" | "verified" | "rejected";
+  gstVerified: boolean;
   createdAt: string;
   updatedAt: string;
 }

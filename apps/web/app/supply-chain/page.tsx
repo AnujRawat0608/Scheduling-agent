@@ -34,6 +34,15 @@ type SupplyChainOffer = SupplierOffer;
 
 type SortOption = "ai-desc" | "price-desc" | "price-asc" | "lead-asc" | "stock-desc";
 
+const UNIT_OF_MEASURE_OPTIONS = [
+  { value: "piece", label: "Piece" },
+  { value: "box_of_10", label: "Box of 10" },
+  { value: "box_of_100", label: "Box of 100" },
+  { value: "kg", label: "Kilogram" },
+  { value: "meter", label: "Meter" },
+  { value: "liter", label: "Liter" },
+];
+
 const inputClass =
   "w-full rounded-lg border border-neutral-200 bg-white px-3.5 py-2.5 text-sm text-neutral-900 outline-none transition placeholder:text-neutral-400 focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]";
 
@@ -71,6 +80,16 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
         }`}
       />
     </button>
+  );
+}
+
+function VerifiedBadge({ status }: { status: string | null }) {
+  if (status !== "verified") return null;
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[11px] font-medium text-green-700">
+      <CheckCircle2 size={11} />
+      Verified
+    </span>
   );
 }
 
@@ -113,6 +132,7 @@ function toCsv(offers: SupplyChainOffer[]): string {
     "supplierName",
     "supplierType",
     "unitPrice",
+    "unitOfMeasure",
     "shippingCost",
     "leadTimeDays",
     "dispatchStatus",
@@ -144,6 +164,15 @@ function downloadCsv(csv: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+function specsToObject(
+  rows: { key: string; value: string }[]
+): Record<string, string> | undefined {
+  const entries = rows
+    .map((r) => [r.key.trim(), r.value.trim()] as const)
+    .filter(([k, v]) => k && v);
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
 const ROWS_PER_PAGE_OPTIONS = [10, 25, 50];
 
 export default function SupplyChainPage() {
@@ -157,12 +186,16 @@ export default function SupplyChainPage() {
   const [supplierName, setSupplierName] = useState("");
   const [supplierType, setSupplierType] = useState("");
   const [unitPrice, setUnitPrice] = useState("");
+  const [unitOfMeasure, setUnitOfMeasure] = useState("piece");
   const [leadTimeDays, setLeadTimeDays] = useState("");
   const [shippingCost, setShippingCost] = useState("0");
   const [moq, setMoq] = useState("1");
   const [quantityAvailable, setQuantityAvailable] = useState("");
   const [dispatchStatus, setDispatchStatus] = useState("Dispatch ready");
   const [aiScore, setAiScore] = useState("");
+  const [specRows, setSpecRows] = useState<{ key: string; value: string }[]>([
+    { key: "", value: "" },
+  ]);
 
   const [loggedInSupplier, setLoggedInSupplier] = useState<Supplier | null>(null);
 
@@ -208,12 +241,14 @@ export default function SupplyChainPage() {
       setSupplierName(loggedInSupplier?.businessName ?? "");
       setSupplierType("");
       setUnitPrice("");
+      setUnitOfMeasure("piece");
       setLeadTimeDays("");
       setShippingCost("0");
       setMoq("1");
       setQuantityAvailable("");
       setDispatchStatus("Dispatch ready");
       setAiScore("");
+      setSpecRows([{ key: "", value: "" }]);
       setShowAddModal(false);
     },
   });
@@ -222,6 +257,20 @@ export default function SupplyChainPage() {
     mutationFn: deleteSupplyChainOffer,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["supply-chain"] }),
   });
+
+  function updateSpecRow(index: number, field: "key" | "value", value: string) {
+    setSpecRows((rows) =>
+      rows.map((row, i) => (i === index ? { ...row, [field]: value } : row))
+    );
+  }
+
+  function addSpecRow() {
+    setSpecRows((rows) => [...rows, { key: "", value: "" }]);
+  }
+
+  function removeSpecRow(index: number) {
+    setSpecRows((rows) => rows.filter((_, i) => i !== index));
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -232,12 +281,14 @@ export default function SupplyChainPage() {
       supplierName,
       supplierType,
       unitPrice: Number(unitPrice),
+      unitOfMeasure,
       leadTimeDays: Number(leadTimeDays),
       shippingCost: Number(shippingCost),
       moq: Number(moq),
       quantityAvailable: Number(quantityAvailable),
       dispatchStatus,
       aiScore: aiScore ? Number(aiScore) : undefined,
+      specs: specsToObject(specRows),
       supplierId: loggedInSupplier?.id,
     });
   }
@@ -261,7 +312,10 @@ export default function SupplyChainPage() {
           o.item.toLowerCase().includes(q) ||
           o.supplierName.toLowerCase().includes(q) ||
           (o.description ?? "").toLowerCase().includes(q) ||
-          (o.category ?? "").toLowerCase().includes(q)
+          (o.category ?? "").toLowerCase().includes(q) ||
+          Object.entries(o.specs ?? {}).some(
+            ([k, v]) => k.toLowerCase().includes(q) || String(v).toLowerCase().includes(q)
+          )
       );
     }
 
@@ -564,15 +618,35 @@ export default function SupplyChainPage() {
                               {o.category}
                             </span>
                           )}
-                        </td>
-                        <td className="px-6 py-3">
-                          <div className="text-neutral-900">{o.supplierName}</div>
-                          {o.supplierType && (
-                            <div className="text-xs text-neutral-400">{o.supplierType}</div>
+                          {o.specs && Object.keys(o.specs).length > 0 && (
+                            <div className="mt-1.5 flex flex-wrap gap-1">
+                              {Object.entries(o.specs).map(([k, v]) => (
+                                <span
+                                  key={k}
+                                  className="rounded bg-neutral-50 px-1.5 py-0.5 text-[10px] text-neutral-500"
+                                >
+                                  {k}: {v}
+                                </span>
+                              ))}
+                            </div>
                           )}
                         </td>
                         <td className="px-6 py-3">
-                          <div className="text-neutral-900">{formatUSD(o.unitPrice)}</div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-neutral-900">{o.supplierName}</span>
+                              <VerifiedBadge status={o.verificationStatus} />
+                            </div>
+                            {o.supplierType && (
+                              <div className="text-xs text-neutral-400">{o.supplierType}</div>
+                            )}
+                          </td>
+                        <td className="px-6 py-3">
+                          <div className="text-neutral-900">
+                            {formatUSD(o.unitPrice)}
+                            <span className="ml-1 text-xs font-normal text-neutral-400">
+                              / {o.unitOfMeasure ?? "piece"}
+                            </span>
+                          </div>
                           <div className="text-xs text-neutral-400">
                             {o.shippingCost ? `+ ${formatUSD(o.shippingCost)} ship` : "Free shipping"}
                           </div>
@@ -724,6 +798,44 @@ export default function SupplyChainPage() {
                 />
               </Field>
 
+              <div className="col-span-2 space-y-2">
+                <span className="text-xs font-medium text-neutral-600">
+                  Specifications (optional, but improves matching)
+                </span>
+                {specRows.map((row, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <input
+                      value={row.key}
+                      onChange={(e) => updateSpecRow(i, "key", e.target.value)}
+                      placeholder="e.g. RAM"
+                      className={inputClass}
+                    />
+                    <input
+                      value={row.value}
+                      onChange={(e) => updateSpecRow(i, "value", e.target.value)}
+                      placeholder="e.g. 8GB"
+                      className={inputClass}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeSpecRow(i)}
+                      className="shrink-0 text-neutral-400 hover:text-red-600"
+                      aria-label="Remove spec"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={addSpecRow}
+                  className="flex items-center gap-1 text-xs font-medium text-[#3d6bff] hover:underline"
+                >
+                  <Plus size={13} />
+                  Add specification
+                </button>
+              </div>
+
               <Field label="Category">
                 <input
                   value={category}
@@ -761,6 +873,20 @@ export default function SupplyChainPage() {
                   onChange={(e) => setUnitPrice(e.target.value)}
                   className={inputClass}
                 />
+              </Field>
+
+              <Field label="Unit of measure">
+                <select
+                  value={unitOfMeasure}
+                  onChange={(e) => setUnitOfMeasure(e.target.value)}
+                  className={inputClass}
+                >
+                  {UNIT_OF_MEASURE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
               </Field>
 
               <Field label="Shipping cost ($)">

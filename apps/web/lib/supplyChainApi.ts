@@ -16,6 +16,10 @@ export interface SupplierOffer {
   aiScore: number | null;
   supplierId: string | null;
   createdAt: string;
+  specs?: Record<string, string> | null;
+  unitOfMeasure: string;
+  verificationStatus: "pending" | "verified" | "rejected" | null;
+  gstVerified: boolean;
 }
 
 export async function listSupplyChainOffers(): Promise<SupplierOffer[]> {
@@ -32,12 +36,14 @@ export interface CreateOfferInput {
   supplierName: string;
   supplierType: string;
   unitPrice: number;
+  unitOfMeasure: string;
   leadTimeDays: number;
   dispatchStatus?: string;
   shippingCost: number;
   moq: number;
   quantityAvailable: number;
   aiScore?: number;
+  specs?: Record<string, string>;
   supplierId?: string;
 }
 

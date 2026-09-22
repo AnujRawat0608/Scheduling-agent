@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, integer, timestamp, jsonb, boolean } from "drizzle-orm/pg-core";
 
 export const suppliers = pgTable("suppliers", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -13,6 +13,13 @@ export const suppliers = pgTable("suppliers", {
   state: text("state"),
   region: text("region"),
   pincode: text("pincode"),
+
+    // --- Verification (KYC) ---
+  gstVerified: boolean("gst_verified").notNull().default(false),
+  verificationStatus: text("verification_status").notNull().default("pending"), // "pending" | "verified" | "rejected"
+  verifiedAt: timestamp("verified_at"),
+  verificationNotes: text("verification_notes"), // admin notes on rejection, etc.
+
 
   // --- Company profile fields ---
   companyOverview: text("company_overview"),
@@ -71,3 +78,27 @@ export const supplierOrders = pgTable("supplier_orders", {
   status: text("status").notNull().default("pending"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+export const supplierCertifications = pgTable("supplier_certifications", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  supplierId: uuid("supplier_id").notNull(),
+  certType: text("cert_type").notNull(),
+  certNumber: text("cert_number"),
+  issuedBy: text("issued_by"),
+  validUntil: timestamp("valid_until"),
+  documentUrl: text("document_url"),
+  verified: boolean("verified").notNull().default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const supplierVerificationEvents = pgTable("supplier_verification_events", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  supplierId: uuid("supplier_id").notNull(),
+  adminId: uuid("admin_id").notNull(),
+  action: text("action").notNull(), // "verified" | "rejected"
+  previousStatus: text("previous_status").notNull(),
+  newStatus: text("new_status").notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+

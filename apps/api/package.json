@@ -9,7 +9,9 @@
     "start": "node dist/server.js",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
-    "eval": "tsx src/evals/run.ts"
+    "eval": "tsx src/evals/run.ts",
+        "seed:admin": "tsx src/scripts/seedAdmin.ts"
+
   },
   "dependencies": {
     "@langchain/core": "^0.3.0",

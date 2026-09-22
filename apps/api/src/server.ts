@@ -9,6 +9,9 @@ import { supplyChainRouter } from "./routes/supplyChain.js";
 import { supplierAuthRouter } from "./routes/supplierAuth.js";
 import { supplierProfileRouter } from "./routes/supplierProfile.js";
 import { supplierOrdersRouter } from "./routes/supplierOrders.js";
+import { adminAuthRouter } from "./routes/adminAuth.js";
+import { adminSuppliersRouter } from "./routes/adminSuppliers.js";
+
 
 process.on("unhandledRejection", (err) => {
   console.error("Unhandled rejection (server stays up):", err);
@@ -35,6 +38,8 @@ app.use("/api", supplyChainRouter);
 app.use("/api/supplier-auth", supplierAuthRouter);
 app.use("/api/suppliers", supplierProfileRouter);
 app.use("/api", supplierOrdersRouter);
+app.use("/api/admin-auth", adminAuthRouter);
+app.use("/api/admin/suppliers", adminSuppliersRouter);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 

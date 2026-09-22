@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { CheckCircle2 } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Building2,
@@ -46,6 +47,16 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
       <span className="text-neutral-500">{label}</span>
       <span className="text-right font-medium text-neutral-900">{value ?? "—"}</span>
     </div>
+  );
+}
+
+function VerifiedBadge({ status }: { status: string | null }) {
+  if (status !== "verified") return null;
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[11px] font-medium text-green-700">
+      <CheckCircle2 size={11} />
+      Verified
+    </span>
   );
 }
 
@@ -153,8 +164,11 @@ export default function SupplierProfilePage() {
               <Building2 size={26} />
             </div>
             <div>
-              <h1 className="text-xl font-semibold text-neutral-900">{supplier.businessName}</h1>
-              <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-neutral-500">
+  <div className="flex items-center gap-2">
+    <h1 className="text-xl font-semibold text-neutral-900">{supplier.businessName}</h1>
+    <VerifiedBadge status={supplier.verificationStatus} />
+  </div>
+  <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-neutral-500">
                 {supplier.yearEstablished && (
                   <span>{new Date().getFullYear() - supplier.yearEstablished}yrs</span>
                 )}
