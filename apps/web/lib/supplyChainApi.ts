@@ -20,6 +20,9 @@ export interface SupplierOffer {
   unitOfMeasure: string;
   verificationStatus: "pending" | "verified" | "rejected" | null;
   gstVerified: boolean;
+  taxType: string | null;
+  taxRate: string | null;
+  taxInclusive: boolean;
 }
 
 export async function listSupplyChainOffers(): Promise<SupplierOffer[]> {
@@ -44,6 +47,9 @@ export interface CreateOfferInput {
   quantityAvailable: number;
   aiScore?: number;
   specs?: Record<string, string>;
+  taxType?: string;
+  taxRate?: number;
+  taxInclusive?: boolean;
   supplierId?: string;
 }
 

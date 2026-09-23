@@ -196,6 +196,9 @@ export default function SupplyChainPage() {
   const [specRows, setSpecRows] = useState<{ key: string; value: string }[]>([
     { key: "", value: "" },
   ]);
+  const [taxType, setTaxType] = useState("None");
+const [taxRate, setTaxRate] = useState("0");
+const [taxInclusive, setTaxInclusive] = useState(false);
 
   const [loggedInSupplier, setLoggedInSupplier] = useState<Supplier | null>(null);
 
@@ -250,6 +253,11 @@ export default function SupplyChainPage() {
       setAiScore("");
       setSpecRows([{ key: "", value: "" }]);
       setShowAddModal(false);
+      setSpecRows([{ key: "", value: "" }]);
+      setTaxType("None");
+      setTaxRate("0");
+      setTaxInclusive(false);
+      setShowAddModal(false);
     },
   });
 
@@ -273,25 +281,28 @@ export default function SupplyChainPage() {
   }
 
   function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    create.mutate({
-      item,
-      description,
-      category,
-      supplierName,
-      supplierType,
-      unitPrice: Number(unitPrice),
-      unitOfMeasure,
-      leadTimeDays: Number(leadTimeDays),
-      shippingCost: Number(shippingCost),
-      moq: Number(moq),
-      quantityAvailable: Number(quantityAvailable),
-      dispatchStatus,
-      aiScore: aiScore ? Number(aiScore) : undefined,
-      specs: specsToObject(specRows),
-      supplierId: loggedInSupplier?.id,
-    });
-  }
+  e.preventDefault();
+  create.mutate({
+    item,
+    description,
+    category,
+    supplierName,
+    supplierType,
+    unitPrice: Number(unitPrice),
+    unitOfMeasure,
+    leadTimeDays: Number(leadTimeDays),
+    shippingCost: Number(shippingCost),
+    moq: Number(moq),
+    quantityAvailable: Number(quantityAvailable),
+    dispatchStatus,
+    aiScore: aiScore ? Number(aiScore) : undefined,
+    specs: specsToObject(specRows),
+    taxType,
+    taxRate: Number(taxRate),
+    taxInclusive,
+    supplierId: loggedInSupplier?.id,
+  });
+}
 
   const categories = useMemo(() => {
     const set = new Set(offers.map((o) => o.category).filter(Boolean) as string[]);
@@ -876,18 +887,50 @@ export default function SupplyChainPage() {
               </Field>
 
               <Field label="Unit of measure">
-                <select
-                  value={unitOfMeasure}
-                  onChange={(e) => setUnitOfMeasure(e.target.value)}
-                  className={inputClass}
-                >
-                  {UNIT_OF_MEASURE_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
+  <select
+    value={unitOfMeasure}
+    onChange={(e) => setUnitOfMeasure(e.target.value)}
+    className={inputClass}
+  >
+    {UNIT_OF_MEASURE_OPTIONS.map((opt) => (
+      <option key={opt.value} value={opt.value}>
+        {opt.label}
+      </option>
+    ))}
+  </select>
+</Field>
+
+<Field label="Tax type">
+  <select
+    value={taxType}
+    onChange={(e) => setTaxType(e.target.value)}
+    className={inputClass}
+  >
+    <option>None</option>
+    <option>GST</option>
+    <option>VAT</option>
+    <option>Sales Tax</option>
+    <option>Other</option>
+  </select>
+</Field>
+
+<Field label="Tax rate (%)">
+  <input
+    type="number"
+    min="0"
+    step="0.01"
+    value={taxRate}
+    onChange={(e) => setTaxRate(e.target.value)}
+    className={inputClass}
+  />
+</Field>
+
+<Field label="Price includes tax" span2>
+  <label className="flex items-center gap-2 text-sm text-neutral-600">
+    <Toggle checked={taxInclusive} onChange={setTaxInclusive} />
+    {taxInclusive ? "Yes — unit price already includes tax" : "No — tax is added on top"}
+  </label>
+</Field>
 
               <Field label="Shipping cost ($)">
                 <input

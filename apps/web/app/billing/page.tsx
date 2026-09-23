@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Receipt, TriangleAlert } from "lucide-react";
+import { Receipt, TriangleAlert, X, FileText } from "lucide-react";
 import { fetchAllSupplierOrders, confirmSupplierOrder, type SupplierOrder } from "../../lib/supplierOrdersApi";
 
 const STATUS_STYLES: Record<string, string> = {
@@ -17,22 +17,32 @@ const STATUS_STYLES: Record<string, string> = {
 const FILTERS = ["all", "pending", "confirmed", "shipped", "delivered", "cancelled"] as const;
 type Filter = (typeof FILTERS)[number];
 
-/* ---------- Money helpers ----------
- * All maths is done in paise (integers) so sums never drift (0.1 + 0.2 problem),
- * and API values that arrive as strings ("250.00") or with symbols are handled.
- */
+/* ---------- Money helpers ---------- */
 function toPaise(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
   const n = typeof value === "number" ? value : Number(String(value).replace(/[₹,\s]/g, ""));
   return Number.isFinite(n) ? Math.round(n * 100) : null;
 }
 
-/** Line total in paise, or null when the price/quantity is missing. */
-function lineTotal(o: SupplierOrder): number | null {
+function subtotalPaise(o: SupplierOrder): number | null {
+  if (o.subtotal !== null && o.subtotal !== undefined) {
+    return Math.round(o.subtotal * 100);
+  }
   const unit = toPaise(o.unitPrice);
   const qty = Number(o.quantity);
   if (unit === null || !Number.isFinite(qty)) return null;
   return unit * qty;
+}
+
+function taxPaise(o: SupplierOrder): number {
+  if (o.taxAmount === null || o.taxAmount === undefined) return 0;
+  return Math.round(o.taxAmount * 100);
+}
+
+function lineTotal(o: SupplierOrder): number | null {
+  const sub = subtotalPaise(o);
+  if (sub === null) return null;
+  return sub + taxPaise(o);
 }
 
 function formatINR(paise: number) {
@@ -46,18 +56,135 @@ function formatINR(paise: number) {
 
 const sumPaise = (orders: SupplierOrder[]) => orders.reduce((sum, o) => sum + (lineTotal(o) ?? 0), 0);
 
+/* ---------- Order detail / invoice modal ---------- */
+function OrderDetailModal({ order, onClose }: { order: SupplierOrder; onClose: () => void }) {
+  const sub = subtotalPaise(order);
+  const tax = taxPaise(order);
+  const total = lineTotal(order);
+  const unit = toPaise(order.unitPrice);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-neutral-200 px-6 py-4">
+          <div className="flex items-center gap-2">
+            <FileText size={18} className="text-[#3d6bff]" />
+            <h2 className="text-base font-semibold text-neutral-900">Order details</h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-neutral-400 hover:text-neutral-700"
+            aria-label="Close"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="space-y-5 p-6">
+          {/* Order meta */}
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <span className="text-xs text-neutral-400">Order ID</span>
+              <div className="truncate font-medium text-neutral-900">{order.id}</div>
+            </div>
+            <div>
+              <span className="text-xs text-neutral-400">Date</span>
+              <div className="font-medium text-neutral-900">
+                {new Date(order.createdAt).toLocaleDateString("en-IN", {
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
+                })}
+              </div>
+            </div>
+            <div>
+              <span className="text-xs text-neutral-400">Status</span>
+              <div>
+                <span
+                  className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium capitalize ${
+                    STATUS_STYLES[order.status] ?? ""
+                  }`}
+                >
+                  {order.status}
+                </span>
+              </div>
+            </div>
+            <div>
+              <span className="text-xs text-neutral-400">Requester</span>
+              <div className="font-medium text-neutral-900">{order.requesterName}</div>
+              <div className="text-xs text-neutral-400">{order.requesterEmail}</div>
+            </div>
+          </div>
+
+          <div className="border-t border-neutral-100 pt-4">
+            <span className="text-xs text-neutral-400">Delivery address</span>
+            <p className="text-sm text-neutral-800">{order.deliveryAddress}</p>
+          </div>
+
+          {order.notes && (
+            <div>
+              <span className="text-xs text-neutral-400">Notes</span>
+              <p className="text-sm text-neutral-800">{order.notes}</p>
+            </div>
+          )}
+
+          {/* Line item */}
+          <div className="rounded-xl border border-neutral-200 p-4">
+            <div className="flex items-center justify-between text-sm">
+              <span className="font-medium text-neutral-900">{order.itemName}</span>
+              <span className="text-neutral-500">Qty {order.quantity}</span>
+            </div>
+            <div className="mt-1 text-xs text-neutral-400">
+              {unit !== null ? `${formatINR(unit)} / unit` : "No unit price recorded"}
+            </div>
+
+            <div className="mt-4 space-y-1.5 border-t border-neutral-100 pt-3 text-sm">
+              <div className="flex justify-between text-neutral-600">
+                <span>Subtotal</span>
+                <span className="tabular-nums">{sub !== null ? formatINR(sub) : "—"}</span>
+              </div>
+              <div className="flex justify-between text-neutral-600">
+                <span>
+                  {order.taxType && order.taxType !== "None"
+                    ? `${order.taxType}${order.taxRate ? ` (${Number(order.taxRate)}%)` : ""}`
+                    : "Tax"}
+                  {order.taxInclusive && (
+                    <span className="ml-1 text-[11px] text-neutral-400">(included in price)</span>
+                  )}
+                </span>
+                <span className="tabular-nums">{formatINR(tax)}</span>
+              </div>
+              <div className="flex justify-between border-t border-neutral-200 pt-2 font-semibold text-neutral-900">
+                <span>Total</span>
+                <span className="tabular-nums">{total !== null ? formatINR(total) : "—"}</span>
+              </div>
+            </div>
+          </div>
+
+          {!order.taxType && (
+            <p className="text-xs text-neutral-400">
+              No tax information was recorded for this order (placed before tax tracking was added, or the
+              product had no tax settings).
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BillingContent() {
   const [filter, setFilter] = useState<Filter>("all");
   const [confirmedMessage, setConfirmedMessage] = useState<string | null>(null);
+  const [detailOrder, setDetailOrder] = useState<SupplierOrder | null>(null);
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
-  // Redirect to /billing?highlight=<orderId> after "add product" to spotlight the new row.
   const highlightId = searchParams.get("highlight");
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["supplier-orders"],
     queryFn: fetchAllSupplierOrders,
-    // Always refetch when landing here so a just-added product is never missing from the totals.
     refetchOnMount: "always",
   });
 
@@ -83,7 +210,6 @@ function BillingContent() {
     [data]
   );
 
-  // Cancelled orders are never billed, so they are excluded from every total.
   const billable = useMemo(() => orders.filter((o) => o.status !== "cancelled"), [orders]);
   const cancelledCount = orders.length - billable.length;
   const missingPrice = useMemo(() => billable.filter((o) => lineTotal(o) === null), [billable]);
@@ -113,7 +239,6 @@ function BillingContent() {
     [filtered]
   );
 
-  // Scroll the newly added order into view.
   useEffect(() => {
     if (!highlightId || isLoading) return;
     document.getElementById(`order-${highlightId}`)?.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -254,16 +379,24 @@ function BillingContent() {
                         </span>
                       </td>
                       <td className="px-5 py-3">
-                        {o.status === "pending" && (
+                        <div className="flex items-center gap-2">
                           <button
-                            onClick={() => confirmOrder.mutate(o.id)}
-                            disabled={confirmOrder.isPending || total === null}
-                            title={total === null ? "Add a unit price before confirming" : undefined}
-                            className="rounded-md bg-[#3d6bff] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-[#3d6bff]/90 disabled:opacity-50"
+                            onClick={() => setDetailOrder(o)}
+                            className="rounded-md border border-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-700 transition hover:border-neutral-300"
                           >
-                            {confirmingThis ? "Confirming…" : "Confirm order"}
+                            View details
                           </button>
-                        )}
+                          {o.status === "pending" && (
+                            <button
+                              onClick={() => confirmOrder.mutate(o.id)}
+                              disabled={confirmOrder.isPending || total === null}
+                              title={total === null ? "Add a unit price before confirming" : undefined}
+                              className="rounded-md bg-[#3d6bff] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-[#3d6bff]/90 disabled:opacity-50"
+                            >
+                              {confirmingThis ? "Confirming…" : "Confirm order"}
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -297,12 +430,13 @@ function BillingContent() {
           </div>
         </>
       )}
+
+      {detailOrder && <OrderDetailModal order={detailOrder} onClose={() => setDetailOrder(null)} />}
     </div>
   );
 }
 
 export default function BillingPage() {
-  // useSearchParams needs a Suspense boundary in the Next.js app router.
   return (
     <Suspense fallback={null}>
       <BillingContent />

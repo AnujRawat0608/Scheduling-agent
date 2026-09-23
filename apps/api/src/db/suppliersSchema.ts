@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, timestamp, jsonb, boolean } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, integer, timestamp, jsonb, boolean, numeric } from "drizzle-orm/pg-core";
 
 export const suppliers = pgTable("suppliers", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -77,6 +77,12 @@ export const supplierOrders = pgTable("supplier_orders", {
   notes: text("notes"),
   status: text("status").notNull().default("pending"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  taxType: text("tax_type"),
+  taxRate: numeric("tax_rate", { precision: 5, scale: 2 }),
+  taxInclusive: boolean("tax_inclusive").notNull().default(false),
+  subtotal: integer("subtotal"),   // unitPrice × quantity, tax excluded
+  taxAmount: integer("tax_amount"), // computed once, at creation
+
 });
 
 export const supplierCertifications = pgTable("supplier_certifications", {

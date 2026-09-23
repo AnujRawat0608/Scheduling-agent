@@ -16,6 +16,11 @@ export interface SupplierOrder extends SupplierOrderInput {
   id: string;
   status: string;
   createdAt: string;
+  taxType: string | null;
+  taxRate: string | null;
+  taxInclusive: boolean;
+  subtotal: number | null;
+  taxAmount: number | null;
 }
 
 async function parseErrorOr<T>(res: Response, fallback: string): Promise<T> {

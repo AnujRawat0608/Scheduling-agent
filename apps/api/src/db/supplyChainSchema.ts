@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, integer, timestamp, jsonb, numeric, boolean } from "drizzle-orm/pg-core";
 
 export const supplierOffers = pgTable("supplier_offers", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -25,6 +25,10 @@ export const supplierOffers = pgTable("supplier_offers", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
   specs: jsonb("specs"),
-  unitOfMeasure: text("unit_of_measure").notNull().default("piece"), // "piece" | "box_of_10" | "kg" | "meter"
+  unitOfMeasure: text("unit_of_measure").notNull().default("piece"),
+  taxType: text("tax_type"),
+  taxRate: numeric("tax_rate",{ precision: 5, scale:2}),
+  taxInclusive: boolean("tax_inclusive").notNull().default(false),
+  // "piece" | "box_of_10" | "kg" | "meter"
 
 });

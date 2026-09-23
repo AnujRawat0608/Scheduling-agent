@@ -45,6 +45,9 @@ supplyChainRouter.post("/supply-chain", async (req, res) => {
       quantityAvailable,
       aiScore,
       specs,
+      taxType,
+      taxRate,
+      taxInclusive,
       supplierId,
     } = req.body;
 
@@ -54,30 +57,29 @@ supplyChainRouter.post("/supply-chain", async (req, res) => {
       });
     }
 
-    const [offer] = await db
-      .insert(supplierOffers)
-      .values({
-        item,
-        description: description ?? null,
-        category: category ?? null,
-        supplierName,
-        supplierType: supplierType ?? null,
-        unitPrice,
-        unitOfMeasure: unitOfMeasure ?? "piece",
-        leadTimeDays,
-        dispatchStatus: dispatchStatus ?? "Dispatch ready",
-        shippingCost: shippingCost ?? 0,
-        moq: moq ?? 1,
-        quantityAvailable,
-        aiScore: aiScore ?? null,
-        specs: specs ?? null,
-        // Optional — set when a logged-in supplier creates the offer from
-        // their own session, so it shows up in their dashboard's product
-        // list. Offers created without being logged in simply have no
-        // owner, same as before this field existed.
-        supplierId: supplierId ?? null,
-      })
-      .returning();
+   const [offer] = await db
+  .insert(supplierOffers)
+  .values({
+    item,
+    description: description ?? null,
+    category: category ?? null,
+    supplierName,
+    supplierType: supplierType ?? null,
+    unitPrice,
+    unitOfMeasure: unitOfMeasure ?? "piece",
+    leadTimeDays,
+    dispatchStatus: dispatchStatus ?? "Dispatch ready",
+    shippingCost: shippingCost ?? 0,
+    moq: moq ?? 1,
+    quantityAvailable,
+    aiScore: aiScore ?? null,
+    specs: specs ?? null,
+    taxType: taxType ?? null,
+    taxRate: taxRate != null ? String(taxRate) : null,
+    taxInclusive: taxInclusive ?? false,
+    supplierId: supplierId ?? null,
+  })
+  .returning();
 
     res.status(201).json({ offer });
   } catch (err) {
@@ -85,7 +87,6 @@ supplyChainRouter.post("/supply-chain", async (req, res) => {
     res.status(500).json({ error: String((err as Error)?.message ?? err) });
   }
 });
-
 supplyChainRouter.delete("/supply-chain/:id", async (req, res) => {
   await db.delete(supplierOffers).where(eq(supplierOffers.id, req.params.id));
   res.status(204).send();
