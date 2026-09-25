@@ -14,7 +14,7 @@ function routeAfterCompare(state: ProcurementStateType) {
 }
 
 function routeAfterApproval(state: ProcurementStateType) {
-  return state.status === "failed" ? END : "confirmPurchase";
+  return state.status === "failed" ? END : "generateRfq";
 }
 
 const builder = new StateGraph(ProcurementState)
@@ -24,8 +24,7 @@ const builder = new StateGraph(ProcurementState)
   .addNode("riskCheck", riskCheckNode)
   .addNode("humanApproval", humanApproval)
   .addNode("confirmPurchase", confirmPurchase)
-  .addEdge(START, "generateRfq")
-  .addEdge("generateRfq", "contactSuppliers")
+  .addEdge(START, "contactSuppliers")
   .addEdge("contactSuppliers", "compareQuotes")
   .addConditionalEdges("compareQuotes", routeAfterCompare, {
     riskCheck: "riskCheck",
@@ -33,9 +32,10 @@ const builder = new StateGraph(ProcurementState)
   })
   .addEdge("riskCheck", "humanApproval")
   .addConditionalEdges("humanApproval", routeAfterApproval, {
-    confirmPurchase: "confirmPurchase",
+    generateRfq: "generateRfq",
     [END]: END,
   })
+  .addEdge("generateRfq", "confirmPurchase")
   .addEdge("confirmPurchase", END);
 
 export async function buildProcurementGraph() {

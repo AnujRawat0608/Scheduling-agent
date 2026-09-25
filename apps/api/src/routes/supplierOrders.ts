@@ -63,6 +63,7 @@ supplierOrdersRouter.post("/supplier-orders", async (req, res) => {
     let taxInclusive = false;
     let subtotal: number | null = null;
     let taxAmount: number | null = null;
+    let shippingCost: number | null = null;
 
     if (productId && unitPrice != null) {
       const [product] = await db
@@ -70,6 +71,7 @@ supplierOrdersRouter.post("/supplier-orders", async (req, res) => {
           taxType: supplierOffers.taxType,
           taxRate: supplierOffers.taxRate,
           taxInclusive: supplierOffers.taxInclusive,
+          shippingCost: supplierOffers.shippingCost,
         })
         .from(supplierOffers)
         .where(eq(supplierOffers.id, productId))
@@ -79,6 +81,7 @@ supplierOrdersRouter.post("/supplier-orders", async (req, res) => {
         taxType = product.taxType;
         taxRate = product.taxRate !== null ? Number(product.taxRate) : null;
         taxInclusive = product.taxInclusive;
+        shippingCost = product.shippingCost ?? null;
 
         const computed = computeTax(unitPrice, quantity, taxRate, taxInclusive);
         subtotal = computed.subtotal;
@@ -86,25 +89,26 @@ supplierOrdersRouter.post("/supplier-orders", async (req, res) => {
       }
     }
 
-   const [order] = await db
-  .insert(supplierOrders)
-  .values({
-    supplierId,
-    productId: productId ?? null,
-    itemName,
-    unitPrice: unitPrice ?? null,
-    quantity,
-    deliveryAddress,
-    requesterName,
-    requesterEmail,
-    notes: notes ?? null,
-    taxType,
-    taxRate: taxRate !== null ? String(taxRate) : null,
-    taxInclusive,
-    subtotal,
-    taxAmount,
-  })
-  .returning();
+    const [order] = await db
+      .insert(supplierOrders)
+      .values({
+        supplierId,
+        productId: productId ?? null,
+        itemName,
+        unitPrice: unitPrice ?? null,
+        quantity,
+        deliveryAddress,
+        requesterName,
+        requesterEmail,
+        notes: notes ?? null,
+        taxType,
+        taxRate: taxRate !== null ? String(taxRate) : null,
+        taxInclusive,
+        subtotal,
+        taxAmount,
+        shippingCost,
+      })
+      .returning();
 
     res.status(201).json({ order });
   } catch (err) {
@@ -112,7 +116,6 @@ supplierOrdersRouter.post("/supplier-orders", async (req, res) => {
     res.status(500).json({ error: String((err as Error)?.message ?? err) });
   }
 });
-
 /**
  * GET /api/supplier-orders
  * Billing-facing: all orders, newest first. No auth — mirrors how

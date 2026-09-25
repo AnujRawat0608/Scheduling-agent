@@ -161,19 +161,13 @@ def ask(req: AskRequest):
 
 class ShipmentRiskRequest(BaseModel):
     supplier_region: str
-    destination_region: Optional[str] = None
+    destination_region: str  # now required
+    mode: Optional[str] = None
     order_id: Optional[str] = None
-
 
 @app.post("/procurement/route-risk")
 def procurement_route_risk(req: ShipmentRiskRequest):
-    """
-    Purpose-built endpoint for the procurement agent's "Use risk analysis"
-    toggle. Given a supplier region, returns the current risk status of the
-    chokepoints that shipment would transit, plus a plain-language
-    recommendation.
-    """
-    result = assess_shipment_risk(req.supplier_region, req.destination_region)
+    result = assess_shipment_risk(req.supplier_region, req.destination_region, req.mode)
     if req.order_id:
         result["order_id"] = req.order_id
     return result

@@ -21,6 +21,7 @@ export interface SupplierOrder extends SupplierOrderInput {
   taxInclusive: boolean;
   subtotal: number | null;
   taxAmount: number | null;
+  shippingCost: number | null;
 }
 
 async function parseErrorOr<T>(res: Response, fallback: string): Promise<T> {

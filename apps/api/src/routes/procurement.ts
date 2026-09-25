@@ -10,6 +10,12 @@ import type { ProcurementRequest } from "../procurement/state.js";
 export const procurementRouter = Router();
 const graphPromise = buildProcurementGraph();
 
+function summarizeItems(lineItems: { item: string }[]): string {
+  if (lineItems.length === 0) return "No items";
+  if (lineItems.length === 1) return lineItems[0].item;
+  return `${lineItems[0].item} +${lineItems.length - 1} more`;
+}
+
 procurementRouter.get("/procurement", async (_req, res) => {
   const tasks = await db
     .select()
@@ -22,11 +28,11 @@ procurementRouter.get("/procurement", async (_req, res) => {
 procurementRouter.post("/procurement", async (req, res) => {
   try {
     const { text, requesterEmail, requesterName, useRiskAnalysis } = req.body as {
-  text: string;
-  requesterEmail: string;
-  requesterName?: string;
-  useRiskAnalysis?: boolean;
-};
+      text: string;
+      requesterEmail: string;
+      requesterName?: string;
+      useRiskAnalysis?: boolean;
+    };
 
     if (!text || !requesterEmail) {
       return res.status(400).json({ error: "text and requesterEmail are required" });
@@ -34,13 +40,14 @@ procurementRouter.post("/procurement", async (req, res) => {
 
     const extracted = await extractProcurementRequest(text);
 
-    const request: ProcurementRequest = {
+       const request: ProcurementRequest = {
       requesterName: requesterName ?? requesterEmail,
       requesterEmail,
-      item: extracted.item,
-      quantity: extracted.quantity,
+      lineItems: extracted.lineItems.map((li) => ({
+        ...li,
+        specifications: li.specifications ?? undefined,
+      })),
       requiredBy: extracted.requiredBy ?? undefined,
-      specifications: extracted.specifications ?? undefined,
     };
 
     const threadId = randomUUID();
@@ -51,24 +58,24 @@ procurementRouter.post("/procurement", async (req, res) => {
       .values({
         threadId,
         requesterEmail,
-        item: request.item,
-        quantity: request.quantity,
+        itemsSummary: summarizeItems(request.lineItems),
+        lineItemCount: request.lineItems.length,
         status: "extracting",
         request,
       })
       .returning();
 
     const result = await graph.invoke(
-  { request, taskId: task.id, useRiskAnalysis: useRiskAnalysis ?? false },
-  { configurable: { thread_id: threadId } }
-);
+      { request, taskId: task.id, useRiskAnalysis: useRiskAnalysis ?? false },
+      { configurable: { thread_id: threadId } }
+    );
 
     await db
       .update(procurementTasks)
       .set({
         status: result.status,
-        recommendedSupplier: result.recommendedSupplier ?? null,
-        totalCost: result.recommendedSupplier?.totalCost ?? null,
+        recommendedPlan: result.recommendedPlan ?? null,
+        totalCost: result.recommendedPlan?.totalCost ?? null,
         updatedAt: new Date(),
       })
       .where(eq(procurementTasks.id, task.id));
@@ -106,7 +113,7 @@ procurementRouter.post("/procurement/:id/approve", async (req, res) => {
     if (!task) return res.status(404).json({ error: "not found" });
 
     const graph = await graphPromise;
-    const decision: { approved: true } | { approved: false; note: string } = req.body;
+    const decision: { approved: true; selectedPlanIndex?: number } | { approved: false; note: string } = req.body;
 
     const result = await graph.invoke(new Command({ resume: decision }), {
       configurable: { thread_id: task.threadId },

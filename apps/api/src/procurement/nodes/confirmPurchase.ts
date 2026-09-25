@@ -1,8 +1,21 @@
-import type { ProcurementStateType } from "../state.js";
+import type { ProcurementStateType, PurchaseConfirmation } from "../state.js";
 
 export async function confirmPurchase(state: ProcurementStateType) {
-  if (!state.recommendedSupplier) {
-    return { status: "failed" as const, failureReason: "No confirmed supplier" };
+  const { recommendedPlan } = state;
+
+  if (!recommendedPlan || recommendedPlan.legs.length === 0) {
+    return { status: "failed" as const, failureReason: "No confirmed supplier plan to purchase from." };
   }
-  return { status: "done" as const };
+
+  const confirmedAt = new Date().toISOString();
+
+  const purchaseConfirmations: PurchaseConfirmation[] = recommendedPlan.legs.map((leg) => ({
+    supplierName: leg.supplierName,
+    supplierId: leg.supplierId,
+    lineItems: leg.lineItems,
+    confirmedCost: leg.legCost,
+    confirmedAt,
+  }));
+
+  return { purchaseConfirmations, status: "done" as const };
 }

@@ -82,6 +82,7 @@ export const supplierOrders = pgTable("supplier_orders", {
   taxInclusive: boolean("tax_inclusive").notNull().default(false),
   subtotal: integer("subtotal"),   // unitPrice × quantity, tax excluded
   taxAmount: integer("tax_amount"), // computed once, at creation
+  shippingCost: integer("shipping_cost"),
 
 });
 

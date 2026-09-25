@@ -1,30 +1,66 @@
 import { Annotation } from "@langchain/langgraph";
 
-export interface ProcurementRequest {
-  requesterName: string;
-  requesterEmail: string;
+export interface LineItem {
   item: string;
   quantity: number;
-  requiredBy?: string; // ISO date
   specifications?: string;
 }
 
 export interface SupplierQuote {
   supplierName: string;
-  supplierId: string | null;       // links to suppliers table when the offer has a registered owner
-  supplierRegion: string | null;   // from suppliers.region — null for mock/unowned quotes
-  unitPrice: number; // in smallest reasonable unit, e.g. INR
+  supplierId: string | null;
+  supplierRegion: string | null;
+  unitPrice: number;
   quantityAvailable: number;
   leadTimeDays: number;
   shippingCost: number;
-  moq: number; // minimum order quantity
+  moq: number;
   respondedAt: string;
 }
 
 export interface QuoteScore extends SupplierQuote {
   totalCost: number;
-  score: number; // 0-1, higher is better
+  score: number;
   rationale: string;
+}
+
+export interface LineItemQuotes {
+  lineItem: LineItem;
+  quotes: SupplierQuote[];
+  scoredQuotes: QuoteScore[];
+  topQuotes: QuoteScore[];
+  hasMatch: boolean;
+}
+
+export interface FulfillmentLeg {
+  supplierName: string;
+  supplierId: string | null;
+  lineItems: LineItem[];
+  quotes: QuoteScore[];
+  legCost: number;
+}
+
+export interface FulfillmentPlan {
+  type: "single_supplier" | "split" | "partial";
+  legs: FulfillmentLeg[];
+  unmatchedItems: LineItem[];
+  totalCost: number;
+  rationale: string;
+}
+
+export interface PurchaseConfirmation {
+  supplierName: string;
+  supplierId: string | null;
+  lineItems: LineItem[];
+  confirmedCost: number;
+  confirmedAt: string;
+}
+
+export interface ProcurementRequest {
+  requesterName: string;
+  requesterEmail: string;
+  lineItems: LineItem[];
+  requiredBy?: string;
 }
 
 export type ProcurementStatus =
@@ -40,24 +76,29 @@ export type ProcurementStatus =
 export const ProcurementState = Annotation.Root({
   request: Annotation<ProcurementRequest>(),
 
-  rfqEmail: Annotation<string | null>({
+  rfqEmails: Annotation<Record<string, string>>({
     reducer: (_e, u) => u,
-    default: () => null,
+    default: () => ({}),
   }),
 
-  quotes: Annotation<SupplierQuote[]>({
+  lineItemQuotes: Annotation<LineItemQuotes[]>({
     reducer: (_e, u) => u,
     default: () => [],
   }),
 
-  scoredQuotes: Annotation<QuoteScore[]>({
+  recommendedPlan: Annotation<FulfillmentPlan | null>({
+    reducer: (_e, u) => u,
+    default: () => null,
+  }),
+
+  alternativePlans: Annotation<FulfillmentPlan[]>({
     reducer: (_e, u) => u,
     default: () => [],
   }),
 
-  recommendedSupplier: Annotation<QuoteScore | null>({
+  purchaseConfirmations: Annotation<PurchaseConfirmation[]>({
     reducer: (_e, u) => u,
-    default: () => null,
+    default: () => [],
   }),
 
   status: Annotation<ProcurementStatus>({
@@ -65,7 +106,7 @@ export const ProcurementState = Annotation.Root({
     default: () => "extracting",
   }),
 
-  approvalRequest: Annotation<{ question: string; recommendation: QuoteScore } | null>({
+  approvalRequest: Annotation<{ question: string; recommendation: FulfillmentPlan } | null>({
     reducer: (_e, u) => u,
     default: () => null,
   }),
@@ -98,5 +139,4 @@ export const ProcurementState = Annotation.Root({
 
 export type ProcurementStateType = typeof ProcurementState.State;
 
-/** Purchases at or above this total require explicit human approval. */
 export const APPROVAL_THRESHOLD = 100_000;

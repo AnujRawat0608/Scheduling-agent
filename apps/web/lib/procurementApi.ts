@@ -1,5 +1,11 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
 
+export interface LineItem {
+  item: string;
+  quantity: number;
+  specifications?: string;
+}
+
 export interface SupplierQuote {
   supplierName: string;
   supplierId: string | null;
@@ -18,19 +24,49 @@ export interface QuoteScore extends SupplierQuote {
   rationale: string;
 }
 
+export interface LineItemQuotes {
+  lineItem: LineItem;
+  quotes: SupplierQuote[];
+  scoredQuotes: QuoteScore[];
+  topQuotes: QuoteScore[];
+  hasMatch: boolean;
+}
+
+export interface FulfillmentLeg {
+  supplierName: string;
+  supplierId: string | null;
+  lineItems: LineItem[];
+  quotes: QuoteScore[];
+  legCost: number;
+}
+
+export interface FulfillmentPlan {
+  type: "single_supplier" | "split" | "partial";
+  legs: FulfillmentLeg[];
+  unmatchedItems: LineItem[];
+  totalCost: number;
+  rationale: string;
+}
+
+export interface PurchaseConfirmation {
+  supplierName: string;
+  supplierId: string | null;
+  lineItems: LineItem[];
+  confirmedCost: number;
+  confirmedAt: string;
+}
+
 export interface ProcurementRequest {
   requesterName: string;
   requesterEmail: string;
-  item: string;
-  quantity: number;
+  lineItems: LineItem[];
   requiredBy?: string;
-  specifications?: string;
 }
 
 export interface ProcurementTaskSummary {
   id: string;
-  item: string;
-  quantity: number;
+  itemsSummary: string;
+  lineItemCount: number;
   status: string;
   requesterEmail: string;
   createdAt: string;
@@ -49,21 +85,22 @@ export interface RiskAssessment {
 export interface ProcurementSnapshot {
   task: {
     id: string;
-    item: string;
-    quantity: number;
+    itemsSummary: string;
+    lineItemCount: number;
     status: string;
     createdAt: string;
   };
   state: {
     request: ProcurementRequest;
-    rfqEmail: string | null;
-    quotes: SupplierQuote[];
-    scoredQuotes: QuoteScore[];
-    recommendedSupplier: QuoteScore | null;
+    rfqEmails: Record<string, string>;
+    lineItemQuotes: LineItemQuotes[];
+    recommendedPlan: FulfillmentPlan | null;
+    alternativePlans: FulfillmentPlan[];
+    purchaseConfirmations: PurchaseConfirmation[];
     status: string;
     failureReason: string | null;
     riskCheckStatus?: "skipped" | "ok" | "unavailable";
-    riskAssessment?: RiskAssessment | null;
+    riskAssessment?: Record<string, RiskAssessment> | null;
   };
   next: string[];
 }
@@ -99,11 +136,14 @@ export async function fetchProcurementTask(id: string): Promise<ProcurementSnaps
   return res.json();
 }
 
-export async function approveProcurementTask(id: string, selectedSupplier?: string) {
+// selectedPlanIndex: omitted/0 = accept recommendedPlan, 1+ = pick that index from alternativePlans.
+// Kept here even though the main request page doesn't use it, since other
+// pages (or a future approval view) may still need to approve a task.
+export async function approveProcurementTask(id: string, selectedPlanIndex?: number) {
   const res = await fetch(`${API_BASE}/procurement/${id}/approve`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ approved: true, selectedSupplier }),
+    body: JSON.stringify({ approved: true, selectedPlanIndex }),
   });
   if (!res.ok) throw new Error(`Failed to approve task ${id}`);
   return res.json();

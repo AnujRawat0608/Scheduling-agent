@@ -39,10 +39,16 @@ function taxPaise(o: SupplierOrder): number {
   return Math.round(o.taxAmount * 100);
 }
 
+function shippingPaise(o: SupplierOrder): number {
+  if (o.shippingCost === null || o.shippingCost === undefined) return 0;
+  return Math.round(o.shippingCost * 100);
+}
+
+/** Subtotal + tax + shipping, or null when the price/quantity is missing. */
 function lineTotal(o: SupplierOrder): number | null {
   const sub = subtotalPaise(o);
   if (sub === null) return null;
-  return sub + taxPaise(o);
+  return sub + taxPaise(o) + shippingPaise(o);
 }
 
 function formatINR(paise: number) {
@@ -60,6 +66,7 @@ const sumPaise = (orders: SupplierOrder[]) => orders.reduce((sum, o) => sum + (l
 function OrderDetailModal({ order, onClose }: { order: SupplierOrder; onClose: () => void }) {
   const sub = subtotalPaise(order);
   const tax = taxPaise(order);
+  const shipping = shippingPaise(order);
   const total = lineTotal(order);
   const unit = toPaise(order.unitPrice);
 
@@ -154,6 +161,10 @@ function OrderDetailModal({ order, onClose }: { order: SupplierOrder; onClose: (
                   )}
                 </span>
                 <span className="tabular-nums">{formatINR(tax)}</span>
+              </div>
+              <div className="flex justify-between text-neutral-600">
+                <span>Shipping</span>
+                <span className="tabular-nums">{shipping > 0 ? formatINR(shipping) : "Free"}</span>
               </div>
               <div className="flex justify-between border-t border-neutral-200 pt-2 font-semibold text-neutral-900">
                 <span>Total</span>
