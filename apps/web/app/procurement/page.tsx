@@ -55,7 +55,7 @@ export default function ProcurementListPage() {
           >
             <div>
               <div className="font-medium text-neutral-900">
-                {task.quantity}x {task.item}
+                {task.itemsSummary}
               </div>
               <div className="text-xs text-neutral-500">
                 {format(new Date(task.createdAt), "MMM d, h:mm a")}
