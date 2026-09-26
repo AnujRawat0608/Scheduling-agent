@@ -7,7 +7,9 @@ import {
   Geographies,
   Geography,
   Marker,
+  Line,
 } from "react-simple-maps";
+import { geoCentroid } from "d3-geo";
 import { fetchChokepointStatuses, type ChokepointStatus } from "../lib/riskAgentApi";
 
 const GEO_URL = "https://unpkg.com/world-atlas@2/countries-110m.json";
@@ -55,37 +57,76 @@ export default function WorldMapPicker({
           style={{ width: "100%", height: "auto" }}
         >
           <Geographies geography={GEO_URL}>
-            {({ geographies }) =>
-              geographies.map((geo) => {
-                const props = geo.properties as GeoProperties;
-                const name = props.name;
-                const isOrigin = name === originCountry;
-                const isDestination = name === destCountry;
-                const isHovered = name === hoveredCountry;
+            {({ geographies }) => {
+              // Look up the two picked features once per render so we can
+              // draw a route line between their centroids.
+              const originGeo = originCountry
+                ? geographies.find((g) => (g.properties as GeoProperties).name === originCountry)
+                : undefined;
+              const destGeo = destCountry
+                ? geographies.find((g) => (g.properties as GeoProperties).name === destCountry)
+                : undefined;
 
-                let fill = "#a3a3a3";
-                if (isOrigin) fill = "#3d6bff";
-                else if (isDestination) fill = "#e11d48";
-                else if (isHovered) fill = "#94a3b8";
+              const originCoords = originGeo ? geoCentroid(originGeo) : undefined;
+              const destCoords = destGeo ? geoCentroid(destGeo) : undefined;
 
-                return (
-                  <Geography
-                    key={geo.rsmKey}
-                    geography={geo}
-                    onMouseEnter={() => setHoveredCountry(name)}
-                    onMouseLeave={() => setHoveredCountry(null)}
-                    onClick={() => onSelectCountry(pickMode, name)}
-                    style={{
-                      fill,
-                      stroke: "#fff",
-                      strokeWidth: 0.5,
-                      outline: "none",
-                      cursor: "pointer",
-                    }}
-                  />
-                );
-              })
-            }
+              return (
+                <>
+                  {geographies.map((geo) => {
+                    const props = geo.properties as GeoProperties;
+                    const name = props.name;
+                    const isOrigin = name === originCountry;
+                    const isDestination = name === destCountry;
+                    const isHovered = name === hoveredCountry;
+
+                    let fill = "#a3a3a3";
+                    if (isOrigin) fill = "#3d6bff";
+                    else if (isDestination) fill = "#e11d48";
+                    else if (isHovered) fill = "#94a3b8";
+
+                    return (
+                      <Geography
+                        key={geo.rsmKey}
+                        geography={geo}
+                        onMouseEnter={() => setHoveredCountry(name)}
+                        onMouseLeave={() => setHoveredCountry(null)}
+                        onClick={() => onSelectCountry(pickMode, name)}
+                        style={{
+                          fill,
+                          stroke: "#fff",
+                          strokeWidth: 0.5,
+                          outline: "none",
+                          cursor: "pointer",
+                        }}
+                      />
+                    );
+                  })}
+
+                  {originCoords && destCoords && (
+                    <Line
+                      from={originCoords}
+                      to={destCoords}
+                      stroke="#3d6bff"
+                      strokeWidth={1.5}
+                      strokeDasharray="4 3"
+                      strokeLinecap="round"
+                    />
+                  )}
+
+                  {originCoords && (
+                    <Marker coordinates={originCoords}>
+                      <circle r={5} fill="#3d6bff" stroke="#fff" strokeWidth={1.5} />
+                    </Marker>
+                  )}
+
+                  {destCoords && (
+                    <Marker coordinates={destCoords}>
+                      <circle r={5} fill="#e11d48" stroke="#fff" strokeWidth={1.5} />
+                    </Marker>
+                  )}
+                </>
+              );
+            }}
           </Geographies>
 
           {showRisk &&

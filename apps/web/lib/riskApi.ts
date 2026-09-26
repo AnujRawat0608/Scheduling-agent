@@ -1,43 +1,74 @@
-export type ChokepointRisk = {
+/**
+ * Client for the risk agent's generic route risk endpoint.
+ *
+ * Calls POST /route-risk on the FastAPI backend with an origin and
+ * destination country, and returns a risk breakdown across every viable
+ * freight mode (sea/air/road/rail). This client — and the endpoint behind
+ * it — knows nothing about suppliers, orders, or pricing; it's a thin
+ * wrapper around a generic origin->destination lookup.
+ */
+
+const RISK_API_BASE_URL = process.env.NEXT_PUBLIC_RISK_API_URL ?? "http://localhost:8000";
+
+export type RiskStatus = "green" | "yellow" | "red" | "unknown";
+export type FreightMode = "sea" | "air" | "road" | "rail";
+
+export type Chokepoint = {
   name: string;
+  region: string | null;
   score: number | null;
-  status: "green" | "yellow" | "red" | null;
+  status: RiskStatus;
   computed_at: string | null;
 };
 
-export type RouteRiskEvent = {
+export type DrivingEvent = {
   headline: string;
-  summary: string;
+  summary: string | null;
   severity: number;
+  confidence: number;
   event_time: string;
   chokepoint_name: string;
 };
 
-export type RouteRiskAssessment = {
-  supplier_region: string;
-  destination_region?: string | null;
-  known_route: boolean;
-  overall_status: "green" | "yellow" | "red" | "unknown";
-  chokepoints: ChokepointRisk[];
-  driving_events?: RouteRiskEvent[];
-  recommendation: string;
-  message?: string;
+// Flat shape (rather than a discriminated union on `viable`) deliberately:
+// it avoids relying on TS control-flow narrowing behaving a particular way
+// across every tsconfig/editor setup. All fields besides mode/viable are
+// optional and only present when viable is true — check for their presence
+// with `?? fallback` rather than assuming the union narrowed.
+export type ModeAssessment = {
+  mode: FreightMode;
+  viable: boolean;
+  reason?: string;
+  chokepoints?: Chokepoint[];
+  status?: RiskStatus;
+  score?: number | null;
+  driving_events?: DrivingEvent[];
+  summary?: string;
 };
 
-const RISK_AGENT_URL = process.env.NEXT_PUBLIC_RISK_AGENT_URL ?? "http://localhost:8001";
+export type RouteRiskResponse = {
+  origin: string;
+  destination: string;
+  modes: ModeAssessment[];
+  disclaimer: string;
+};
 
 export async function assessRouteRisk(
-  supplierRegion: string,
-  destinationRegion?: string
-): Promise<RouteRiskAssessment> {
-  const res = await fetch(`${RISK_AGENT_URL}/procurement/route-risk`, {
+  originCountry: string,
+  destinationCountry: string
+): Promise<RouteRiskResponse> {
+  const res = await fetch(`${RISK_API_BASE_URL}/route-risk`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      supplier_region: supplierRegion,
-      destination_region: destinationRegion || undefined,
+      origin_country: originCountry,
+      destination_country: destinationCountry,
     }),
   });
-  if (!res.ok) throw new Error(`Risk check failed (${res.status})`);
+
+  if (!res.ok) {
+    throw new Error(`Route risk request failed: ${res.status}`);
+  }
+
   return res.json();
 }
