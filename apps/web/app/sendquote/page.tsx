@@ -8,7 +8,7 @@ import {
   fetchSuppliers,
   saveQuote,
   type QuoteLineItem,
-} from "../../lib/quotesApi";
+} from "../../lib/quotesAPI";
 
 /* ---------- Money helpers (paise-based, same pattern as billing) ---------- */
 function toPaise(value: number): number {
