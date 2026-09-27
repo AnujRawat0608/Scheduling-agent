@@ -10,6 +10,7 @@ import {
   Mail,
   Route,
   Boxes,
+  Send,
   Receipt,
 } from "lucide-react";
 
@@ -50,13 +51,23 @@ const apps: DockApp[] = [
     href: "/supply-chain",
     isActive: (p) => !!p?.startsWith("/supply-chain"),
   },
-  {
-    id: "mail",
-    label: "Mail",
-    icon: <Mail size={20} strokeWidth={2} />,
-    href: "/mail",
-    isActive: (p) => !!p?.startsWith("/mail"),
-  },
+    {
+      id: "mail",
+      label: "Mail",
+      icon: <Mail size={20} strokeWidth={2} />,
+      href: "/mail",
+      isActive: (p) => !!p?.startsWith("/mail"),
+    },
+
+   {
+  id: "sendQuote",
+  label: "Send Quotes",
+  icon: <Send size={20} strokeWidth={2} />,
+  href: "/sendquote",
+  isActive: (p) => !!p?.startsWith("/sendquote"),
+},
+
+
   {
     id: "routing",
     label: "Routing",
