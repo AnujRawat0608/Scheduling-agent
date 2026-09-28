@@ -1,6 +1,27 @@
+export type VerificationStatus = "pending" | "verified" | "rejected";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
+
 export type Supplier = {
   id: string;
-  name: string;
+  businessName: string;
+  contactName: string | null;
+  email: string;
+  phone: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  region: string | null;
+  pincode: string | null;
+  gstNumber: string | null;
+  gstVerified: boolean;
+  verificationStatus: VerificationStatus;
+  businessType: string | null;
+  yearEstablished: number | null;
+  mainProducts: string | null;
+  /** Free-text field from the supplier's profile — not a checklist, just what they've self-reported. */
+  certifications: string | null;
+  averageLeadTimeDays: number | null;
 };
 
 export type QuoteLineItem = {
@@ -64,7 +85,7 @@ export type Quote = QuoteDraft & {
 /* ---------- Suppliers ---------- */
 
 export async function fetchSuppliers(): Promise<Supplier[]> {
-  const res = await fetch("/api/suppliers");
+  const res = await fetch(`${API_BASE}/suppliers`);
   if (!res.ok) throw new Error("Couldn't load suppliers.");
   const data = await res.json();
   return data.suppliers;
@@ -73,7 +94,7 @@ export async function fetchSuppliers(): Promise<Supplier[]> {
 /* ---------- Quotes ---------- */
 
 export async function saveQuote(payload: QuoteDraft & { status: QuoteStatus }): Promise<Quote> {
-  const res = await fetch("/api/quotes", {
+  const res = await fetch(`${API_BASE}/quotes`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),

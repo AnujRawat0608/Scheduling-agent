@@ -103,10 +103,11 @@ export default function NewQuotePage() {
   // Value-added / misc
   const [notes, setNotes] = useState("");
 
-  const supplierName = useMemo(
-    () => suppliers?.find((s) => s.id === supplierId)?.name ?? "",
+  const selectedSupplier = useMemo(
+    () => suppliers?.find((s) => s.id === supplierId) ?? null,
     [suppliers, supplierId]
   );
+  const supplierName = selectedSupplier?.businessName ?? "";
 
   function updateLineItem(id: string, patch: Partial<QuoteLineItem>) {
     setLineItems((items) => items.map((it) => (it.id === id ? { ...it, ...patch } : it)));
@@ -218,8 +219,8 @@ export default function NewQuotePage() {
         <div className="rounded-xl border border-neutral-200 bg-white p-6">
           <h2 className="mb-4 text-base font-semibold text-neutral-900">RFQ details</h2>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div>
-              <label className="mb-1 block text-xs text-neutral-500">Supplier name</label>
+            <div className="sm:col-span-3">
+              <label className="mb-1 block text-xs text-neutral-500">Supplier</label>
               <select
                 value={supplierId}
                 onChange={(e) => setSupplierId(e.target.value)}
@@ -228,10 +229,83 @@ export default function NewQuotePage() {
                 <option value="">{suppliersLoading ? "Loading…" : "Select a supplier"}</option>
                 {suppliers?.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {s.name}
+                    {s.businessName}
+                    {s.verificationStatus === "verified" ? " — Verified" : ""}
+                    {s.city ? ` (${s.city}${s.state ? `, ${s.state}` : ""})` : ""}
                   </option>
                 ))}
               </select>
+
+              {selectedSupplier && (
+                <div className="mt-3 rounded-lg border border-neutral-200 bg-neutral-50 p-4">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-sm font-medium text-neutral-900">
+                      {selectedSupplier.businessName}
+                    </span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                        selectedSupplier.verificationStatus === "verified"
+                          ? "bg-green-100 text-green-700"
+                          : selectedSupplier.verificationStatus === "rejected"
+                          ? "bg-red-100 text-red-700"
+                          : "bg-amber-100 text-amber-700"
+                      }`}
+                    >
+                      {selectedSupplier.verificationStatus === "verified"
+                        ? "Verified"
+                        : selectedSupplier.verificationStatus === "rejected"
+                        ? "Rejected"
+                        : "Pending verification"}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-x-6 gap-y-1 text-xs text-neutral-600 sm:grid-cols-2">
+                    {selectedSupplier.contactName && (
+                      <div>Contact: <span className="text-neutral-900">{selectedSupplier.contactName}</span></div>
+                    )}
+                    <div>Email: <span className="text-neutral-900">{selectedSupplier.email}</span></div>
+                    {selectedSupplier.phone && (
+                      <div>Phone: <span className="text-neutral-900">{selectedSupplier.phone}</span></div>
+                    )}
+                    {(selectedSupplier.city || selectedSupplier.state) && (
+                      <div>
+                        Location:{" "}
+                        <span className="text-neutral-900">
+                          {[selectedSupplier.city, selectedSupplier.state, selectedSupplier.region]
+                            .filter(Boolean)
+                            .join(", ")}
+                        </span>
+                      </div>
+                    )}
+                    {selectedSupplier.gstNumber && (
+                      <div>GST: <span className="text-neutral-900">{selectedSupplier.gstNumber}</span></div>
+                    )}
+                    {selectedSupplier.averageLeadTimeDays != null && (
+                      <div>
+                        Typical lead time:{" "}
+                        <span className="text-neutral-900">{selectedSupplier.averageLeadTimeDays} days</span>
+                      </div>
+                    )}
+                    {selectedSupplier.mainProducts && (
+                      <div className="sm:col-span-2">
+                        Main products: <span className="text-neutral-900">{selectedSupplier.mainProducts}</span>
+                      </div>
+                    )}
+                    {selectedSupplier.certifications && (
+                      <div className="sm:col-span-2">
+                        Certifications on file:{" "}
+                        <span className="text-neutral-900">{selectedSupplier.certifications}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {selectedSupplier.verificationStatus !== "verified" && (
+                    <p className="mt-2 text-xs text-amber-700">
+                      This supplier hasn&apos;t completed verification yet.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
             <div>
               <label className="mb-1 block text-xs text-neutral-500">Due date (response by)</label>

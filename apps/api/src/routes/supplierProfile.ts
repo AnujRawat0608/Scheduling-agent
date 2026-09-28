@@ -22,6 +22,17 @@ function publicSupplier(row: typeof suppliers.$inferSelect) {
  * all; "only visible to logged-in buyers" can't be enforced until buyer
  * accounts exist. Flagging this here so it isn't a silent gap.
  */
+/**
+ * GET /api/suppliers
+ * List of registered suppliers for procurers to select from (e.g. the RFQ
+ * "Send RFQ" supplier dropdown). Same no-auth caveat as GET /:id — there's
+ * no buyer/procurement login system yet, so this is open for now.
+ */
+supplierProfileRouter.get("/", async (_req, res) => {
+  const rows = await db.select().from(suppliers);
+  res.json({ suppliers: rows.map(publicSupplier) });
+});
+
 supplierProfileRouter.get("/:id", async (req, res) => {
   const [supplier] = await db
     .select()

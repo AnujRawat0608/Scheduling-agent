@@ -40,6 +40,7 @@ app.use("/api/suppliers", supplierProfileRouter);
 app.use("/api", supplierOrdersRouter);
 app.use("/api/admin-auth", adminAuthRouter);
 app.use("/api/admin/suppliers", adminSuppliersRouter);
+app.use("/api/suppliers", supplierProfileRouter);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
