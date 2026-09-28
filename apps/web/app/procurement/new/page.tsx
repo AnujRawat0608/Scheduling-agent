@@ -21,8 +21,8 @@ const STATUS_STYLES: Record<string, string> = {
   extracting: "bg-neutral-100 text-neutral-600",
   sourcing: "bg-neutral-100 text-neutral-600",
   comparing: "bg-neutral-100 text-neutral-600",
-  awaiting_approval: "bg-blue-100 text-blue-700",
-  purchasing: "bg-blue-100 text-blue-700",
+  awaiting_approval: "bg-[#EA580C]/10 text-[#EA580C]",
+  purchasing: "bg-[#EA580C]/10 text-[#EA580C]",
   done: "bg-green-100 text-green-700",
   failed: "bg-red-100 text-red-700",
 };
@@ -112,7 +112,7 @@ export default function NewProcurementPage() {
             type="checkbox"
             checked={useRiskAnalysis}
             onChange={(e) => setUseRiskAnalysis(e.target.checked)}
-            className="h-3.5 w-3.5 rounded border-neutral-300 text-blue-600 focus:ring-blue-500"
+            className="h-3.5 w-3.5 rounded border-neutral-300 text-[#EA580C] focus:ring-[#EA580C]"
           />
           Use supply chain risk analysis
         </label>
@@ -120,7 +120,7 @@ export default function NewProcurementPage() {
         {mode === "type" && (
           <button
             onClick={() => setText(EXAMPLE_PROMPT)}
-            className="block w-full rounded-xl bg-blue-50 p-4 text-left transition hover:bg-blue-100"
+            className="block w-full rounded-xl bg-[#EA580C]/10 p-4 text-left transition hover:bg-[#EA580C]/20"
           >
             <p className="text-[15px] leading-relaxed text-neutral-800">
               Here is the part, the quantity, and the date it has to land.
@@ -184,7 +184,7 @@ export default function NewProcurementPage() {
           <button
             onClick={handleSubmit}
             disabled={create.isPending || !canSubmit}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white transition hover:bg-blue-700 disabled:opacity-40"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#EA580C] text-white transition hover:bg-[#EA580C]/90 disabled:opacity-40"
             aria-label="Send"
           >
             <ArrowUp size={16} />
@@ -308,7 +308,7 @@ export default function NewProcurementPage() {
                                    href={`/suppliers/${q.supplierId}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="text-[#3d6bff] hover:underline"
+                                    className="text-[#EA580C] hover:underline"
                                   >
                                     {q.supplierName}
                                   </a>
@@ -414,7 +414,7 @@ function SourceTab({
       title={disabled ? "Not connected yet" : undefined}
       className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
         active
-          ? "border-blue-600 text-blue-600"
+          ? "border-[#EA580C] text-[#EA580C]"
           : disabled
             ? "cursor-not-allowed border-neutral-200 text-neutral-300"
             : "border-neutral-200 text-neutral-500 hover:border-neutral-300"
@@ -449,12 +449,12 @@ function ProcessTracker({ currentIndex }: { currentIndex: number }) {
                   done
                     ? "border-green-500 bg-green-500 text-white scale-100"
                     : active
-                      ? "border-blue-600 bg-white text-blue-600 scale-110"
+                      ? "border-[#EA580C] bg-white text-[#EA580C] scale-110"
                       : "border-neutral-200 bg-white text-neutral-300 scale-100"
                 }`}
               >
                 {active && (
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-40" />
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#EA580C]/60 opacity-40" />
                 )}
                 <span className={`transition-all duration-300 ${done ? "animate-[pop_0.3s_ease-out]" : ""}`}>
                   {done ? <Check size={12} strokeWidth={3} /> : i + 1}

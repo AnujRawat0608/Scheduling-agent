@@ -21,6 +21,7 @@ import {
   MoreHorizontal,
   ChevronLeft,
   ChevronRight,
+  Network,
 } from "lucide-react";
 import { fetchCurrentSupplier, type Supplier } from "../../lib/supplierAuthApi";
 import {
@@ -175,6 +176,81 @@ function specsToObject(
 
 const ROWS_PER_PAGE_OPTIONS = [10, 25, 50];
 
+/* ---------- Signed-out hero ---------- */
+function SupplyChainHero() {
+  return (
+    <div className="space-y-10">
+      <div className="rounded-2xl border border-neutral-200 bg-white px-8 py-16 text-center sm:px-16">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-[#eef2ff] px-3 py-1 text-xs font-medium text-[#3d6bff]">
+          <Network size={13} />
+          Supply chain network
+        </span>
+        <h1 className="mx-auto mt-4 max-w-xl text-3xl font-bold text-neutral-900 sm:text-4xl">
+          One catalog for every supplier offer in your network
+        </h1>
+        <p className="mx-auto mt-3 max-w-md text-sm text-neutral-500">
+          Suppliers list what they can ship, when, and at what price. Procurement teams filter,
+          compare, and get AI-matched to the best offer — all in one place.
+        </p>
+        <div className="mt-7 flex items-center justify-center gap-3">
+          <Link
+            href="/suppliers/register"
+            className="flex items-center gap-1.5 rounded-full bg-[#3d6bff] px-5 py-2.5 text-sm font-medium text-white transition hover:bg-[#3d6bff]/90"
+          >
+            <UserPlus size={15} />
+            Register as a supplier
+          </Link>
+          <Link
+            href="/suppliers/login"
+            className="flex items-center gap-1.5 rounded-full border border-neutral-200 bg-white px-5 py-2.5 text-sm font-medium text-neutral-700 transition hover:border-neutral-300"
+          >
+            <LogIn size={15} />
+            Log in
+          </Link>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="rounded-2xl border border-neutral-200 bg-white p-6">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#eef2ff] text-[#3d6bff]">
+            <Boxes size={17} />
+          </span>
+          <h3 className="mt-3 text-sm font-semibold text-neutral-900">List your offers</h3>
+          <p className="mt-1 text-xs text-neutral-500">
+            Add products with pricing, lead time, stock, and specs so buyers can find you.
+          </p>
+        </div>
+        <div className="rounded-2xl border border-neutral-200 bg-white p-6">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#eef2ff] text-[#3d6bff]">
+            <Timer size={17} />
+          </span>
+          <h3 className="mt-3 text-sm font-semibold text-neutral-900">Keep buyers updated</h3>
+          <p className="mt-1 text-xs text-neutral-500">
+            Update stock, lead time, and dispatch status as things change on your end.
+          </p>
+        </div>
+        <div className="rounded-2xl border border-neutral-200 bg-white p-6">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#eef2ff] text-[#3d6bff]">
+            <Sparkles size={17} />
+          </span>
+          <h3 className="mt-3 text-sm font-semibold text-neutral-900">Get AI-matched</h3>
+          <p className="mt-1 text-xs text-neutral-500">
+            Well-specified offers get matched to procurement requests automatically.
+          </p>
+        </div>
+      </div>
+
+      <p className="text-center text-xs text-neutral-400">
+        Already listed with us?{" "}
+        <Link href="/suppliers/login" className="font-medium text-[#3d6bff] hover:underline">
+          Log in
+        </Link>{" "}
+        to manage your offers.
+      </p>
+    </div>
+  );
+}
+
 export default function SupplyChainPage() {
   const queryClient = useQueryClient();
 
@@ -197,10 +273,11 @@ export default function SupplyChainPage() {
     { key: "", value: "" },
   ]);
   const [taxType, setTaxType] = useState("None");
-const [taxRate, setTaxRate] = useState("0");
-const [taxInclusive, setTaxInclusive] = useState(false);
+  const [taxRate, setTaxRate] = useState("0");
+  const [taxInclusive, setTaxInclusive] = useState(false);
 
   const [loggedInSupplier, setLoggedInSupplier] = useState<Supplier | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
     fetchCurrentSupplier()
@@ -212,7 +289,8 @@ const [taxInclusive, setTaxInclusive] = useState(false);
       })
       .catch(() => {
         // Not logged in — leave form as anonymous entry.
-      });
+      })
+      .finally(() => setAuthChecked(true));
   }, []);
 
   // ---- Toolbar / filter state ----
@@ -227,9 +305,12 @@ const [taxInclusive, setTaxInclusive] = useState(false);
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(25);
 
+  // Only fetch the catalog once we know someone's logged in — no point
+  // loading supplier data for a visitor who's about to see the hero.
   const { data, isLoading, error } = useQuery({
     queryKey: ["supply-chain"],
     queryFn: listSupplyChainOffers,
+    enabled: authChecked && !!loggedInSupplier,
   });
 
   const offers = (data ?? []) as SupplyChainOffer[];
@@ -251,8 +332,6 @@ const [taxInclusive, setTaxInclusive] = useState(false);
       setQuantityAvailable("");
       setDispatchStatus("Dispatch ready");
       setAiScore("");
-      setSpecRows([{ key: "", value: "" }]);
-      setShowAddModal(false);
       setSpecRows([{ key: "", value: "" }]);
       setTaxType("None");
       setTaxRate("0");
@@ -281,28 +360,28 @@ const [taxInclusive, setTaxInclusive] = useState(false);
   }
 
   function handleSubmit(e: React.FormEvent) {
-  e.preventDefault();
-  create.mutate({
-    item,
-    description,
-    category,
-    supplierName,
-    supplierType,
-    unitPrice: Number(unitPrice),
-    unitOfMeasure,
-    leadTimeDays: Number(leadTimeDays),
-    shippingCost: Number(shippingCost),
-    moq: Number(moq),
-    quantityAvailable: Number(quantityAvailable),
-    dispatchStatus,
-    aiScore: aiScore ? Number(aiScore) : undefined,
-    specs: specsToObject(specRows),
-    taxType,
-    taxRate: Number(taxRate),
-    taxInclusive,
-    supplierId: loggedInSupplier?.id,
-  });
-}
+    e.preventDefault();
+    create.mutate({
+      item,
+      description,
+      category,
+      supplierName,
+      supplierType,
+      unitPrice: Number(unitPrice),
+      unitOfMeasure,
+      leadTimeDays: Number(leadTimeDays),
+      shippingCost: Number(shippingCost),
+      moq: Number(moq),
+      quantityAvailable: Number(quantityAvailable),
+      dispatchStatus,
+      aiScore: aiScore ? Number(aiScore) : undefined,
+      specs: specsToObject(specRows),
+      taxType,
+      taxRate: Number(taxRate),
+      taxInclusive,
+      supplierId: loggedInSupplier?.id,
+    });
+  }
 
   const categories = useMemo(() => {
     const set = new Set(offers.map((o) => o.category).filter(Boolean) as string[]);
@@ -401,6 +480,19 @@ const [taxInclusive, setTaxInclusive] = useState(false);
     };
   }, [offers, categories]);
 
+  // Not logged in (or we haven't confirmed yet) — show the hero, not the catalog.
+  if (!authChecked) {
+    return <main className="mx-auto max-w-6xl px-6 py-16" />;
+  }
+
+  if (!loggedInSupplier) {
+    return (
+      <main className="mx-auto max-w-6xl px-6 py-16">
+        <SupplyChainHero />
+      </main>
+    );
+  }
+
   return (
     <main className="mx-auto max-w-6xl px-6 py-16 space-y-6">
       {/* Header */}
@@ -417,32 +509,13 @@ const [taxInclusive, setTaxInclusive] = useState(false);
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          {loggedInSupplier ? (
-            <Link
-              href="/suppliers/dashboard"
-              className="flex items-center gap-1.5 rounded-full border border-neutral-200 bg-white px-3.5 py-2 text-xs font-medium text-neutral-700 transition hover:border-neutral-300"
-            >
-              <LayoutDashboard size={14} />
-              {loggedInSupplier.businessName}
-            </Link>
-          ) : (
-            <>
-              <Link
-                href="/suppliers/login"
-                className="flex items-center gap-1.5 rounded-full border border-neutral-200 bg-white px-3.5 py-2 text-xs font-medium text-neutral-700 transition hover:border-neutral-300"
-              >
-                <LogIn size={14} />
-                Log in
-              </Link>
-              <Link
-                href="/suppliers/register"
-                className="flex items-center gap-1.5 rounded-full border border-neutral-200 bg-white px-3.5 py-2 text-xs font-medium text-neutral-700 transition hover:border-neutral-300"
-              >
-                <UserPlus size={14} />
-                Register
-              </Link>
-            </>
-          )}
+          <Link
+            href="/suppliers/dashboard"
+            className="flex items-center gap-1.5 rounded-full border border-neutral-200 bg-white px-3.5 py-2 text-xs font-medium text-neutral-700 transition hover:border-neutral-300"
+          >
+            <LayoutDashboard size={14} />
+            {loggedInSupplier.businessName}
+          </Link>
 
           <button
             type="button"
@@ -538,12 +611,10 @@ const [taxInclusive, setTaxInclusive] = useState(false);
               <Toggle checked={inStockOnly} onChange={setInStockOnly} />
             </label>
 
-            {loggedInSupplier && (
-              <label className="flex items-center gap-2 rounded-lg border border-neutral-200 px-3 py-2 text-sm text-neutral-600 whitespace-nowrap">
-                My offers only
-                <Toggle checked={myOffersOnly} onChange={setMyOffersOnly} />
-              </label>
-            )}
+            <label className="flex items-center gap-2 rounded-lg border border-neutral-200 px-3 py-2 text-sm text-neutral-600 whitespace-nowrap">
+              My offers only
+              <Toggle checked={myOffersOnly} onChange={setMyOffersOnly} />
+            </label>
 
             <div className="relative">
               <button
@@ -643,14 +714,14 @@ const [taxInclusive, setTaxInclusive] = useState(false);
                           )}
                         </td>
                         <td className="px-6 py-3">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-neutral-900">{o.supplierName}</span>
-                              <VerifiedBadge status={o.verificationStatus} />
-                            </div>
-                            {o.supplierType && (
-                              <div className="text-xs text-neutral-400">{o.supplierType}</div>
-                            )}
-                          </td>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-neutral-900">{o.supplierName}</span>
+                            <VerifiedBadge status={o.verificationStatus} />
+                          </div>
+                          {o.supplierType && (
+                            <div className="text-xs text-neutral-400">{o.supplierType}</div>
+                          )}
+                        </td>
                         <td className="px-6 py-3">
                           <div className="text-neutral-900">
                             {formatUSD(o.unitPrice)}
@@ -887,50 +958,50 @@ const [taxInclusive, setTaxInclusive] = useState(false);
               </Field>
 
               <Field label="Unit of measure">
-  <select
-    value={unitOfMeasure}
-    onChange={(e) => setUnitOfMeasure(e.target.value)}
-    className={inputClass}
-  >
-    {UNIT_OF_MEASURE_OPTIONS.map((opt) => (
-      <option key={opt.value} value={opt.value}>
-        {opt.label}
-      </option>
-    ))}
-  </select>
-</Field>
+                <select
+                  value={unitOfMeasure}
+                  onChange={(e) => setUnitOfMeasure(e.target.value)}
+                  className={inputClass}
+                >
+                  {UNIT_OF_MEASURE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
 
-<Field label="Tax type">
-  <select
-    value={taxType}
-    onChange={(e) => setTaxType(e.target.value)}
-    className={inputClass}
-  >
-    <option>None</option>
-    <option>GST</option>
-    <option>VAT</option>
-    <option>Sales Tax</option>
-    <option>Other</option>
-  </select>
-</Field>
+              <Field label="Tax type">
+                <select
+                  value={taxType}
+                  onChange={(e) => setTaxType(e.target.value)}
+                  className={inputClass}
+                >
+                  <option>None</option>
+                  <option>GST</option>
+                  <option>VAT</option>
+                  <option>Sales Tax</option>
+                  <option>Other</option>
+                </select>
+              </Field>
 
-<Field label="Tax rate (%)">
-  <input
-    type="number"
-    min="0"
-    step="0.01"
-    value={taxRate}
-    onChange={(e) => setTaxRate(e.target.value)}
-    className={inputClass}
-  />
-</Field>
+              <Field label="Tax rate (%)">
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={taxRate}
+                  onChange={(e) => setTaxRate(e.target.value)}
+                  className={inputClass}
+                />
+              </Field>
 
-<Field label="Price includes tax" span2>
-  <label className="flex items-center gap-2 text-sm text-neutral-600">
-    <Toggle checked={taxInclusive} onChange={setTaxInclusive} />
-    {taxInclusive ? "Yes — unit price already includes tax" : "No — tax is added on top"}
-  </label>
-</Field>
+              <Field label="Price includes tax" span2>
+                <label className="flex items-center gap-2 text-sm text-neutral-600">
+                  <Toggle checked={taxInclusive} onChange={setTaxInclusive} />
+                  {taxInclusive ? "Yes — unit price already includes tax" : "No — tax is added on top"}
+                </label>
+              </Field>
 
               <Field label="Shipping cost ($)">
                 <input

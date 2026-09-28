@@ -61,7 +61,7 @@ const apps: DockApp[] = [
 
    {
   id: "sendQuote",
-  label: "Send Quotes",
+  label: "Send RFQ",
   icon: <Send size={20} strokeWidth={2} />,
   href: "/sendquote",
   isActive: (p) => !!p?.startsWith("/sendquote"),

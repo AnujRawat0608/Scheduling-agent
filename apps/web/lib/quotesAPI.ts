@@ -6,9 +6,11 @@ export type Supplier = {
 export type QuoteLineItem = {
   id: string;
   productName: string;
+  /** Tolerance, grade, or standard reference for this item. */
+  specification?: string;
+  /** Unit of measure — one of "Pcs" | "Box" | "Kg" | "Litre" | "Lot". */
+  unit?: string;
   quantity: number;
-  /** Rupees, not paise — converted at the API boundary. */
-  rate: number;
 };
 
 export type QuoteDraft = {
@@ -16,11 +18,38 @@ export type QuoteDraft = {
   supplierName: string;
   dueDate: string;
   referenceNumber: string;
+  /** ISO 4217 currency code the supplier should quote in, e.g. "INR", "USD". */
+  currency: string;
+  /** ISO date string — quote requested to remain valid up to and including this date. */
+  priceValidUntil: string;
   lineItems: QuoteLineItem[];
-  discountPercent: number;
-  taxPercent: number;
-  /** Rupees, not paise. */
-  shippingCost: number;
+
+  /* Technical specification & scope */
+  scopeNotes: string;
+  assumptionsExclusions: string;
+
+  /* Payment terms */
+  paymentTerms: string;
+
+  /* Delivery & logistics */
+  deliveryAddress: string;
+  /** ISO date string — hard target date goods must arrive. */
+  requiredDeliveryDate: string;
+  incoterm: string;
+  packagingRequirements: string;
+
+  /* Quality, warranty & compliance */
+  warrantyPeriod: string;
+  qualityRequirements: string;
+  requiredCertifications: string;
+  insuranceRequired: boolean;
+  /**
+   * Filenames of attached technical documents (CAD, drawings, spec sheets).
+   * NOTE: these are filenames only, not the files themselves — see the
+   * comment in page.tsx for what's needed to actually persist uploads.
+   */
+  technicalDocumentNames: string[];
+
   notes: string;
 };
 
