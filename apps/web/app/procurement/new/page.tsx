@@ -27,7 +27,6 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 export default function NewProcurementPage() {
-  
   const [mode, setMode] = useState<SourceMode>("type");
   const [text, setText] = useState("");
   const [attachedFile, setAttachedFile] = useState<{ name: string; content: string } | null>(null);
@@ -36,6 +35,10 @@ export default function NewProcurementPage() {
 
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [hasSubmitted, setHasSubmitted] = useState(false);
+
+  // Shared hover / selection state for the supplier link + Select button
+  const [hoveredKey, setHoveredKey] = useState<string | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
   const create = useMutation({
     mutationFn: createProcurementTask,
@@ -82,21 +85,25 @@ export default function NewProcurementPage() {
     });
   }
 
+  function handleSelect(key: string) {
+    setSelectedKey(key);
+    // TODO: call your API / mutation here if selecting should also record the choice
+  }
+
   const canSubmit = mode === "bom" ? Boolean(attachedFile) : Boolean(text.trim());
 
   const state = data?.state;
   const task = data?.task;
-  
 
   return (
-    <main className="m-full px-6 py-16">
+    <main className="m-full bg-[#FAF8F2] px-6 py-16">
       <GlobalRiskOverview />
 
-      <div className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+      <div className="rounded-lg border border-neutral-200 bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
         <div className="mb-5 flex items-start justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-neutral-400">Your team</p>
-            <h1 className="mt-0.5 text-xl font-semibold text-neutral-900">New request</h1>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">Your team</p>
+            <h1 className="mt-1 text-base font-semibold text-neutral-900">New request</h1>
           </div>
 
           <div className="flex gap-1.5">
@@ -119,12 +126,12 @@ export default function NewProcurementPage() {
         {mode === "type" && (
           <button
             onClick={() => setText(EXAMPLE_PROMPT)}
-            className="block w-full rounded-xl bg-[#EA580C]/10 p-4 text-left transition hover:bg-[#EA580C]/20"
+            className="block w-full rounded-md bg-[#EA580C]/10 p-3.5 text-left transition hover:bg-[#EA580C]/20"
           >
-            <p className="text-[15px] leading-relaxed text-neutral-800">
+            <p className="text-xs leading-relaxed text-neutral-800">
               Here is the part, the quantity, and the date it has to land.
             </p>
-            <span className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs text-neutral-500">
+            <span className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-neutral-200 bg-white px-2 py-1 text-[10px] text-neutral-500">
               <Paperclip size={12} />
               example prompt click to use
             </span>
@@ -168,7 +175,7 @@ export default function NewProcurementPage() {
 
         {create.isError && <p className="mt-3 text-sm text-red-600">{(create.error as Error).message}</p>}
 
-        <div className="mt-4 flex items-center gap-2 rounded-full border border-neutral-200 bg-neutral-50 px-4 py-2.5">
+        <div className="mt-4 flex items-center gap-2 rounded-lg border border-neutral-200 bg-white px-4 py-2.5">
           <input
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -178,7 +185,7 @@ export default function NewProcurementPage() {
                 ? "Add any instructions for this BOM…"
                 : "Ask the agent to dispatch to custom sources or add instructions…"
             }
-            className="flex-1 bg-transparent text-sm text-neutral-800 outline-none placeholder:text-neutral-400"
+            className="flex-1 bg-transparent text-xs text-neutral-800 outline-none placeholder:text-neutral-400"
           />
           <button
             onClick={handleSubmit}
@@ -193,19 +200,21 @@ export default function NewProcurementPage() {
 
       {/* Results panel — appears once a request has been sent, updates in place */}
       {activeTaskId && (
-        <div className="mt-6 rounded-2xl border border-neutral-200 bg-white p-6 space-y-5">
+        <div className="mt-6 space-y-5 rounded-lg border border-neutral-200 bg-white p-5">
           <div className="flex items-start justify-between">
             <div>
-              <h2 className="text-base font-medium text-neutral-900">
+              <h2 className="text-sm font-semibold text-neutral-900">
                 {isLoadingResult && !task ? "Loading…" : task?.itemsSummary ?? ""}
               </h2>
               {state && (
                 <div className="mt-1 flex items-center gap-2">
-                  <span
-                    className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[state.status] ?? ""}`}
-                  >
-                    {state.status.replace("_", " ")}
-                  </span>
+                  {state.status !== "awaiting_approval" && (
+                    <span
+                      className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[state.status] ?? ""}`}
+                    >
+                      {state.status.replace("_", " ")}
+                    </span>
+                  )}
                   {state.request?.requiredBy && (
                     <span className="text-xs text-neutral-500">
                       needed by {new Date(state.request.requiredBy).toLocaleDateString()}
@@ -215,11 +224,11 @@ export default function NewProcurementPage() {
               )}
             </div>
 
-            
-              <a href={`/procurement/${activeTaskId}`}
+            <a
+              href={`/procurement/${activeTaskId}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex shrink-0 items-center gap-1 text-xs font-medium text-neutral-500 hover:text-neutral-800"
+              className="flex shrink-0 items-center gap-1 text-[11px] font-medium text-neutral-500 hover:text-neutral-800"
             >
               Open in new tab
               <ExternalLink size={12} />
@@ -248,14 +257,14 @@ export default function NewProcurementPage() {
           {/* Consolidated view — the recommended plan, plus other viable combinations */}
           {state?.recommendedPlan && (
             <div className="space-y-3">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+              <h3 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
                 Recommended plan
               </h3>
               <PlanCard plan={state.recommendedPlan} highlight />
 
               {state.alternativePlans && state.alternativePlans.length > 0 && (
                 <details className="rounded-lg border border-neutral-200">
-                  <summary className="cursor-pointer px-4 py-2 text-xs font-medium text-neutral-500 hover:text-neutral-700">
+                  <summary className="cursor-pointer px-3.5 py-2 text-[11px] font-medium text-neutral-500 hover:text-neutral-700">
                     {state.alternativePlans.length} other viable combination
                     {state.alternativePlans.length === 1 ? "" : "s"}
                   </summary>
@@ -272,12 +281,12 @@ export default function NewProcurementPage() {
           {/* Per-item view — each line item's top matching suppliers */}
           {state?.lineItemQuotes && state.lineItemQuotes.length > 0 && (
             <div className="space-y-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+              <h3 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
                 Per-item options
               </h3>
               {state.lineItemQuotes.map((liq, i) => (
                 <div key={i} className="space-y-2">
-                  <p className="text-sm font-medium text-neutral-800">
+                  <p className="text-xs font-semibold text-neutral-800">
                     {liq.lineItem.item}{" "}
                     <span className="font-normal text-neutral-400">× {liq.lineItem.quantity}</span>
                   </p>
@@ -286,41 +295,117 @@ export default function NewProcurementPage() {
                       No supplier found for this item.
                     </p>
                   ) : (
-                    <div className="overflow-hidden rounded-lg border border-neutral-200">
-                      <table className="w-full text-sm">
-                        <thead className="bg-neutral-50 text-left text-xs font-semibold uppercase tracking-wider text-neutral-500">
+                    <div className="overflow-hidden rounded-lg border border-neutral-300">
+                      <table className="w-full text-xs">
+                        <thead className="border-b border-neutral-300 bg-neutral-50 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
                           <tr>
-                            <th className="px-4 py-2">Supplier</th>
-                            <th className="px-4 py-2">Unit price</th>
-                            <th className="px-4 py-2">Lead time</th>
-                            <th className="px-4 py-2">Estimated Total cost</th>
-                            <th className="px-4 py-2">Notes</th>
+                            <th className="px-4 py-3 text-left">Supplier</th>
+                            <th className="px-4 py-3 text-right">Unit price</th>
+                            <th className="px-4 py-3 text-center">Lead time</th>
+                            <th className="px-4 py-3 text-right">Estimated total</th>
+                            <th className="px-4 py-3 text-left">AI sourcing notes</th>
+                            <th className="px-4 py-3 text-right">Action</th>
                           </tr>
                         </thead>
-                        <tbody>
-                          {liq.topQuotes.map((q: QuoteScore) => (
-                            <tr key={q.supplierName} className="border-t border-neutral-100">
-                              <td className="px-4 py-2 font-medium text-neutral-900">
-                                {q.supplierId ? (
-                                  
-                                  <a 
-                                   href={`/suppliers/${q.supplierId}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-[#EA580C] hover:underline"
+                        <tbody className="divide-y divide-neutral-200">
+                          {liq.topQuotes.map((q: QuoteScore, j: number) => {
+                            const rowKey = `${i}-${j}`;
+                            const isHovered = hoveredKey === rowKey;
+                            const isSelected = selectedKey === rowKey;
+                            const href = q.supplierId ? `/suppliers/${q.supplierId}` : undefined;
+                            const isBest = q.rationale?.toLowerCase().includes("best price and fastest");
+
+                            const linkHandlers = {
+                              onMouseEnter: () => setHoveredKey(rowKey),
+                              onMouseLeave: () => setHoveredKey(null),
+                              onFocus: () => setHoveredKey(rowKey),
+                              onBlur: () => setHoveredKey(null),
+                              onClick: () => handleSelect(rowKey),
+                            };
+
+                            return (
+                              <tr key={rowKey} className={isSelected ? "bg-[#EA580C]/5" : ""}>
+                                {/* Supplier */}
+                                <td className="px-4 py-3 font-medium">
+                                  {href ? (
+                                    <a
+                                      href={href}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      {...linkHandlers}
+                                      className={`text-[#EA580C] ${isHovered || isSelected ? "underline" : ""}`}
+                                    >
+                                      {q.supplierName}
+                                    </a>
+                                  ) : (
+                                    <span className="text-neutral-900">{q.supplierName}</span>
+                                  )}
+                                </td>
+
+                                {/* Unit price */}
+                                <td className="px-4 py-3 text-right font-mono text-xs text-neutral-700">
+                                  ₹{q.unitPrice.toLocaleString("en-IN")}
+                                </td>
+
+                                {/* Lead time */}
+                                <td className="px-4 py-3 text-center">
+                                  <span
+                                    className={`inline-block rounded-md px-2 py-0.5 text-xs font-medium ${
+                                      q.leadTimeDays <= 1
+                                        ? "bg-green-100 text-green-700"
+                                        : "bg-neutral-100 text-neutral-600"
+                                    }`}
                                   >
-                                    {q.supplierName}
-                                  </a>
-                                ) : (
-                                  q.supplierName
-                                )}
-                              </td>
-                              <td className="px-4 py-2">₹{q.unitPrice.toLocaleString("en-IN")}</td>
-                              <td className="px-4 py-2">{q.leadTimeDays}d</td>
-                              <td className="px-4 py-2">₹{q.totalCost.toLocaleString("en-IN")}</td>
-                              <td className="px-4 py-2 text-xs text-neutral-500">{q.rationale}</td>
-                            </tr>
-                          ))}
+                                    {q.leadTimeDays} {q.leadTimeDays === 1 ? "day" : "days"}
+                                  </span>
+                                </td>
+
+                                {/* Estimated total */}
+                                <td className="px-4 py-3 text-right font-mono text-xs font-semibold text-neutral-900">
+                                  ₹{q.totalCost.toLocaleString("en-IN")}
+                                </td>
+
+                                {/* AI sourcing notes */}
+                                <td className="px-4 py-3 text-xs">
+                                  {isBest ? (
+                                    <span className="inline-block rounded-md bg-green-50 px-2 py-1 font-medium text-green-700">
+                                      {q.rationale}
+                                    </span>
+                                  ) : (
+                                    <span className="text-neutral-500">{q.rationale}</span>
+                                  )}
+                                </td>
+
+                                {/* Action */}
+                                <td className="px-4 py-3 text-right">
+                                  {href ? (
+                                    <a
+                                      href={href}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      {...linkHandlers}
+                                      className={`inline-block rounded-md border px-3.5 py-1.5 text-[11px] font-medium transition ${
+                                        isHovered || isSelected
+                                          ? "border-[#EA580C] bg-[#EA580C]/10 text-[#EA580C]"
+                                          : "border-neutral-300 bg-white text-neutral-800"
+                                      }`}
+                                    >
+                                      {isSelected ? "Selected" : "Select"}
+                                    </a>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      disabled
+                                      title="No supplier page available"
+                                      className="cursor-not-allowed rounded-md border border-neutral-200 px-3.5 py-1.5 text-[11px] font-medium text-neutral-300"
+                                    >
+                                      Select
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -368,10 +453,10 @@ function PlanCard({ plan, highlight }: { plan: FulfillmentPlan; highlight?: bool
       }`}
     >
       <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-neutral-900">
+        <span className="text-xs font-semibold text-neutral-900">
           {plan.legs.length === 1 ? "Single supplier" : `Split across ${plan.legs.length} suppliers`}
         </span>
-        <span className="text-sm font-semibold text-neutral-900">
+        <span className="text-xs font-semibold text-neutral-900">
           ₹{plan.totalCost.toLocaleString("en-IN")}
         </span>
       </div>
@@ -411,12 +496,12 @@ function SourceTab({
       onClick={onClick}
       disabled={disabled}
       title={disabled ? "Not connected yet" : undefined}
-      className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+      className={`rounded-md border bg-white px-3 py-1.5 text-[11px] font-medium transition ${
         active
           ? "border-[#EA580C] text-[#EA580C]"
           : disabled
             ? "cursor-not-allowed border-neutral-200 text-neutral-300"
-            : "border-neutral-200 text-neutral-500 hover:border-neutral-300"
+            : "border-neutral-200 text-neutral-800 hover:border-neutral-300"
       }`}
     >
       {label}
@@ -446,10 +531,10 @@ function ProcessTracker({ currentIndex }: { currentIndex: number }) {
               <div
                 className={`relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 text-[10px] font-semibold transition-all duration-500 ${
                   done
-                    ? "border-green-500 bg-green-500 text-white scale-100"
+                    ? "scale-100 border-green-500 bg-green-500 text-white"
                     : active
-                      ? "border-[#EA580C] bg-white text-[#EA580C] scale-110"
-                      : "border-neutral-200 bg-white text-neutral-300 scale-100"
+                      ? "scale-110 border-[#EA580C] bg-white text-[#EA580C]"
+                      : "scale-100 border-neutral-200 bg-white text-neutral-300"
                 }`}
               >
                 {active && (
@@ -468,7 +553,7 @@ function ProcessTracker({ currentIndex }: { currentIndex: number }) {
               </span>
             </div>
             {!isLast && (
-              <div className="mx-1.5 h-0.5 flex-1 rounded-full bg-neutral-200 overflow-hidden">
+              <div className="mx-1.5 h-0.5 flex-1 overflow-hidden rounded-full bg-neutral-200">
                 <div
                   className="h-full rounded-full bg-green-500 transition-all duration-700 ease-out"
                   style={{ width: done ? "100%" : "0%" }}
