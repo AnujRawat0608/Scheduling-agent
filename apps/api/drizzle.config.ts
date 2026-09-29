@@ -14,6 +14,8 @@ export default defineConfig({
   "./src/db/suppliersSchema.ts",
   "./src/db/supplierMessagesSchema.ts",
   "./src/db/adminSchema.ts",   // add this
+  "./src/db/rfqsSchema.ts",
+
 ],
 
 dialect: "postgresql",

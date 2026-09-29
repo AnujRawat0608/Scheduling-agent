@@ -77,6 +77,8 @@ export default function NewQuotePage() {
   );
   const [currency, setCurrency] = useState("INR");
   const [priceValidUntil, setPriceValidUntil] = useState("");
+  const [requesterName, setRequesterName] = useState("");
+  const [requesterEmail, setRequesterEmail] = useState("");
 
   // Technical specification & scope
   const [lineItems, setLineItems] = useState<QuoteLineItem[]>([newLineItem()]);
@@ -139,6 +141,8 @@ export default function NewQuotePage() {
   const canSubmit =
     Boolean(supplierId) &&
     Boolean(dueDate) &&
+    Boolean(requesterName.trim()) &&
+    Boolean(requesterEmail.trim()) &&
     Boolean(deliveryAddress.trim()) &&
     Boolean(paymentTerms) &&
     Boolean(priceValidUntil) &&
@@ -147,8 +151,8 @@ export default function NewQuotePage() {
   const saveMutation = useMutation({
     mutationFn: saveQuote,
     onSuccess: (quote) => {
-      router.push(`/quotes?highlight=${quote.id}`);
-    },
+  router.push(`/quotes/${quote.id}`);
+},
   });
 
   function submit(status: "draft" | "sent") {
@@ -158,6 +162,8 @@ export default function NewQuotePage() {
       supplierName,
       dueDate,
       referenceNumber,
+      requesterName,
+      requesterEmail,
       currency,
       priceValidUntil,
       lineItems: lineItems.filter((it) => it.productName.trim()),
@@ -306,6 +312,26 @@ export default function NewQuotePage() {
                   )}
                 </div>
               )}
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-neutral-500">Your name</label>
+              <input
+                type="text"
+                value={requesterName}
+                onChange={(e) => setRequesterName(e.target.value)}
+                placeholder="Who this RFQ is from"
+                className="w-full rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#f97316]"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-neutral-500">Your email</label>
+              <input
+                type="email"
+                value={requesterEmail}
+                onChange={(e) => setRequesterEmail(e.target.value)}
+                placeholder="Where the supplier can reach you"
+                className="w-full rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#f97316]"
+              />
             </div>
             <div>
               <label className="mb-1 block text-xs text-neutral-500">Due date (response by)</label>

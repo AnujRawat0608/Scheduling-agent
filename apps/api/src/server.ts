@@ -11,7 +11,7 @@ import { supplierProfileRouter } from "./routes/supplierProfile.js";
 import { supplierOrdersRouter } from "./routes/supplierOrders.js";
 import { adminAuthRouter } from "./routes/adminAuth.js";
 import { adminSuppliersRouter } from "./routes/adminSuppliers.js";
-
+import { rfqRouter } from "./routes/rfqs.js";
 
 process.on("unhandledRejection", (err) => {
   console.error("Unhandled rejection (server stays up):", err);
@@ -40,7 +40,7 @@ app.use("/api/suppliers", supplierProfileRouter);
 app.use("/api", supplierOrdersRouter);
 app.use("/api/admin-auth", adminAuthRouter);
 app.use("/api/admin/suppliers", adminSuppliersRouter);
-app.use("/api/suppliers", supplierProfileRouter);
+app.use("/api/rfqs", rfqRouter);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 

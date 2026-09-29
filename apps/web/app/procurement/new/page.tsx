@@ -21,7 +21,6 @@ const STATUS_STYLES: Record<string, string> = {
   extracting: "bg-neutral-100 text-neutral-600",
   sourcing: "bg-neutral-100 text-neutral-600",
   comparing: "bg-neutral-100 text-neutral-600",
-  awaiting_approval: "bg-[#EA580C]/10 text-[#EA580C]",
   purchasing: "bg-[#EA580C]/10 text-[#EA580C]",
   done: "bg-green-100 text-green-700",
   failed: "bg-red-100 text-red-700",

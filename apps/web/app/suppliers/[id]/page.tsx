@@ -12,12 +12,15 @@ import {
   BarChart3,
   Send,
   MapPin,
+  ShoppingCart,
+  Trash2,
+  Plus,
 } from "lucide-react";
 import {
   fetchSupplierProfile,
   sendMessageToSupplier,
 } from "../../../lib/supplierProfileApi";
-import { createSupplierOrder } from "../../../lib/supplierOrdersApi";
+import { createSupplierOrder, type SupplierOrderItemInput } from "../../../lib/supplierOrdersApi";
 
 type Tab = "overview" | "products" | "rd" | "trade" | "performance";
 
@@ -60,6 +63,18 @@ function VerifiedBadge({ status }: { status: string | null }) {
   );
 }
 
+// A cart line, kept separate from the API's SupplierOrderItemInput so the
+// UI can track a per-row React key and a live MOQ check without leaking
+// UI-only concerns into what actually gets sent to the API.
+type CartLine = {
+  key: string;
+  productId?: string;
+  itemName: string;
+  unitPrice: number | null;
+  quantity: number;
+  moq: number;
+};
+
 export default function SupplierProfilePage() {
   const params = useParams();
   const supplierId = params.id as string;
@@ -86,37 +101,101 @@ export default function SupplierProfilePage() {
     },
   });
 
-  const [orderProductId, setOrderProductId] = useState<string>("");
-  const [orderQuantity, setOrderQuantity] = useState("");
+  // --- Cart state ---
+  const [cart, setCart] = useState<CartLine[]>([]);
+  const [pickerProductId, setPickerProductId] = useState("");
+  const [pickerQuantity, setPickerQuantity] = useState("");
+
   const [orderAddress, setOrderAddress] = useState("");
   const [orderRequesterName, setOrderRequesterName] = useState("");
   const [orderRequesterEmail, setOrderRequesterEmail] = useState("");
   const [orderNotes, setOrderNotes] = useState("");
+  const [addError, setAddError] = useState<string | null>(null);
 
-  // Derived order figures, used by both the live total and the submit handler,
-  // so what the user sees is exactly what gets sent.
-  const selectedProduct = data?.products.find((p) => p.id === orderProductId);
-  const unitPrice = toNumber(selectedProduct?.unitPrice);
-  const quantity = Number(orderQuantity);
-  const moq = toNumber(selectedProduct?.moq) ?? 1;
-  const hasQuantity = Number.isInteger(quantity) && quantity > 0;
-  const belowMoq = !!selectedProduct && hasQuantity && quantity < moq;
-  const orderTotal =
-    unitPrice !== null && hasQuantity ? Math.round(unitPrice * quantity * 100) / 100 : null;
+  const pickerProduct = data?.products.find((p) => p.id === pickerProductId);
+  const pickerUnitPrice = toNumber(pickerProduct?.unitPrice);
+  const pickerMoq = toNumber(pickerProduct?.moq) ?? 1;
+  const pickerQty = Number(pickerQuantity);
+  const pickerHasQty = Number.isInteger(pickerQty) && pickerQty > 0;
+  const pickerBelowMoq = !!pickerProduct && pickerHasQty && pickerQty < pickerMoq;
+
+  function handleAddToCart() {
+    setAddError(null);
+    if (!pickerProduct) {
+      setAddError("Select a product first.");
+      return;
+    }
+    if (!pickerHasQty) {
+      setAddError("Enter a whole-number quantity.");
+      return;
+    }
+    if (pickerQty < pickerMoq) {
+      setAddError(`The minimum order for this product is ${pickerMoq} units.`);
+      return;
+    }
+
+    setCart((prev) => {
+      // If this product's already in the cart, combine quantities instead
+      // of adding a duplicate row.
+      const existing = prev.find((line) => line.productId === pickerProduct.id);
+      if (existing) {
+        return prev.map((line) =>
+          line.productId === pickerProduct.id
+            ? { ...line, quantity: line.quantity + pickerQty }
+            : line
+        );
+      }
+      return [
+        ...prev,
+        {
+          key: pickerProduct.id,
+          productId: pickerProduct.id,
+          itemName: pickerProduct.item,
+          unitPrice: pickerUnitPrice,
+          quantity: pickerQty,
+          moq: pickerMoq,
+        },
+      ];
+    });
+
+    setPickerProductId("");
+    setPickerQuantity("");
+  }
+
+  function updateCartQuantity(key: string, quantity: number) {
+    setCart((prev) => prev.map((line) => (line.key === key ? { ...line, quantity } : line)));
+  }
+
+  function removeFromCart(key: string) {
+    setCart((prev) => prev.filter((line) => line.key !== key));
+  }
+
+  const cartTotal = cart.reduce((sum, line) => {
+    if (line.unitPrice === null) return sum;
+    return sum + line.unitPrice * line.quantity;
+  }, 0);
+
+  const cartHasBelowMoqLine = cart.some(
+    (line) => Number.isInteger(line.quantity) && line.quantity > 0 && line.quantity < line.moq
+  );
+  const cartHasInvalidQty = cart.some((line) => !Number.isInteger(line.quantity) || line.quantity <= 0);
 
   const placeOrder = useMutation({
     mutationFn: () => {
-      if (!selectedProduct) throw new Error("Select a product first.");
-      if (unitPrice === null) throw new Error("This product has no price, so it can't be ordered online.");
-      if (!hasQuantity) throw new Error("Enter a whole-number quantity.");
-      if (quantity < moq) throw new Error(`The minimum order for this product is ${moq} units.`);
+      if (cart.length === 0) throw new Error("Add at least one product to the cart first.");
+      if (cartHasInvalidQty) throw new Error("Every line needs a whole-number quantity greater than 0.");
+      if (cartHasBelowMoqLine) throw new Error("One or more lines are below that product's minimum order quantity.");
+
+      const items: SupplierOrderItemInput[] = cart.map((line) => ({
+        productId: line.productId,
+        itemName: line.itemName,
+        unitPrice: line.unitPrice ?? undefined,
+        quantity: line.quantity,
+      }));
 
       return createSupplierOrder({
         supplierId,
-        productId: orderProductId,
-        itemName: selectedProduct.item,
-        unitPrice, // always a number, never a string or undefined
-        quantity,
+        items,
         deliveryAddress: orderAddress,
         requesterName: orderRequesterName,
         requesterEmail: orderRequesterEmail,
@@ -124,10 +203,7 @@ export default function SupplierProfilePage() {
       });
     },
     onSuccess: (result) => {
-      // Make sure billing never shows a cached list without the new order.
       queryClient.invalidateQueries({ queryKey: ["supplier-orders"] });
-
-      // Pass the new order id so billing can highlight it (works if the API returns it).
       const r = result as { id?: string | number; order?: { id?: string | number } } | undefined;
       const id = r?.id ?? r?.order?.id;
       router.push(id != null ? `/billing?highlight=${id}` : "/billing");
@@ -160,7 +236,7 @@ export default function SupplierProfilePage() {
       <div className="rounded-2xl border border-neutral-200 bg-white p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-start gap-3">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-[#eef2ff] text-[#3d6bff]">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-[#fff1e6] text-[#c2410c]">
               <Building2 size={26} />
             </div>
             <div>
@@ -198,7 +274,7 @@ export default function SupplierProfilePage() {
               onClick={() => setActiveTab(tab.id)}
               className={`flex shrink-0 items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition ${
                 activeTab === tab.id
-                  ? "border-[#3d6bff] text-[#3d6bff]"
+                  ? "border-[#c2410c] text-[#c2410c]"
                   : "border-transparent text-neutral-500 hover:text-neutral-800"
               }`}
             >
@@ -247,7 +323,7 @@ export default function SupplierProfilePage() {
                           {p.description}
                         </div>
                       )}
-                      <div className="mt-2 text-sm font-medium text-[#3d6bff]">
+                      <div className="mt-2 text-sm font-medium text-[#c2410c]">
                         {formatINR(p.unitPrice)}
                       </div>
                       <div className="mt-1 text-xs text-neutral-400">
@@ -375,7 +451,7 @@ export default function SupplierProfilePage() {
                 value={senderName}
                 onChange={(e) => setSenderName(e.target.value)}
                 placeholder="Your name"
-                className="rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
+                className="rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#c2410c] focus:ring-1 focus:ring-[#c2410c]"
               />
               <input
                 required
@@ -383,7 +459,7 @@ export default function SupplierProfilePage() {
                 value={senderEmail}
                 onChange={(e) => setSenderEmail(e.target.value)}
                 placeholder="Your email"
-                className="rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
+                className="rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#c2410c] focus:ring-1 focus:ring-[#c2410c]"
               />
             </div>
             <textarea
@@ -392,7 +468,7 @@ export default function SupplierProfilePage() {
               onChange={(e) => setMessage(e.target.value)}
               rows={4}
               placeholder="Enter your inquiry details such as product name, quantity, and timeline…"
-              className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
+              className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#c2410c] focus:ring-1 focus:ring-[#c2410c]"
             />
             {sendMessage.isError && (
               <p className="text-sm text-red-600">{(sendMessage.error as Error).message}</p>
@@ -400,7 +476,7 @@ export default function SupplierProfilePage() {
             <button
               type="submit"
               disabled={sendMessage.isPending}
-              className="flex items-center gap-1.5 rounded-lg bg-[#3d6bff] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#3d6bff]/90 disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-lg bg-[#c2410c] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#9a3412] disabled:opacity-50"
             >
               <Send size={14} />
               {sendMessage.isPending ? "Sending…" : "Send"}
@@ -409,9 +485,12 @@ export default function SupplierProfilePage() {
         )}
       </div>
 
-      {/* Place an order */}
-      <div className="rounded-2xl border border-neutral-200 bg-white p-6 space-y-4">
-        <h2 className="text-sm font-medium text-neutral-700">Place an order</h2>
+      {/* Place an order — cart based */}
+      <div className="rounded-2xl border border-neutral-200 bg-white p-6 space-y-5">
+        <div className="flex items-center gap-2">
+          <ShoppingCart size={16} className="text-neutral-500" />
+          <h2 className="text-sm font-medium text-neutral-700">Place an order</h2>
+        </div>
 
         {products.length === 0 ? (
           <p className="text-sm text-neutral-400">
@@ -420,135 +499,198 @@ export default function SupplierProfilePage() {
           </p>
         ) : (
           <>
+            {/* Product picker: add one line to the cart at a time */}
+            <div className="rounded-xl border border-dashed border-neutral-300 p-4 space-y-3">
+              <div className="grid grid-cols-[1fr_auto] gap-3">
+                <label className="block space-y-1.5">
+                  <span className="text-xs font-medium text-neutral-600">Product</span>
+                  <select
+                    value={pickerProductId}
+                    onChange={(e) => {
+                      setPickerProductId(e.target.value);
+                      setAddError(null);
+                    }}
+                    className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#c2410c] focus:ring-1 focus:ring-[#c2410c]"
+                  >
+                    <option value="">Select a product…</option>
+                    {products.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.item} — {formatINR(p.unitPrice)}/unit
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block space-y-1.5">
+                  <span className="text-xs font-medium text-neutral-600">Qty</span>
+                  <input
+                    type="number"
+                    min={pickerMoq}
+                    step="1"
+                    value={pickerQuantity}
+                    onChange={(e) => {
+                      setPickerQuantity(e.target.value);
+                      setAddError(null);
+                    }}
+                    className="w-24 rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#c2410c] focus:ring-1 focus:ring-[#c2410c]"
+                  />
+                </label>
+              </div>
+
+              {pickerProduct && (
+                <span className={`block text-xs ${pickerBelowMoq ? "text-red-600" : "text-neutral-400"}`}>
+                  Minimum order: {pickerMoq} {pickerMoq === 1 ? "unit" : "units"}
+                </span>
+              )}
+
+              {addError && <p className="text-xs text-red-600">{addError}</p>}
+
+              <button
+                type="button"
+                onClick={handleAddToCart}
+                className="flex items-center gap-1.5 rounded-lg border border-[#c2410c] px-3.5 py-2 text-sm font-medium text-[#c2410c] transition hover:bg-[#fff1e6]"
+              >
+                <Plus size={14} />
+                Add to cart
+              </button>
+            </div>
+
+            {/* Cart contents */}
+            {cart.length > 0 && (
+              <div className="overflow-hidden rounded-lg border border-neutral-200">
+                <table className="w-full text-sm">
+                  <thead className="bg-neutral-50 text-left text-xs text-neutral-500">
+                    <tr>
+                      <th className="px-4 py-2">Item</th>
+                      <th className="px-4 py-2">Unit price</th>
+                      <th className="px-4 py-2">Qty</th>
+                      <th className="px-4 py-2">Subtotal</th>
+                      <th className="px-4 py-2" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cart.map((line) => {
+                      const lineBelowMoq =
+                        Number.isInteger(line.quantity) && line.quantity > 0 && line.quantity < line.moq;
+                      const lineSubtotal = line.unitPrice !== null ? line.unitPrice * line.quantity : null;
+                      return (
+                        <tr key={line.key} className="border-t border-neutral-100">
+                          <td className="px-4 py-2 font-medium text-neutral-900">{line.itemName}</td>
+                          <td className="px-4 py-2 text-neutral-600">{formatINR(line.unitPrice)}</td>
+                          <td className="px-4 py-2">
+                            <input
+                              type="number"
+                              min={1}
+                              step="1"
+                              value={line.quantity}
+                              onChange={(e) => updateCartQuantity(line.key, Number(e.target.value))}
+                              aria-invalid={lineBelowMoq}
+                              className="w-20 rounded-lg border border-neutral-200 px-2 py-1.5 text-sm outline-none focus:border-[#c2410c] focus:ring-1 focus:ring-[#c2410c]"
+                            />
+                            {lineBelowMoq && (
+                              <span className="mt-1 block text-[11px] text-red-600">Min {line.moq}</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-2 font-medium text-neutral-900">
+                            {lineSubtotal !== null ? formatINR(lineSubtotal) : "—"}
+                          </td>
+                          <td className="px-4 py-2 text-right">
+                            <button
+                              type="button"
+                              onClick={() => removeFromCart(line.key)}
+                              className="text-neutral-400 transition hover:text-red-600"
+                              aria-label={`Remove ${line.itemName}`}
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
             {placeOrder.isError && (
               <p role="alert" className="text-sm text-red-600">
                 {(placeOrder.error as Error).message}
               </p>
             )}
 
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                placeOrder.mutate();
-              }}
-              className="space-y-3"
-            >
-              <label className="block space-y-1.5">
-                <span className="text-xs font-medium text-neutral-600">Product</span>
-                <select
-                  required
-                  value={orderProductId}
-                  onChange={(e) => setOrderProductId(e.target.value)}
-                  className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
-                >
-                  <option value="" disabled>
-                    Select a product…
-                  </option>
-                  {products.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.item} — {formatINR(p.unitPrice)}/unit
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block space-y-1.5">
-                  <span className="text-xs font-medium text-neutral-600">Quantity</span>
-                  <input
-                    required
-                    type="number"
-                    min={moq}
-                    step="1"
-                    value={orderQuantity}
-                    onChange={(e) => setOrderQuantity(e.target.value)}
-                    aria-invalid={belowMoq}
-                    className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
-                  />
-                  {selectedProduct && (
-                    <span className={`block text-xs ${belowMoq ? "text-red-600" : "text-neutral-400"}`}>
-                      Minimum order: {moq} {moq === 1 ? "unit" : "units"}
-                    </span>
-                  )}
-                </label>
-                <label className="block space-y-1.5">
-                  <span className="text-xs font-medium text-neutral-600">Your name</span>
-                  <input
-                    required
-                    value={orderRequesterName}
-                    onChange={(e) => setOrderRequesterName(e.target.value)}
-                    className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
-                  />
-                </label>
-              </div>
-
-              <label className="block space-y-1.5">
-                <span className="text-xs font-medium text-neutral-600">Your email</span>
-                <input
-                  required
-                  type="email"
-                  value={orderRequesterEmail}
-                  onChange={(e) => setOrderRequesterEmail(e.target.value)}
-                  className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
-                />
-              </label>
-
-              <label className="block space-y-1.5">
-                <span className="text-xs font-medium text-neutral-600">Delivery address</span>
-                <textarea
-                  required
-                  value={orderAddress}
-                  onChange={(e) => setOrderAddress(e.target.value)}
-                  rows={2}
-                  className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
-                />
-              </label>
-
-              <label className="block space-y-1.5">
-                <span className="text-xs font-medium text-neutral-600">Notes (optional)</span>
-                <textarea
-                  value={orderNotes}
-                  onChange={(e) => setOrderNotes(e.target.value)}
-                  rows={2}
-                  placeholder="Any delivery instructions or special requirements…"
-                  className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#3d6bff] focus:ring-1 focus:ring-[#3d6bff]"
-                />
-              </label>
-
-              {/* Live order summary: the same numbers that are sent to the API */}
-              <div aria-live="polite" className="rounded-lg bg-neutral-50 p-4 text-sm">
-                <div className="flex justify-between text-neutral-600">
-                  <span>Unit price</span>
-                  <span className="tabular-nums">{selectedProduct ? formatINR(unitPrice) : "—"}</span>
-                </div>
-                <div className="mt-1 flex justify-between text-neutral-600">
-                  <span>Quantity</span>
-                  <span className="tabular-nums">{hasQuantity ? quantity.toLocaleString("en-IN") : "—"}</span>
-                </div>
-                {selectedProduct?.leadTimeDays != null && (
-                  <div className="mt-1 flex justify-between text-neutral-600">
-                    <span>Lead time</span>
-                    <span className="tabular-nums">{selectedProduct.leadTimeDays} days</span>
-                  </div>
-                )}
-                <div className="mt-3 flex justify-between border-t border-neutral-200 pt-3 font-semibold text-neutral-900">
-                  <span>Order total</span>
-                  <span className="tabular-nums">{orderTotal !== null ? formatINR(orderTotal) : "—"}</span>
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={placeOrder.isPending || belowMoq || (!!selectedProduct && unitPrice === null)}
-                className="rounded-lg bg-[#3d6bff] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#3d6bff]/90 disabled:opacity-50"
+            {cart.length > 0 && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  placeOrder.mutate();
+                }}
+                className="space-y-3"
               >
-                {placeOrder.isPending
-                  ? "Placing order…"
-                  : orderTotal !== null
-                    ? `Place order · ${formatINR(orderTotal)}`
-                    : "Place order"}
-              </button>
-            </form>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block space-y-1.5">
+                    <span className="text-xs font-medium text-neutral-600">Your name</span>
+                    <input
+                      required
+                      value={orderRequesterName}
+                      onChange={(e) => setOrderRequesterName(e.target.value)}
+                      className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#c2410c] focus:ring-1 focus:ring-[#c2410c]"
+                    />
+                  </label>
+                  <label className="block space-y-1.5">
+                    <span className="text-xs font-medium text-neutral-600">Your email</span>
+                    <input
+                      required
+                      type="email"
+                      value={orderRequesterEmail}
+                      onChange={(e) => setOrderRequesterEmail(e.target.value)}
+                      className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#c2410c] focus:ring-1 focus:ring-[#c2410c]"
+                    />
+                  </label>
+                </div>
+
+                <label className="block space-y-1.5">
+                  <span className="text-xs font-medium text-neutral-600">Delivery address</span>
+                  <textarea
+                    required
+                    value={orderAddress}
+                    onChange={(e) => setOrderAddress(e.target.value)}
+                    rows={2}
+                    className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#c2410c] focus:ring-1 focus:ring-[#c2410c]"
+                  />
+                </label>
+
+                <label className="block space-y-1.5">
+                  <span className="text-xs font-medium text-neutral-600">Notes (optional)</span>
+                  <textarea
+                    value={orderNotes}
+                    onChange={(e) => setOrderNotes(e.target.value)}
+                    rows={2}
+                    placeholder="Any delivery instructions or special requirements…"
+                    className="w-full rounded-lg border border-neutral-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#c2410c] focus:ring-1 focus:ring-[#c2410c]"
+                  />
+                </label>
+
+                <div aria-live="polite" className="rounded-lg bg-neutral-50 p-4 text-sm">
+                  <div className="flex justify-between text-neutral-600">
+                    <span>{cart.length} {cart.length === 1 ? "item" : "items"}</span>
+                    <span className="tabular-nums">
+                      {cart.reduce((n, l) => n + l.quantity, 0)} units total
+                    </span>
+                  </div>
+                  <div className="mt-3 flex justify-between border-t border-neutral-200 pt-3 font-semibold text-neutral-900">
+                    <span>Order total</span>
+                    <span className="tabular-nums">{formatINR(cartTotal)}</span>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={placeOrder.isPending || cartHasBelowMoqLine || cartHasInvalidQty}
+                  className="rounded-lg bg-[#c2410c] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#9a3412] disabled:opacity-50"
+                >
+                  {placeOrder.isPending ? "Placing order…" : `Place order · ${formatINR(cartTotal)}`}
+                </button>
+              </form>
+            )}
           </>
         )}
       </div>

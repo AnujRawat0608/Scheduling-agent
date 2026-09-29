@@ -99,6 +99,13 @@
       "when": 1790233815783,
       "tag": "0013_open_marten_broadcloak",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1790588387371,
+      "tag": "0014_natural_stardust",
+      "breakpoints": true
     }
   ]
 }

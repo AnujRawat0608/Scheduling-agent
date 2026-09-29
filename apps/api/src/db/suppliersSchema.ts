@@ -55,35 +55,56 @@ export const suppliers = pgTable("suppliers", {
  * profile page — separate from procurementTasks (the AI-driven multi-quote
  * comparison flow).
  *
+ * Order-level only as of the cart feature: a single order can contain
+ * multiple line items (see supplierOrderItems below), so per-product
+ * fields (itemName, unitPrice, quantity, per-item tax) moved off this
+ * table. subtotal/taxAmount/shippingCost here are the SUMS across all of
+ * an order's items, computed once at creation time — never recalculated
+ * later even if a listing's price or tax settings change afterward, same
+ * snapshotting principle as before, just rolled up instead of per-item.
+ *
  * Defined in this file (not its own supplierOrdersSchema.ts) because
  * drizzle-kit's config loader doesn't reliably resolve cross-schema-file
  * .js imports the way tsx does at runtime — same issue we hit with
- * risk_assessments last night. productId is deliberately a plain uuid
- * (no .references()) to avoid a cross-file import to supplyChainSchema.ts;
- * the relationship is enforced at the application level instead.
+ * risk_assessments last night.
  */
 export const supplierOrders = pgTable("supplier_orders", {
   id: uuid("id").defaultRandom().primaryKey(),
   supplierId: uuid("supplier_id")
     .references(() => suppliers.id)
     .notNull(),
-  productId: uuid("product_id"),
-  itemName: text("item_name").notNull(),
-  unitPrice: integer("unit_price"), // denormalized from the product at order time, so Billing has a real total even if the listing changes later
-  quantity: integer("quantity").notNull(),
   deliveryAddress: text("delivery_address").notNull(),
   requesterName: text("requester_name").notNull(),
   requesterEmail: text("requester_email").notNull(),
   notes: text("notes"),
   status: text("status").notNull().default("pending"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  subtotal: integer("subtotal"),     // sum of all items' subtotal
+  taxAmount: integer("tax_amount"),  // sum of all items' taxAmount
+  shippingCost: integer("shipping_cost"),
+  total: integer("total"),           // subtotal + taxAmount + shippingCost
+});
+
+/**
+ * One line item within a supplierOrder. productId is deliberately a plain
+ * uuid (no .references()) to avoid a cross-file import to
+ * supplyChainSchema.ts — same reasoning as the original supplierOrders
+ * table; the relationship is enforced at the application level instead.
+ */
+export const supplierOrderItems = pgTable("supplier_order_items", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  orderId: uuid("order_id")
+    .references(() => supplierOrders.id, { onDelete: "cascade" })
+    .notNull(),
+  productId: uuid("product_id"),
+  itemName: text("item_name").notNull(),
+  unitPrice: integer("unit_price"), // denormalized from the product at order time
+  quantity: integer("quantity").notNull(),
   taxType: text("tax_type"),
   taxRate: numeric("tax_rate", { precision: 5, scale: 2 }),
   taxInclusive: boolean("tax_inclusive").notNull().default(false),
   subtotal: integer("subtotal"),   // unitPrice × quantity, tax excluded
-  taxAmount: integer("tax_amount"), // computed once, at creation
-  shippingCost: integer("shipping_cost"),
-
+  taxAmount: integer("tax_amount"),
 });
 
 export const supplierCertifications = pgTable("supplier_certifications", {
@@ -108,4 +129,3 @@ export const supplierVerificationEvents = pgTable("supplier_verification_events"
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
-

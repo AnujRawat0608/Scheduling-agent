@@ -1,19 +1,34 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
 
-export interface SupplierOrderInput {
-  supplierId: string;
+export interface SupplierOrderItemInput {
   productId?: string;
   itemName: string;
   unitPrice?: number;
   quantity: number;
+}
+
+export interface SupplierOrderInput {
+  supplierId: string;
+  items: SupplierOrderItemInput[];
   deliveryAddress: string;
   requesterName: string;
   requesterEmail: string;
   notes?: string;
 }
 
-export interface SupplierOrder extends SupplierOrderInput {
+export interface SupplierOrderItem extends SupplierOrderItemInput {
   id: string;
+  subtotal: number | null;
+}
+
+export interface SupplierOrder {
+  id: string;
+  supplierId: string;
+  items: SupplierOrderItem[];
+  deliveryAddress: string;
+  requesterName: string;
+  requesterEmail: string;
+  notes?: string;
   status: string;
   createdAt: string;
   taxType: string | null;
@@ -22,6 +37,7 @@ export interface SupplierOrder extends SupplierOrderInput {
   subtotal: number | null;
   taxAmount: number | null;
   shippingCost: number | null;
+  total: number | null;
 }
 
 async function parseErrorOr<T>(res: Response, fallback: string): Promise<T> {

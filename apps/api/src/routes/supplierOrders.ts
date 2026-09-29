@@ -1,7 +1,7 @@
 import { Router } from "express";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { supplierOrders } from "../db/suppliersSchema.js";
+import { supplierOrders, supplierOrderItems } from "../db/suppliersSchema.js";
 import { supplierOffers } from "../db/supplyChainSchema.js";
 import { requireSupplierAuth } from "../agent/lib/supplierAuth.js";
 
@@ -32,94 +32,162 @@ function computeTax(
 }
 
 /**
+ * Attaches each order's line items, grouped in one extra query rather
+ * than N+1 queries per order.
+ */
+async function attachItems<T extends { id: string }>(
+  orders: T[]
+): Promise<(T & { items: (typeof supplierOrderItems.$inferSelect)[] })[]> {
+  if (orders.length === 0) return [];
+
+  const orderIds = orders.map((o) => o.id);
+  const items = await db
+    .select()
+    .from(supplierOrderItems)
+    .where(inArray(supplierOrderItems.orderId, orderIds));
+
+  const itemsByOrder = new Map<string, (typeof supplierOrderItems.$inferSelect)[]>();
+  for (const item of items) {
+    const list = itemsByOrder.get(item.orderId) ?? [];
+    list.push(item);
+    itemsByOrder.set(item.orderId, list);
+  }
+
+  return orders.map((order) => ({ ...order, items: itemsByOrder.get(order.id) ?? [] }));
+}
+
+/**
  * POST /api/supplier-orders
- * Buyer-facing: place a direct order against a supplier's listing.
- * If productId is given, tax settings are pulled from that product and
- * snapshotted onto the order — never recalculated later even if the
- * product's tax settings change afterward.
+ * Buyer-facing: place a direct order against a supplier, containing one
+ * or more line items (cart checkout). Tax is computed per item (each
+ * item's own productId, if given) and rolled up into the order's
+ * subtotal/taxAmount/total.
  */
 supplierOrdersRouter.post("/supplier-orders", async (req, res) => {
   try {
     const {
       supplierId,
-      productId,
-      itemName,
-      unitPrice,
-      quantity,
+      items,
       deliveryAddress,
       requesterName,
       requesterEmail,
       notes,
     } = req.body ?? {};
 
-    if (!supplierId || !itemName || !quantity || !deliveryAddress || !requesterName || !requesterEmail) {
+    if (
+      !supplierId ||
+      !Array.isArray(items) ||
+      items.length === 0 ||
+      !deliveryAddress ||
+      !requesterName ||
+      !requesterEmail
+    ) {
       return res.status(400).json({
-        error: "supplierId, itemName, quantity, deliveryAddress, requesterName, and requesterEmail are required",
+        error:
+          "supplierId, a non-empty items array, deliveryAddress, requesterName, and requesterEmail are required",
       });
     }
 
-    let taxType: string | null = null;
-    let taxRate: number | null = null;
-    let taxInclusive = false;
-    let subtotal: number | null = null;
-    let taxAmount: number | null = null;
-    let shippingCost: number | null = null;
-
-    if (productId && unitPrice != null) {
-      const [product] = await db
-        .select({
-          taxType: supplierOffers.taxType,
-          taxRate: supplierOffers.taxRate,
-          taxInclusive: supplierOffers.taxInclusive,
-          shippingCost: supplierOffers.shippingCost,
-        })
-        .from(supplierOffers)
-        .where(eq(supplierOffers.id, productId))
-        .limit(1);
-
-      if (product) {
-        taxType = product.taxType;
-        taxRate = product.taxRate !== null ? Number(product.taxRate) : null;
-        taxInclusive = product.taxInclusive;
-        shippingCost = product.shippingCost ?? null;
-
-        const computed = computeTax(unitPrice, quantity, taxRate, taxInclusive);
-        subtotal = computed.subtotal;
-        taxAmount = computed.taxAmount;
+    for (const item of items) {
+      if (!item.itemName || !item.quantity) {
+        return res.status(400).json({
+          error: "Each item requires itemName and quantity",
+        });
       }
     }
 
-    const [order] = await db
-      .insert(supplierOrders)
-      .values({
-        supplierId,
-        productId: productId ?? null,
-        itemName,
-        unitPrice: unitPrice ?? null,
-        quantity,
-        deliveryAddress,
-        requesterName,
-        requesterEmail,
-        notes: notes ?? null,
+    // Look up tax settings for every item that has a productId, in one
+    // query rather than one per item.
+    const productIds = [...new Set(items.map((i: any) => i.productId).filter(Boolean))];
+    const products = productIds.length
+      ? await db
+          .select({
+            id: supplierOffers.id,
+            taxType: supplierOffers.taxType,
+            taxRate: supplierOffers.taxRate,
+            taxInclusive: supplierOffers.taxInclusive,
+            shippingCost: supplierOffers.shippingCost,
+          })
+          .from(supplierOffers)
+          .where(inArray(supplierOffers.id, productIds))
+      : [];
+    const productById = new Map(products.map((p) => [p.id, p]));
+
+    let orderSubtotal = 0;
+    let orderTaxAmount = 0;
+    let orderShippingCost: number | null = null;
+
+    const itemsToInsert = items.map((item: any) => {
+      let taxType: string | null = null;
+      let taxRate: number | null = null;
+      let taxInclusive = false;
+      let subtotal: number | null = null;
+      let taxAmount: number | null = null;
+
+      if (item.productId && item.unitPrice != null) {
+        const product = productById.get(item.productId);
+        if (product) {
+          taxType = product.taxType;
+          taxRate = product.taxRate !== null ? Number(product.taxRate) : null;
+          taxInclusive = product.taxInclusive;
+          if (orderShippingCost === null && product.shippingCost != null) {
+            orderShippingCost = product.shippingCost;
+          }
+
+          const computed = computeTax(item.unitPrice, item.quantity, taxRate, taxInclusive);
+          subtotal = computed.subtotal;
+          taxAmount = computed.taxAmount;
+        }
+      }
+
+      if (subtotal !== null) orderSubtotal += subtotal;
+      if (taxAmount !== null) orderTaxAmount += taxAmount;
+
+      return {
+        productId: item.productId ?? null,
+        itemName: item.itemName,
+        unitPrice: item.unitPrice ?? null,
+        quantity: item.quantity,
         taxType,
         taxRate: taxRate !== null ? String(taxRate) : null,
         taxInclusive,
         subtotal,
         taxAmount,
-        shippingCost,
+      };
+    });
+
+    const total = orderSubtotal + orderTaxAmount + (orderShippingCost ?? 0);
+
+    const [order] = await db
+      .insert(supplierOrders)
+      .values({
+        supplierId,
+        deliveryAddress,
+        requesterName,
+        requesterEmail,
+        notes: notes ?? null,
+        subtotal: orderSubtotal || null,
+        taxAmount: orderTaxAmount || null,
+        shippingCost: orderShippingCost,
+        total: total || null,
       })
       .returning();
 
-    res.status(201).json({ order });
+    const insertedItems = await db
+      .insert(supplierOrderItems)
+      .values(itemsToInsert.map((item) => ({ ...item, orderId: order.id })))
+      .returning();
+
+    res.status(201).json({ order: { ...order, items: insertedItems } });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: String((err as Error)?.message ?? err) });
   }
 });
+
 /**
  * GET /api/supplier-orders
- * Billing-facing: all orders, newest first. No auth — mirrors how
- * procurementTasks are listed today (no buyer login system yet).
+ * Billing-facing: all orders, newest first, with their line items.
  */
 supplierOrdersRouter.get("/supplier-orders", async (_req, res) => {
   const orders = await db
@@ -127,7 +195,7 @@ supplierOrdersRouter.get("/supplier-orders", async (_req, res) => {
     .from(supplierOrders)
     .orderBy(desc(supplierOrders.createdAt));
 
-  res.json({ orders });
+  res.json({ orders: await attachItems(orders) });
 });
 
 /**
@@ -141,7 +209,7 @@ supplierOrdersRouter.get("/supplier-orders/mine", requireSupplierAuth, async (re
     .where(eq(supplierOrders.supplierId, req.supplier!.supplierId))
     .orderBy(desc(supplierOrders.createdAt));
 
-  res.json({ orders });
+  res.json({ orders: await attachItems(orders) });
 });
 
 /**
@@ -161,7 +229,12 @@ supplierOrdersRouter.patch("/supplier-orders/:id/confirm", async (req, res) => {
       return res.status(404).json({ error: "Order not found" });
     }
 
-    res.json({ order });
+    const items = await db
+      .select()
+      .from(supplierOrderItems)
+      .where(eq(supplierOrderItems.orderId, order.id));
+
+    res.json({ order: { ...order, items } });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: String((err as Error)?.message ?? err) });
