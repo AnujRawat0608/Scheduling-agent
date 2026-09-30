@@ -18,6 +18,10 @@ function getTransporter() {
       port,
       secure: port === 465, // true for 465, false for 587 (STARTTLS)
       auth: { user: SMTP_USER, pass: SMTP_PASS },
+      // Fail fast if the host can't reach the SMTP server (e.g. blocked port)
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 15_000,
     });
   }
   return transporter;
