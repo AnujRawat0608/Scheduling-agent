@@ -29,7 +29,7 @@
     "jsonwebtoken": "^9.0.3",
     "langfuse": "^3.29.0",
     "langfuse-langchain": "^3.29.0",
-    "nodemailer": "^10.0.11",
+    "nodemailer": "^10.0.13",
     "postgres": "^3.4.4",
     "zod": "^3.23.8"
   },

@@ -70,7 +70,7 @@ const apps: DockApp[] = [
 
   {
     id: "routing",
-    label: "Routing",
+    label: "Risk Analysis",
     icon: <Route size={20} strokeWidth={2} />,
     href: "/routing",
     isActive: (p) => !!p?.startsWith("/routing"),

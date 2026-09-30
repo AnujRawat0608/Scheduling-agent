@@ -9,25 +9,22 @@ import {
   FlaskConical,
   Globe2,
   BarChart3,
-  Send,
   MapPin,
   ShoppingCart,
   Trash2,
   Plus,
   CheckCircle2,
   Clock,
+  MessageSquare,
 } from "lucide-react";
-import {
-  fetchSupplierProfile,
-  sendMessageToSupplier,
-} from "../../../lib/supplierProfileApi";
+import { fetchSupplierProfile } from "../../../lib/supplierProfileApi";
 import { createSupplierOrder, type SupplierOrderItemInput } from "../../../lib/supplierOrdersApi";
 
 type Tab = "overview" | "products" | "rd" | "trade" | "performance";
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
-  { id: "overview", label: "Company Overview", icon: <Building2 size={16} /> },
   { id: "products", label: "Selected Products", icon: <Package size={16} /> },
+  { id: "overview", label: "Company Overview", icon: <Building2 size={16} /> },
   { id: "rd", label: "R&D Capacity", icon: <FlaskConical size={16} /> },
   { id: "trade", label: "Trade Capacity", icon: <Globe2 size={16} /> },
   { id: "performance", label: "Business Performance", icon: <BarChart3 size={16} /> },
@@ -91,25 +88,12 @@ export default function SupplierProfilePage() {
   const supplierId = params.id as string;
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<Tab>("overview");
+  const [activeTab, setActiveTab] = useState<Tab>("products");
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["supplier-profile", supplierId],
     queryFn: () => fetchSupplierProfile(supplierId),
     enabled: !!supplierId,
-  });
-
-  const [senderName, setSenderName] = useState("");
-  const [senderEmail, setSenderEmail] = useState("");
-  const [message, setMessage] = useState("");
-
-  const sendMessage = useMutation({
-    mutationFn: () => sendMessageToSupplier(supplierId, { senderName, senderEmail, message }),
-    onSuccess: () => {
-      setSenderName("");
-      setSenderEmail("");
-      setMessage("");
-    },
   });
 
   // --- Cart state ---
@@ -177,6 +161,24 @@ export default function SupplierProfilePage() {
   function removeFromCart(key: string) {
     setCart((prev) => prev.filter((line) => line.key !== key));
   }
+
+  // Quick add from a product card: first add uses the minimum order quantity,
+  // each further click adds 1 more unit.
+  function addProductToCart(p: { id: string; item: string; unitPrice?: unknown; moq?: unknown }) {
+    const moq = toNumber(p.moq) ?? 1;
+    setCart((prev) => {
+      const existing = prev.find((line) => line.productId === p.id);
+      if (existing) {
+        return prev.map((line) => (line.productId === p.id ? { ...line, quantity: line.quantity + 1 } : line));
+      }
+      return [
+        ...prev,
+        { key: p.id, productId: p.id, itemName: p.item, unitPrice: toNumber(p.unitPrice), quantity: moq, moq },
+      ];
+    });
+  }
+
+  const qtyInCart = (id: string) => cart.find((line) => line.productId === id)?.quantity ?? 0;
 
   const cartTotal = cart.reduce(
     (sum, line) => (line.unitPrice === null ? sum : sum + line.unitPrice * line.quantity),
@@ -294,6 +296,15 @@ export default function SupplierProfilePage() {
               )}
             </div>
           </div>
+
+          <button
+            type="button"
+            onClick={() => router.push(`/suppliers/${supplierId}/contact`)}
+            className={`${primaryBtn} shrink-0 self-center`}
+          >
+            <MessageSquare size={15} />
+            Connect with supplier
+          </button>
         </div>
       </div>
 
@@ -356,6 +367,20 @@ export default function SupplierProfilePage() {
                           <div className="mt-1 text-xs text-neutral-400">
                             MOQ {p.moq} · {p.leadTimeDays}d lead time
                           </div>
+                          <button
+                            type="button"
+                            onClick={() => addProductToCart(p)}
+                            className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs font-semibold shadow-sm transition hover:border-[#F97316] hover:bg-orange-50"
+                            style={{ color: ACCENT }}
+                          >
+                            <Plus size={13} />
+                            Add to cart
+                          </button>
+                          {qtyInCart(p.id) > 0 && (
+                            <p className="mt-1.5 text-center text-[11px] text-green-700">
+                              In cart: {qtyInCart(p.id)} {qtyInCart(p.id) === 1 ? "unit" : "units"}
+                            </p>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -435,67 +460,6 @@ export default function SupplierProfilePage() {
                 </div>
               )}
             </div>
-          </div>
-
-          {/* Contact form */}
-          <div className={card}>
-            <h2 className="text-base font-semibold text-neutral-900">Send message to supplier</h2>
-            {supplier.contactName && <p className="mt-1 text-xs text-neutral-500">To: {supplier.contactName}</p>}
-
-            {sendMessage.isSuccess ? (
-              <div className="mt-4 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-700">
-                Message sent. The supplier will see it and can follow up with you directly.
-              </div>
-            ) : (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  sendMessage.mutate();
-                }}
-                className="mt-4 space-y-4"
-              >
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div>
-                    <label className={labelCls}>Your name</label>
-                    <input
-                      required
-                      value={senderName}
-                      onChange={(e) => setSenderName(e.target.value)}
-                      placeholder="Your name"
-                      className={inputCls}
-                    />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Your email</label>
-                    <input
-                      required
-                      type="email"
-                      value={senderEmail}
-                      onChange={(e) => setSenderEmail(e.target.value)}
-                      placeholder="Your email"
-                      className={inputCls}
-                    />
-                  </div>
-                </div>
-                <textarea
-                  required
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  rows={5}
-                  placeholder="Enter your inquiry details such as product name, quantity, and timeline…"
-                  className={inputCls}
-                />
-                {sendMessage.isError && (
-                  <p className="text-sm text-red-600">{(sendMessage.error as Error).message}</p>
-                )}
-                <div className="flex justify-end">
-                  <button type="submit" disabled={sendMessage.isPending} className={primaryBtn}>
-                    <Send size={14} />
-                    {sendMessage.isPending ? "Sending…" : "Send message"}
-                  </button>
-                </div>
-              </form>
-            )}
           </div>
         </div>
 
