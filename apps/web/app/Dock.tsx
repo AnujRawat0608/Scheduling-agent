@@ -25,7 +25,7 @@ type DockApp = {
 const apps: DockApp[] = [
   {
     id: "scheduling",
-    label: "Scheduling Agent",
+    label: "About",
     icon: <Calendar size={20} strokeWidth={2} />,
     href: "/",
     isActive: (p) => p === "/",

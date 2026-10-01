@@ -1,4 +1,8 @@
+import { authHeaders } from "./supplierAuthApi";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
+// "http://localhost:3001/api" -> "http://localhost:3001" (where /uploads is served)
+const API_ORIGIN = API_BASE.replace(/\/api\/?$/, "");
 
 export interface SupplierOffer {
   id: string;
@@ -23,6 +27,12 @@ export interface SupplierOffer {
   taxType: string | null;
   taxRate: string | null;
   taxInclusive: boolean;
+  imageUrl?: string | null;
+}
+
+/** Turns a stored "/uploads/..." path into a full URL the browser can load. */
+export function resolveImageUrl(url: string): string {
+  return url.startsWith("http") ? url : `${API_ORIGIN}${url}`;
 }
 
 export async function listSupplyChainOffers(): Promise<SupplierOffer[]> {
@@ -51,12 +61,33 @@ export interface CreateOfferInput {
   taxRate?: number;
   taxInclusive?: boolean;
   supplierId?: string;
+  imageUrl?: string;
+}
+
+/** Uploads a product image and returns its stored path (e.g. "/uploads/products/abc.jpg"). */
+export async function uploadProductImage(file: File): Promise<string> {
+  const form = new FormData();
+  form.append("image", file);
+
+  // Don't set Content-Type: the browser adds the multipart boundary itself.
+  // The bearer token is required by requireSupplierAuth on the server.
+  const res = await fetch(`${API_BASE}/uploads/product-image`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: form,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? "Failed to upload image");
+  }
+  const data = await res.json();
+  return data.url as string;
 }
 
 export async function createSupplyChainOffer(input: CreateOfferInput) {
   const res = await fetch(`${API_BASE}/supply-chain`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...(authHeaders() as Record<string, string>) },
     body: JSON.stringify(input),
   });
   if (!res.ok) {
@@ -67,6 +98,9 @@ export async function createSupplyChainOffer(input: CreateOfferInput) {
 }
 
 export async function deleteSupplyChainOffer(id: string) {
-  const res = await fetch(`${API_BASE}/supply-chain/${id}`, { method: "DELETE" });
+  const res = await fetch(`${API_BASE}/supply-chain/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error("Failed to delete offer");
 }

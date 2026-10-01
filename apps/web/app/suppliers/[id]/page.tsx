@@ -363,8 +363,7 @@ export default function SupplierProfilePage() {
                           {p.description && (
                             <div className="mt-1 line-clamp-2 text-xs text-neutral-400">{p.description}</div>
                           )}
-                          <div className="mt-2 text-sm font-medium text-[#c2410c]">{formatINR(p.unitPrice)}</div>
-                          <div className="mt-1 text-xs text-neutral-400">
+<div className="mt-2 text-sm font-medium tabular-nums text-[#c2410c]">{formatINR(p.unitPrice)}</div>                          <div className="mt-1 text-xs text-neutral-400">
                             MOQ {p.moq} · {p.leadTimeDays}d lead time
                           </div>
                           <button
@@ -549,7 +548,7 @@ export default function SupplierProfilePage() {
                       return (
                         <div key={line.key} className={`${CART_GRID} border-t border-neutral-100 px-3 py-2.5 text-xs`}>
                           <span className="font-medium text-neutral-900">{line.itemName}</span>
-                          <span className="text-neutral-600">{formatINR(line.unitPrice)}</span>
+                          <span className="tabular-nums text-neutral-600">{formatINR(line.unitPrice)}</span>
                           <div>
                             <input
                               type="number"
@@ -562,8 +561,8 @@ export default function SupplierProfilePage() {
                             />
                             {lineBelowMoq && <span className="block text-[10px] text-red-600">Min {line.moq}</span>}
                           </div>
-                          <span className="font-semibold text-neutral-900">
-                            {lineSubtotal !== null ? formatINR(lineSubtotal) : "—"}
+                          <span className="font-semibold tabular-nums text-neutral-900">
+                              {lineSubtotal !== null ? formatINR(lineSubtotal) : "—"}
                           </span>
                           <button
                             type="button"
@@ -653,8 +652,14 @@ export default function SupplierProfilePage() {
                       disabled={placeOrder.isPending || cartInvalid}
                       className={`${primaryBtn} w-full`}
                     >
-                      {placeOrder.isPending ? "Placing order…" : `Place order · ${formatINR(cartTotal)}`}
-                    </button>
+                        {placeOrder.isPending ? (
+                          "Placing order…"
+                        ) : (
+                          <>
+                            Place order · <span className="tabular-nums">{formatINR(cartTotal)}</span>
+                          </>
+                        )}                    
+                        </button>
                   </form>
                 )}
               </div>

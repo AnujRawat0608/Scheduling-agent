@@ -12,6 +12,8 @@ import { supplierOrdersRouter } from "./routes/supplierOrders.js";
 import { adminAuthRouter } from "./routes/adminAuth.js";
 import { adminSuppliersRouter } from "./routes/adminSuppliers.js";
 import { rfqRouter } from "./routes/rfqs.js";
+import path from "path";
+import { uploadsRouter } from "./routes/uploads.js";
 
 process.on("unhandledRejection", (err) => {
   console.error("Unhandled rejection (server stays up):", err);
@@ -31,6 +33,8 @@ app.use(
 app.use(express.json());
 app.use(cookieParser());
 
+app.use("/api/uploads", uploadsRouter);
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 app.use("/api", runsRouter);
 app.use("/auth", authRouter);
 app.use("/api", procurementRouter);
@@ -41,6 +45,7 @@ app.use("/api", supplierOrdersRouter);
 app.use("/api/admin-auth", adminAuthRouter);
 app.use("/api/admin/suppliers", adminSuppliersRouter);
 app.use("/api/rfqs", rfqRouter);
+
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 

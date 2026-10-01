@@ -30,5 +30,6 @@ export const supplierOffers = pgTable("supplier_offers", {
   taxRate: numeric("tax_rate",{ precision: 5, scale:2}),
   taxInclusive: boolean("tax_inclusive").notNull().default(false),
   // "piece" | "box_of_10" | "kg" | "meter"
+  imageUrl: text("image_url"),
 
 });

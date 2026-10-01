@@ -22,3 +22,6 @@ eval-output.txt
 apps/risk-agent/venv/
 apps/risk-agent/__pycache__/
 apps/risk-agent/**/__pycache__/
+
+
+uploads/
