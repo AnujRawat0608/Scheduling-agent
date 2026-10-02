@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { formatMoney } from "../../../lib/format";
 import {
   AlertCircle,
   BarChart3,
@@ -588,8 +589,8 @@ export default function SupplierDashboardPage() {
                       </td>
                       <td className="px-3 py-3.5 text-slate-600">{p.moq}</td>
                       <td className="px-3 py-3.5 text-slate-600">{p.leadTimeDays} days</td>
-                      <td className="px-3 py-3.5 text-right font-medium tabular-nums text-slate-900">
-                        ₹{p.unitPrice.toLocaleString("en-IN")}
+                        <td className="px-3 py-3.5 text-right font-medium tabular-nums text-slate-900">
+                        {formatMoney(Number(p.unitPrice), p.currency)}
                       </td>
                       <td className="px-6 py-3.5 text-right">
                         <Link

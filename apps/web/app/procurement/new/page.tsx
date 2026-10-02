@@ -574,7 +574,7 @@ function PlanCard({
     >
       <div className="flex items-center justify-between">
         <span className="text-xs font-semibold text-neutral-900">
-          {plan.legs.length === 1 ? "Single supplier" : `Split across ${plan.legs.length} suppliers`}
+          {plan.legs.length === 1 ? "Single Supplier" : `Split across ${plan.legs.length} suppliers`}
         </span>
         <span className="text-xs font-semibold text-neutral-900">
           {show(plan.totalCost, BUYER_CURRENCY)}

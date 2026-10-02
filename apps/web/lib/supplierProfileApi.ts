@@ -40,6 +40,7 @@ export interface SupplierProfile {
   gstVerified: boolean;
   createdAt: string;
   updatedAt: string;
+ 
 }
 
 export interface SupplierProduct {
@@ -48,6 +49,7 @@ export interface SupplierProduct {
   description: string | null;
   category: string | null;
   unitPrice: number;
+  currency: string;
   leadTimeDays: number;
   dispatchStatus: string | null;
   shippingCost: number;

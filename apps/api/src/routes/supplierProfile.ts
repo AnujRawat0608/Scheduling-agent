@@ -59,7 +59,15 @@ supplierProfileRouter.get("/:id", async (req, res) => {
     .from(supplierOffers)
     .where(eq(supplierOffers.supplierId, req.params.id));
 
-  res.json({ supplier: publicSupplier(supplier), products });
+ res.json({
+    supplier: publicSupplier(supplier),
+    // numeric columns come back from Postgres as strings; the web types expect numbers
+    products: products.map((p) => ({
+      ...p,
+      unitPrice: Number(p.unitPrice),
+      shippingCost: Number(p.shippingCost),
+    })),
+  });
 });
 
 /**
