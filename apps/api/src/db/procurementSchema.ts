@@ -1,4 +1,4 @@
-﻿import { pgTable, uuid, text, integer, timestamp, jsonb, boolean } from "drizzle-orm/pg-core";
+﻿import { pgTable, uuid, text, integer,numeric, timestamp, jsonb, boolean } from "drizzle-orm/pg-core";
 
 export const procurementTasks = pgTable("procurement_tasks", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -9,8 +9,8 @@ export const procurementTasks = pgTable("procurement_tasks", {
   status: text("status").notNull().default("extracting"),
   request: jsonb("request").notNull(),
   recommendedPlan: jsonb("recommended_plan"),
-  totalCost: integer("total_cost"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+totalCost: numeric("total_cost", { precision: 12, scale: 2 }),  
+createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 

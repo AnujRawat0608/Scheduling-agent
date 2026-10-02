@@ -12,7 +12,25 @@ export const supplyChainRouter = Router();
 // Only accept image paths produced by our own upload endpoint (routes/uploads.ts).
 const IMAGE_URL_RE = /^\/uploads\/products\/[\w-]+\.(jpg|png)$/;
 
-// Unchanged: `...r.offer` already includes imageUrl once the column exists.
+// Currencies suppliers may price in. Adding one later is a one-line change here
+// (plus a rate for it in the fx_rates table). Keep to 2-decimal currencies for now.
+const SUPPORTED_CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED", "SGD"];
+
+// Existing clients don't send a currency yet, so a missing value defaults to USD
+// (matches what the Add Product form showed). An unsupported value is rejected.
+const DEFAULT_CURRENCY = "USD";
+
+const isMoney = (v: unknown): v is number =>
+  typeof v === "number" && Number.isFinite(v) && v >= 0 && v < 10_000_000;
+
+const hasMax2Decimals = (v: number) => Math.abs(Math.round(v * 100) - v * 100) < 1e-6;
+
+const isWholeNumber = (v: unknown): v is number =>
+  typeof v === "number" && Number.isInteger(v) && v >= 0;
+
+// NOTE: this endpoint is still public because the catalog page doesn't send an
+// auth header yet. Lock it down (requireSupplierAuth + filter by supplierId) in
+// the same change that adds `headers: authHeaders()` to listSupplyChainOffers.
 supplyChainRouter.get("/supply-chain", async (_req, res) => {
   const rows = await db
     .select({
@@ -26,6 +44,9 @@ supplyChainRouter.get("/supply-chain", async (_req, res) => {
 
   const offers = rows.map((r) => ({
     ...r.offer,
+    // numeric columns come back from Postgres as strings; the web types expect numbers
+    unitPrice: Number(r.offer.unitPrice),
+    shippingCost: Number(r.offer.shippingCost),
     verificationStatus: r.verificationStatus ?? null,
     gstVerified: r.gstVerified ?? false,
   }));
@@ -35,7 +56,7 @@ supplyChainRouter.get("/supply-chain", async (_req, res) => {
 
 supplyChainRouter.post("/supply-chain", requireSupplierAuth, async (req, res) => {
   try {
-    // supplierId / supplierName are deliberately NOT read from the body —
+    // supplierId / supplierName are deliberately NOT read from the body -
     // they come from the logged-in supplier, so nobody can list under another company.
     const {
       item,
@@ -55,12 +76,53 @@ supplyChainRouter.post("/supply-chain", requireSupplierAuth, async (req, res) =>
       taxRate,
       taxInclusive,
       imageUrl,
+      currency,
     } = req.body ?? {};
 
     if (!item || unitPrice == null || leadTimeDays == null || quantityAvailable == null) {
       return res.status(400).json({
         error: "item, unitPrice, leadTimeDays, and quantityAvailable are required",
       });
+    }
+
+    // ---- Currency ----
+    const cur = currency ?? DEFAULT_CURRENCY;
+    if (typeof cur !== "string" || !SUPPORTED_CURRENCIES.includes(cur)) {
+      return res.status(400).json({
+        error: `Unsupported currency. Use one of: ${SUPPORTED_CURRENCIES.join(", ")}`,
+      });
+    }
+
+    // ---- Money ----
+    const shipping = shippingCost ?? 0;
+    if (!isMoney(unitPrice) || !isMoney(shipping)) {
+      return res
+        .status(400)
+        .json({ error: "unitPrice and shippingCost must be non-negative numbers" });
+    }
+    if (!hasMax2Decimals(unitPrice) || !hasMax2Decimals(shipping)) {
+      return res
+        .status(400)
+        .json({ error: "unitPrice and shippingCost can have at most 2 decimal places" });
+    }
+    if (unitPrice <= 0) {
+      return res.status(400).json({ error: "unitPrice must be greater than 0" });
+    }
+
+    // ---- Quantities and lead time ----
+    const moqValue = moq ?? 1;
+    if (!isWholeNumber(leadTimeDays) || !isWholeNumber(quantityAvailable) || !isWholeNumber(moqValue)) {
+      return res
+        .status(400)
+        .json({ error: "leadTimeDays, quantityAvailable and moq must be whole numbers (0 or more)" });
+    }
+    if (moqValue < 1) {
+      return res.status(400).json({ error: "moq must be at least 1" });
+    }
+
+    // ---- Tax (declared by the supplier) ----
+    if (taxRate != null && (typeof taxRate !== "number" || !Number.isFinite(taxRate) || taxRate < 0 || taxRate > 100)) {
+      return res.status(400).json({ error: "taxRate must be a number between 0 and 100" });
     }
 
     const [supplier] = await db
@@ -84,12 +146,14 @@ supplyChainRouter.post("/supply-chain", requireSupplierAuth, async (req, res) =>
         category: category ?? null,
         supplierName: supplier.businessName,
         supplierType: supplierType ?? null,
-        unitPrice,
+        // numeric columns take strings
+        unitPrice: unitPrice.toFixed(2),
+        currency: cur,
         unitOfMeasure: unitOfMeasure ?? "piece",
         leadTimeDays,
         dispatchStatus: dispatchStatus ?? "Dispatch ready",
-        shippingCost: shippingCost ?? 0,
-        moq: moq ?? 1,
+        shippingCost: shipping.toFixed(2),
+        moq: moqValue,
         quantityAvailable,
         aiScore: aiScore ?? null,
         specs: specs ?? null,
@@ -101,7 +165,13 @@ supplyChainRouter.post("/supply-chain", requireSupplierAuth, async (req, res) =>
       })
       .returning();
 
-    res.status(201).json({ offer });
+    res.status(201).json({
+      offer: {
+        ...offer,
+        unitPrice: Number(offer.unitPrice),
+        shippingCost: Number(offer.shippingCost),
+      },
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: String((err as Error)?.message ?? err) });

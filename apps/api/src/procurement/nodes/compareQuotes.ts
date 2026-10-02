@@ -1,4 +1,5 @@
 import { scoreQuotes } from "../lib/scoreQuotes.js";
+import { getRates, type RateTable } from "../lib/fx.js";
 import type {
   ProcurementStateType,
   LineItemQuotes,
@@ -11,16 +12,20 @@ import type {
 const MAX_COMBINATIONS = 5000; // safety cap — see note below buildAllPlans
 const TOP_QUOTES_LIMIT = 5;
 
+/** Totals are in INR with 2 decimals; round after every sum so float drift can't creep in. */
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
 /** Score every line item's quotes, sort best-first, and cap a display-only top-N. */
-function scoreAllLineItems(lineItemQuotes: LineItemQuotes[]): LineItemQuotes[] {
+function scoreAllLineItems(lineItemQuotes: LineItemQuotes[], rates: RateTable): LineItemQuotes[] {
   return lineItemQuotes.map((liq) => {
-    const scoredQuotes = scoreQuotes(liq.quotes, liq.lineItem.quantity);
+    const scoredQuotes = scoreQuotes(liq.quotes, liq.lineItem.quantity, rates);
     const sorted = [...scoredQuotes].sort((a, b) => b.score - a.score);
-    const hasMatch = scoredQuotes.some((q) => q.score > 0); // ← recomputed here, not the stale pre-scoring flag
+    // score -1 means "cannot fulfill / cannot price"; 0 is a valid (worst-ranked) quote.
+    const hasMatch = scoredQuotes.some((q) => q.score >= 0); // recomputed here, not the stale pre-scoring flag
     return {
       ...liq,
       scoredQuotes,
-      topQuotes: sorted.filter((q) => q.score > 0).slice(0, TOP_QUOTES_LIMIT),
+      topQuotes: sorted.filter((q) => q.score >= 0).slice(0, TOP_QUOTES_LIMIT),
       hasMatch,
     };
   });
@@ -30,7 +35,7 @@ function scoreAllLineItems(lineItemQuotes: LineItemQuotes[]): LineItemQuotes[] {
 function candidatesFor(liq: LineItemQuotes): Map<string, QuoteScore> {
   const bySupplier = new Map<string, QuoteScore>();
   for (const q of liq.scoredQuotes) {
-    if (q.score <= 0) continue;
+    if (q.score < 0) continue; // only skip unfulfillable quotes (-1), not a valid score of 0
     const key = q.supplierId ?? q.supplierName;
     const existing = bySupplier.get(key);
     if (!existing || q.score > existing.score) bySupplier.set(key, q);
@@ -54,13 +59,13 @@ function legsFromAssignment(assignment: { lineItem: LineItem; quote: QuoteScore 
     const leg = bySupplier.get(key)!;
     leg.lineItems.push(lineItem);
     leg.quotes.push(quote);
-    leg.legCost += quote.totalCost;
+    leg.legCost = round2(leg.legCost + quote.totalCost);
   }
   return Array.from(bySupplier.values());
 }
 
 function planFromLegs(legs: FulfillmentLeg[], unmatchedItems: LineItem[]): FulfillmentPlan {
-  const totalCost = legs.reduce((sum, l) => sum + l.legCost, 0);
+  const totalCost = round2(legs.reduce((sum, l) => sum + l.legCost, 0));
   const type: FulfillmentPlan["type"] =
     unmatchedItems.length > 0 ? "partial" : legs.length === 1 ? "single_supplier" : "split";
 
@@ -135,7 +140,8 @@ function buildAllPlans(scored: LineItemQuotes[]): { plans: FulfillmentPlan[]; ca
 }
 
 export async function compareQuotes(state: ProcurementStateType) {
-  const scored = scoreAllLineItems(state.lineItemQuotes);
+  const rates = await getRates();
+  const scored = scoreAllLineItems(state.lineItemQuotes, rates);
   const anyMatch = scored.some((liq) => liq.hasMatch);
 
   if (!anyMatch) {

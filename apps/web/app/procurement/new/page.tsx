@@ -2,6 +2,8 @@
 
 import { useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { formatMoney } from "../../../lib/format";
+import { useFxRates, useDisplayCurrency, convertAmount, DISPLAY_CURRENCIES } from "../../../lib/fxApi";
 import { GlobalRiskOverview } from "../../../components/GlobalRiskOverview";
 import { RiskAssessmentBadge } from "../../../components/RiskAssessmentBadge";
 import { Paperclip, ArrowUp, X, ExternalLink, Check } from "lucide-react";
@@ -16,6 +18,10 @@ type SourceMode = "plm" | "bom" | "type";
 
 const DEFAULT_REQUESTER_EMAIL = "team@procurement.local";
 const EXAMPLE_PROMPT = "We need 50 units of Raspberry Pi 5 for the hardware team by [Date].";
+
+// The backend ranks and sums everything in this currency. The dropdown below only
+// changes how amounts are DISPLAYED, so the ranking never changes when it is switched.
+const BUYER_CURRENCY = "INR";
 
 const STATUS_STYLES: Record<string, string> = {
   extracting: "bg-neutral-100 text-neutral-600",
@@ -39,6 +45,10 @@ export default function NewProcurementPage() {
   // Shared hover / selection state for the supplier link + Select button
   const [hoveredKey, setHoveredKey] = useState<string | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+
+  // Display currency (buyer's choice, remembered in the browser) + live exchange rates
+  const { data: fx } = useFxRates();
+  const [displayCurrency, setDisplayCurrency] = useDisplayCurrency(BUYER_CURRENCY);
 
   const create = useMutation({
     mutationFn: createProcurementTask,
@@ -89,6 +99,58 @@ export default function NewProcurementPage() {
     setSelectedKey(key);
     // TODO: call your API / mutation here if selecting should also record the choice
   }
+
+  /* ---------- display-currency helpers ---------- */
+
+  /** Show an amount (in currency `from`) in the chosen display currency.
+   *  If a rate is missing it falls back to the original currency, correctly labelled. */
+  function money(amount: number, from: string): string {
+    const converted = convertAmount(fx, amount, from, displayCurrency);
+    return converted === null ? formatMoney(amount, from) : formatMoney(converted, displayCurrency);
+  }
+
+  /** A line of a quote's price breakdown in the display currency.
+   *  When the display currency is the buyer currency, use the server's own numbers
+   *  so they match the plan card and the saved total exactly. */
+  function quoteAmount(q: QuoteScore, field: "total" | "taxAmount" | "shipping"): string {
+    if (!q.pricing) return money(q.totalCost, q.buyerCurrency);
+    if (displayCurrency === q.pricing.buyerCurrency) {
+      return formatMoney(q.pricing.converted[field], q.pricing.buyerCurrency);
+    }
+    return money(q.pricing.local[field], q.pricing.supplierCurrency);
+  }
+
+  /** "≈ ..." line under the supplier's own unit price, or null if there is nothing to add. */
+  function unitApprox(q: QuoteScore): string | null {
+    if (displayCurrency === q.currency) return null;
+    if (q.pricing && displayCurrency === q.pricing.buyerCurrency) {
+      return formatMoney(q.pricing.unitPriceConverted, q.pricing.buyerCurrency);
+    }
+    const converted = convertAmount(fx, q.unitPrice, q.currency, displayCurrency);
+    return converted === null ? null : formatMoney(converted, displayCurrency);
+  }
+
+  /** "1 USD = 96.379 INR" style rate note, or null if the currencies match or a rate is missing. */
+  function rateLine(q: QuoteScore): string | null {
+    if (displayCurrency === q.currency) return null;
+    let rate: number | null = null;
+    if (q.pricing && displayCurrency === q.pricing.buyerCurrency) {
+      rate = q.pricing.fxRate;
+    } else if (fx?.rates[q.currency] && fx.rates[displayCurrency]) {
+      rate = fx.rates[displayCurrency] / fx.rates[q.currency];
+    }
+    if (rate === null) return null;
+    return `1 ${q.currency} = ${rate.toLocaleString("en-US", { maximumSignificantDigits: 5 })} ${displayCurrency}`;
+  }
+
+  const ratesAsOf = fx
+    ? new Date(fx.fetchedAt).toLocaleString(undefined, {
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : null;
 
   const canSubmit = mode === "bom" ? Boolean(attachedFile) : Boolean(text.trim());
 
@@ -224,15 +286,40 @@ export default function NewProcurementPage() {
               )}
             </div>
 
-            <a
-              href={`/procurement/${activeTaskId}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex shrink-0 items-center gap-1 text-[11px] font-medium text-neutral-500 hover:text-neutral-800"
-            >
-              Open in new tab
-              <ExternalLink size={12} />
-            </a>
+            <div className="flex shrink-0 flex-col items-end gap-1.5">
+              <a
+                href={`/procurement/${activeTaskId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 text-[11px] font-medium text-neutral-500 hover:text-neutral-800"
+              >
+                Open in new tab
+                <ExternalLink size={12} />
+              </a>
+
+              {/* Display currency: changes how amounts are shown, not how suppliers are ranked */}
+              <label className="flex items-center gap-1.5 text-[11px] text-neutral-500">
+                Show Estimated Total in
+                <select
+                  value={displayCurrency}
+                  onChange={(e) => setDisplayCurrency(e.target.value)}
+                  className="rounded-md border border-neutral-300 bg-white px-1.5 py-1 text-[11px] font-medium text-neutral-800 outline-none focus:border-[#EA580C]"
+                >
+                  {DISPLAY_CURRENCIES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {displayCurrency !== BUYER_CURRENCY && (
+                <p className="max-w-[260px] text-right text-[10px] text-neutral-400">
+                  {fx
+                    ? `Approximate, converted at rates from ${ratesAsOf}. Suppliers invoice in their own currency.`
+                    : "Exchange rates unavailable right now, showing original currencies."}
+                </p>
+              )}
+            </div>
           </div>
 
           {state?.riskCheckStatus && state.riskAssessment && (
@@ -260,7 +347,7 @@ export default function NewProcurementPage() {
               <h3 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
                 Recommended plan
               </h3>
-              <PlanCard plan={state.recommendedPlan} highlight />
+              <PlanCard plan={state.recommendedPlan} show={money} highlight />
 
               {state.alternativePlans && state.alternativePlans.length > 0 && (
                 <details className="rounded-lg border border-neutral-200">
@@ -270,7 +357,7 @@ export default function NewProcurementPage() {
                   </summary>
                   <div className="space-y-2 border-t border-neutral-100 p-3">
                     {state.alternativePlans.map((plan, i) => (
-                      <PlanCard key={i} plan={plan} />
+                      <PlanCard key={i} plan={plan} show={money} />
                     ))}
                   </div>
                 </details>
@@ -313,7 +400,7 @@ export default function NewProcurementPage() {
                             const isHovered = hoveredKey === rowKey;
                             const isSelected = selectedKey === rowKey;
                             const href = q.supplierId ? `/suppliers/${q.supplierId}` : undefined;
-                            const isBest = q.rationale?.toLowerCase().includes("best price and fastest");
+                            const isBest = q.isBest;
 
                             const linkHandlers = {
                               onMouseEnter: () => setHoveredKey(rowKey),
@@ -322,6 +409,24 @@ export default function NewProcurementPage() {
                               onBlur: () => setHoveredKey(null),
                               onClick: () => handleSelect(rowKey),
                             };
+
+                            // Small grey line under the total: tax, shipping, and the rate used.
+                            const detailParts: string[] = [];
+                            if (q.pricing) {
+                              if (q.pricing.converted.taxAmount > 0) {
+                                detailParts.push(
+                                  `${q.pricing.taxInclusive ? "incl." : "+"} ${quoteAmount(q, "taxAmount")} tax`
+                                );
+                              }
+                              detailParts.push(
+                                q.pricing.converted.shipping > 0
+                                  ? `${quoteAmount(q, "shipping")} shipping`
+                                  : "free shipping"
+                              );
+                              const rl = rateLine(q);
+                              if (rl) detailParts.push(rl);
+                            }
+                            const approx = unitApprox(q);
 
                             return (
                               <tr key={rowKey} className={isSelected ? "bg-[#EA580C]/5" : ""}>
@@ -342,9 +447,10 @@ export default function NewProcurementPage() {
                                   )}
                                 </td>
 
-                                {/* Unit price */}
+                                {/* Unit price: always the supplier's own price, plus an approximation */}
                                 <td className="px-4 py-3 text-right font-mono text-xs text-neutral-700">
-                                  ₹{q.unitPrice.toLocaleString("en-IN")}
+                                  <div>{formatMoney(q.unitPrice, q.currency)}</div>
+                                  {approx && <div className="text-[10px] text-neutral-400">≈ {approx}</div>}
                                 </td>
 
                                 {/* Lead time */}
@@ -360,9 +466,14 @@ export default function NewProcurementPage() {
                                   </span>
                                 </td>
 
-                                {/* Estimated total */}
+                                {/* Estimated total, in the display currency */}
                                 <td className="px-4 py-3 text-right font-mono text-xs font-semibold text-neutral-900">
-                                  ₹{q.totalCost.toLocaleString("en-IN")}
+                                  <div>{quoteAmount(q, "total")}</div>
+                                  {detailParts.length > 0 && (
+                                    <div className="text-[10px] font-normal text-neutral-400">
+                                      {detailParts.join(" · ")}
+                                    </div>
+                                  )}
                                 </td>
 
                                 {/* AI sourcing notes */}
@@ -445,7 +556,16 @@ export default function NewProcurementPage() {
   );
 }
 
-function PlanCard({ plan, highlight }: { plan: FulfillmentPlan; highlight?: boolean }) {
+function PlanCard({
+  plan,
+  show,
+  highlight,
+}: {
+  plan: FulfillmentPlan;
+  /** Formats an amount (in the given source currency) in the buyer's display currency. */
+  show: (amount: number, from: string) => string;
+  highlight?: boolean;
+}) {
   return (
     <div
       className={`rounded-lg border p-3 ${
@@ -457,7 +577,7 @@ function PlanCard({ plan, highlight }: { plan: FulfillmentPlan; highlight?: bool
           {plan.legs.length === 1 ? "Single supplier" : `Split across ${plan.legs.length} suppliers`}
         </span>
         <span className="text-xs font-semibold text-neutral-900">
-          ₹{plan.totalCost.toLocaleString("en-IN")}
+          {show(plan.totalCost, BUYER_CURRENCY)}
         </span>
       </div>
       <p className="mt-1 text-xs text-neutral-500">{plan.rationale}</p>
@@ -467,7 +587,7 @@ function PlanCard({ plan, highlight }: { plan: FulfillmentPlan; highlight?: bool
             <span>
               {leg.supplierName} — {leg.lineItems.map((li) => li.item).join(", ")}
             </span>
-            <span>₹{leg.legCost.toLocaleString("en-IN")}</span>
+            <span>{show(leg.legCost, BUYER_CURRENCY)}</span>
           </div>
         ))}
       </div>

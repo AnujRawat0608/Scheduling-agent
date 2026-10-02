@@ -1,5 +1,6 @@
 import { pgTable, uuid, text, integer, timestamp, jsonb, boolean, numeric } from "drizzle-orm/pg-core";
 
+
 export const suppliers = pgTable("suppliers", {
   id: uuid("id").defaultRandom().primaryKey(),
   email: text("email").notNull().unique(),
@@ -79,10 +80,11 @@ export const supplierOrders = pgTable("supplier_orders", {
   notes: text("notes"),
   status: text("status").notNull().default("pending"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-  subtotal: integer("subtotal"),     // sum of all items' subtotal
-  taxAmount: integer("tax_amount"),  // sum of all items' taxAmount
-  shippingCost: integer("shipping_cost"),
-  total: integer("total"),           // subtotal + taxAmount + shippingCost
+subtotal: numeric("subtotal", { precision: 12, scale: 2 }),
+taxAmount: numeric("tax_amount", { precision: 12, scale: 2 }),
+shippingCost: numeric("shipping_cost", { precision: 12, scale: 2 }),
+total: numeric("total", { precision: 12, scale: 2 }),
+currency: text("currency").notNull(),// subtotal + taxAmount + shippingCost
 });
 
 /**
@@ -98,14 +100,13 @@ export const supplierOrderItems = pgTable("supplier_order_items", {
     .notNull(),
   productId: uuid("product_id"),
   itemName: text("item_name").notNull(),
-  unitPrice: integer("unit_price"), // denormalized from the product at order time
+unitPrice: numeric("unit_price", { precision: 12, scale: 2 }),
   quantity: integer("quantity").notNull(),
   taxType: text("tax_type"),
   taxRate: numeric("tax_rate", { precision: 5, scale: 2 }),
   taxInclusive: boolean("tax_inclusive").notNull().default(false),
-  subtotal: integer("subtotal"),   // unitPrice × quantity, tax excluded
-  taxAmount: integer("tax_amount"),
-});
+  subtotal: numeric("subtotal", { precision: 12, scale: 2 }),   // unitPrice × quantity, tax excluded
+taxAmount: numeric("tax_amount", { precision: 12, scale: 2 }),});
 
 export const supplierCertifications = pgTable("supplier_certifications", {
   id: uuid("id").defaultRandom().primaryKey(),

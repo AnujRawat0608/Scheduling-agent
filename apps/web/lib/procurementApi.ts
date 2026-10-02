@@ -5,6 +5,16 @@ export interface LineItem {
   quantity: number;
   specifications?: string;
 }
+export interface PricingBreakdown {
+  supplierCurrency: string;
+  buyerCurrency: string;
+  fxRate: number; // 1 supplier-currency unit = fxRate buyer-currency units
+  taxRate: number | null;
+  taxInclusive: boolean;
+  unitPriceConverted: number;
+  local: { subtotal: number; taxAmount: number; shipping: number; total: number };
+  converted: { subtotal: number; taxAmount: number; shipping: number; total: number };
+}
 
 export interface SupplierQuote {
   supplierName: string;
@@ -16,12 +26,20 @@ export interface SupplierQuote {
   shippingCost: number;
   moq: number;
   respondedAt: string;
+  currency: string;
+  taxType: string | null;
+  taxRate: number | null;
+  taxInclusive: boolean;
+  simulated?: boolean;
 }
 
 export interface QuoteScore extends SupplierQuote {
   totalCost: number;
   score: number;
   rationale: string;
+  buyerCurrency: string;
+  pricing: PricingBreakdown | null;
+  isBest: boolean;
 }
 
 export interface LineItemQuotes {
@@ -104,6 +122,8 @@ export interface ProcurementSnapshot {
   };
   next: string[];
 }
+
+
 
 export async function listProcurementTasks(): Promise<ProcurementTaskSummary[]> {
   const res = await fetch(`${API_BASE}/procurement`);

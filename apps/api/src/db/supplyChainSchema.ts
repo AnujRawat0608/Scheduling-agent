@@ -15,11 +15,12 @@ export const supplierOffers = pgTable("supplier_offers", {
   category: text("category"),
   supplierName: text("supplier_name").notNull(),
   supplierType: text("supplier_type"),
-  unitPrice: integer("unit_price").notNull(),
+unitPrice: numeric("unit_price", { precision: 12, scale: 2 }).notNull(),
   leadTimeDays: integer("lead_time_days").notNull(),
   dispatchStatus: text("dispatch_status").default("Dispatch ready"),
-  shippingCost: integer("shipping_cost").notNull().default(0),
-  moq: integer("moq").notNull().default(1),
+shippingCost: numeric("shipping_cost", { precision: 12, scale: 2 }).notNull().default("0"),
+currency: text("currency").notNull(),  
+moq: integer("moq").notNull().default(1),
   quantityAvailable: integer("quantity_available").notNull(),
   aiScore: integer("ai_score"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -32,4 +33,10 @@ export const supplierOffers = pgTable("supplier_offers", {
   // "piece" | "box_of_10" | "kg" | "meter"
   imageUrl: text("image_url"),
 
+});
+
+export const fxRates = pgTable("fx_rates", {
+  currency: text("currency").primaryKey(),
+  perUsd: numeric("per_usd", { precision: 18, scale: 8 }).notNull(),
+  fetchedAt: timestamp("fetched_at", { withTimezone: true }).defaultNow().notNull(),
 });

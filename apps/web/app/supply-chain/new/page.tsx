@@ -27,6 +27,16 @@ const UNIT_OF_MEASURE_OPTIONS = [
   { value: "liter", label: "Liter" },
 ];
 
+// Keep in sync with SUPPORTED_CURRENCIES in the API (routes/supplyChain.ts).
+const CURRENCIES = [
+  { code: "INR", symbol: "₹", label: "INR – Indian Rupee" },
+  { code: "USD", symbol: "$", label: "USD – US Dollar" },
+  { code: "EUR", symbol: "€", label: "EUR – Euro" },
+  { code: "GBP", symbol: "£", label: "GBP – British Pound" },
+  { code: "AED", symbol: "AED", label: "AED – UAE Dirham" },
+  { code: "SGD", symbol: "S$", label: "SGD – Singapore Dollar" },
+];
+
 const CATEGORY_OPTIONS = [
   "Single Board Computers",
   "Laptops & Computers",
@@ -83,12 +93,14 @@ function Field({
   );
 }
 
-/** Input with a text adornment on the left ($) or right (%, days). */
+/** Input with a text adornment on the left (currency symbol) or right (%, days). */
 function AdornedInput({
   prefix,
   suffix,
   ...props
 }: { prefix?: string; suffix?: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+  // Longer symbols (e.g. "AED") need more room so they don't overlap the number.
+  const prefixPadding = prefix ? (prefix.trim().length > 2 ? "pl-12" : "pl-8") : "";
   return (
     <div className="relative">
       {prefix && (
@@ -96,7 +108,7 @@ function AdornedInput({
           {prefix}
         </span>
       )}
-      <input {...props} className={`${inputClass} ${prefix ? "pl-8" : ""} ${suffix ? "pr-14" : ""}`} />
+      <input {...props} className={`${inputClass} ${prefixPadding} ${suffix ? "pr-14" : ""}`} />
       {suffix && (
         <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-sm text-neutral-400">
           {suffix}
@@ -148,11 +160,15 @@ export default function AddProductPage() {
   const [supplierType, setSupplierType] = useState(SUPPLIER_TYPE_OPTIONS[0]);
 
   // Pricing & tax
+  const [currency, setCurrency] = useState("INR");
   const [unitPrice, setUnitPrice] = useState("");
   const [unitOfMeasure, setUnitOfMeasure] = useState("piece");
   const [taxType, setTaxType] = useState("None");
   const [taxRate, setTaxRate] = useState("0");
   const [taxInclusive, setTaxInclusive] = useState(false);
+
+  // Symbol shown inside the price and shipping inputs, follows the selected currency.
+  const symbol = CURRENCIES.find((c) => c.code === currency)?.symbol ?? currency;
 
   // Logistics & inventory
   const [shippingCost, setShippingCost] = useState("0");
@@ -233,6 +249,7 @@ export default function AddProductPage() {
       supplierName: supplier.businessName,
       supplierType,
       unitPrice: Number(unitPrice),
+      currency,
       unitOfMeasure,
       leadTimeDays: Number(leadTimeDays),
       shippingCost: Number(shippingCost),
@@ -389,17 +406,26 @@ export default function AddProductPage() {
 
         {/* ---------- Pricing & tax ---------- */}
         <Card icon={<DollarSign size={18} />} title="Pricing & tax">
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-5">
+            <Field label="Currency">
+              <select value={currency} onChange={(e) => setCurrency(e.target.value)} className={inputClass}>
+                {CURRENCIES.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
             <Field label="Unit price">
               <AdornedInput
                 required
                 type="number"
-                min="0"
-                step="1"
-                prefix="$"
+                min="0.01"
+                step="0.01"
+                prefix={symbol}
                 value={unitPrice}
                 onChange={(e) => setUnitPrice(e.target.value)}
-                placeholder="0"
+                placeholder="0.00"
               />
             </Field>
             <Field label="Unit of measure">
@@ -428,6 +454,7 @@ export default function AddProductPage() {
               <AdornedInput
                 type="number"
                 min="0"
+                max="100"
                 step="0.01"
                 suffix="%"
                 value={taxRate}
@@ -449,8 +476,8 @@ export default function AddProductPage() {
               <AdornedInput
                 type="number"
                 min="0"
-                step="1"
-                prefix="$"
+                step="0.01"
+                prefix={symbol}
                 value={shippingCost}
                 onChange={(e) => setShippingCost(e.target.value)}
               />
@@ -460,6 +487,7 @@ export default function AddProductPage() {
                 required
                 type="number"
                 min="0"
+                step="1"
                 suffix="days"
                 value={leadTimeDays}
                 onChange={(e) => setLeadTimeDays(e.target.value)}
@@ -481,6 +509,7 @@ export default function AddProductPage() {
                 required
                 type="number"
                 min="0"
+                step="1"
                 value={quantityAvailable}
                 onChange={(e) => setQuantityAvailable(e.target.value)}
                 className={inputClass}

@@ -28,6 +28,7 @@ export interface SupplierOffer {
   taxRate: string | null;
   taxInclusive: boolean;
   imageUrl?: string | null;
+  currency: string;
 }
 
 /** Turns a stored "/uploads/..." path into a full URL the browser can load. */
@@ -62,6 +63,7 @@ export interface CreateOfferInput {
   taxInclusive?: boolean;
   supplierId?: string;
   imageUrl?: string;
+  currency: string;
 }
 
 /** Uploads a product image and returns its stored path (e.g. "/uploads/products/abc.jpg"). */

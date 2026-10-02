@@ -75,8 +75,7 @@ procurementRouter.post("/procurement", async (req, res) => {
       .set({
         status: result.status,
         recommendedPlan: result.recommendedPlan ?? null,
-        totalCost: result.recommendedPlan?.totalCost ?? null,
-        updatedAt: new Date(),
+totalCost: result.recommendedPlan ? String(result.recommendedPlan.totalCost) : null,        updatedAt: new Date(),
       })
       .where(eq(procurementTasks.id, task.id));
 

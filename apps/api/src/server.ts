@@ -14,6 +14,11 @@ import { adminSuppliersRouter } from "./routes/adminSuppliers.js";
 import { rfqRouter } from "./routes/rfqs.js";
 import path from "path";
 import { uploadsRouter } from "./routes/uploads.js";
+import { startFxRefreshJob } from "./procurement/lib/refreshFxRates.js";
+import { fxRatesRouter } from "./routes/fxRates.js";
+
+
+startFxRefreshJob();
 
 process.on("unhandledRejection", (err) => {
   console.error("Unhandled rejection (server stays up):", err);
@@ -45,7 +50,7 @@ app.use("/api", supplierOrdersRouter);
 app.use("/api/admin-auth", adminAuthRouter);
 app.use("/api/admin/suppliers", adminSuppliersRouter);
 app.use("/api/rfqs", rfqRouter);
-
+app.use("/api", fxRatesRouter);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 

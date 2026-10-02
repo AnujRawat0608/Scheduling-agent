@@ -10,18 +10,37 @@ export interface SupplierQuote {
   supplierName: string;
   supplierId: string | null;
   supplierRegion: string | null;
-  unitPrice: number;
+  unitPrice: number;          // in the supplier's currency
+  currency: string;
   quantityAvailable: number;
   leadTimeDays: number;
-  shippingCost: number;
+  shippingCost: number;       // in the supplier's currency
   moq: number;
+  taxType: string | null;
+  taxRate: number | null;     // percent, as declared by the supplier
+  taxInclusive: boolean;
+  simulated?: boolean;        // true = invented fallback quote, not a real offer
   respondedAt: string;
 }
 
+export interface PricingBreakdown {
+  supplierCurrency: string;
+  buyerCurrency: string;
+  fxRate: number;             // 1 supplier-currency unit = fxRate buyer-currency units
+  taxRate: number | null;
+  taxInclusive: boolean;
+  unitPriceConverted: number;
+  local:     { subtotal: number; taxAmount: number; shipping: number; total: number }; // supplier currency
+  converted: { subtotal: number; taxAmount: number; shipping: number; total: number }; // buyer currency
+}
+
 export interface QuoteScore extends SupplierQuote {
-  totalCost: number;
+  totalCost: number;          // buyer currency (INR). compareQuotes keeps using this.
+  buyerCurrency: string;
+  pricing: PricingBreakdown | null; // null if the quote couldn't be priced (e.g. no exchange rate)
   score: number;
   rationale: string;
+  isBest: boolean;
 }
 
 export interface LineItemQuotes {

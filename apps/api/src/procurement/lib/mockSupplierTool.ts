@@ -30,5 +30,10 @@ export function fetchSimulatedSupplierQuotes(
     shippingCost: Math.round(basePrice * 0.5),
     moq: Math.max(1, Math.floor(quantity / s.moqDivisor)),
     respondedAt: formatISO(new Date()),
+    currency: "INR",
+taxType: null,
+taxRate: null,
+taxInclusive: false,
+simulated: true,
   }));
 }

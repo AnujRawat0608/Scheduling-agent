@@ -21,17 +21,21 @@ async function sourceOneItem(item: string, quantity: number): Promise<SupplierQu
     .orderBy(sql`ts_rank(${searchVector}, ${searchQuery}) DESC`);
 
   if (matches.length > 0) {
-    return matches.map(({ offer, supplierRegion }) => ({
-      supplierName: offer.supplierName,
-      supplierId: offer.supplierId,
-      supplierRegion: supplierRegion ?? null,
-      unitPrice: offer.unitPrice,
-      quantityAvailable: offer.quantityAvailable,
-      leadTimeDays: offer.leadTimeDays,
-      shippingCost: offer.shippingCost,
-      moq: offer.moq,
-      respondedAt: formatISO(new Date()),
-    }));
+   return matches.map(({ offer, supplierRegion }) => ({
+  supplierName: offer.supplierName,
+  supplierId: offer.supplierId,
+  supplierRegion: supplierRegion ?? null,
+  unitPrice: Number(offer.unitPrice),
+  currency: offer.currency,
+  quantityAvailable: offer.quantityAvailable,
+  leadTimeDays: offer.leadTimeDays,
+  shippingCost: Number(offer.shippingCost),
+  moq: offer.moq,
+  taxType: offer.taxType,
+  taxRate: offer.taxRate == null ? null : Number(offer.taxRate),
+  taxInclusive: offer.taxInclusive,
+  respondedAt: formatISO(new Date()),
+}));
   }
 
   return fetchSimulatedSupplierQuotes(item, quantity).map((q) => ({

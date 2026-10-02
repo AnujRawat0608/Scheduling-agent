@@ -16,72 +16,118 @@ export function runInvoiceEvals() {
     }
   };
 
- const makeQuote = (overrides: Partial<QuoteScore> = {}): QuoteScore => ({
-  supplierId: null,
-  supplierRegion: null,
-  supplierName: "Test",
-  unitPrice: 100,
-  quantityAvailable: 100,
-  leadTimeDays: 5,
-  shippingCost: 200,
-  moq: 1,
-  respondedAt: "",
-  totalCost: 0,
-  score: 1,
-  rationale: "",
-  ...overrides,
-});
+  // Fixed rates so expected numbers are exact: 1 USD = 96 INR. No EUR on purpose.
+  const rates = new Map<string, number>([
+    ["USD", 1],
+    ["INR", 96],
+  ]);
 
-  const paise = (rupees: number) => Math.round(rupees * 100);
+  const makeQuote = (overrides: Partial<QuoteScore> = {}): QuoteScore => ({
+    supplierId: null,
+    supplierRegion: null,
+    supplierName: "Test",
+    unitPrice: 100,
+    currency: "INR",
+    quantityAvailable: 100,
+    leadTimeDays: 5,
+    shippingCost: 200,
+    moq: 1,
+    taxType: null,
+    taxRate: null,
+    taxInclusive: false,
+    respondedAt: "",
+    totalCost: 0,
+    buyerCurrency: "INR",
+    pricing: null,
+    score: 1,
+    rationale: "",
+    isBest: false,
+    ...overrides,
+  });
 
-  // 1. Basic maths: items 50 × 100 = 5000, shipping 200, fee 3% of 5200 = 156
+  const throws = (fn: () => unknown) => {
+    try {
+      fn();
+      return false;
+    } catch {
+      return true;
+    }
+  };
+
+  const minor = (amount: number) => Math.round(amount * 100);
+
+  // 1. Basic maths, INR supplier and buyer, no tax, no platform fee: 50 × 100 + 200 shipping
   {
-    const invoice = calculateInvoice(makeQuote(), 50);
-    const expectedTotal = 5000 + 200 + 156;
-    check(
-      "invoice-total-matches-expected-math",
-      invoice.total === expectedTotal,
-      `expected ${expectedTotal}, got ${invoice.total}`
-    );
+    const invoice = calculateInvoice(makeQuote(), 50, rates);
+    check("invoice-total-matches-expected-math", invoice.total === 5200, `expected 5200, got ${invoice.total}`);
+    check("no-platform-fee-line", !invoice.lineItems.some((li) => /fee/i.test(li.label)));
   }
 
-  // 2. Line items always add up to the total (compared in paise)
+  // 2. Line items always add up to the total (compared in minor units)
   {
-    const invoice = calculateInvoice(makeQuote(), 50);
-    const sumPaise = invoice.lineItems.reduce((s, li) => s + paise(li.amount), 0);
-    check(
-      "line-items-sum-to-total",
-      sumPaise === invoice.totalPaise,
-      `line items sum to ${sumPaise} paise, total is ${invoice.totalPaise}`
-    );
+    const cases: [string, QuoteScore, number][] = [
+      ["plain", makeQuote(), 50],
+      ["tax-exclusive", makeQuote({ taxRate: 18 }), 10],
+      ["tax-inclusive", makeQuote({ taxRate: 18, taxInclusive: true }), 10],
+      ["usd-supplier", makeQuote({ currency: "USD", unitPrice: 10.5, shippingCost: 5, taxRate: 18 }), 3],
+    ];
+    for (const [label, quote, qty] of cases) {
+      const invoice = calculateInvoice(quote, qty, rates);
+      const sum = invoice.lineItems.reduce((s, li) => s + minor(li.amount), 0);
+      check(`line-items-sum-to-total (${label})`, sum === invoice.totalMinor, `lines ${sum}, total ${invoice.totalMinor}`);
+    }
   }
 
   // 3. Fractional prices must not drift (99.99 × 3 = 299.96999999999997 in naive float maths)
   {
-    const invoice = calculateInvoice(makeQuote({ unitPrice: 99.99, shippingCost: 0 }), 3);
-    // items 299.97, fee 3% = 8.9991 -> ₹9.00, total 308.97
-    check("fractional-price-has-no-float-drift", invoice.total === 308.97, `got ${invoice.total}`);
-    check("total-is-integer-paise", Number.isInteger(invoice.totalPaise), `got ${invoice.totalPaise}`);
+    const invoice = calculateInvoice(makeQuote({ unitPrice: 99.99, shippingCost: 0 }), 3, rates);
+    check("fractional-price-has-no-float-drift", invoice.total === 299.97, `got ${invoice.total}`);
+    check("total-is-integer-minor-units", Number.isInteger(invoice.totalMinor), `got ${invoice.totalMinor}`);
   }
 
-  // 4. Bad input must throw, never produce NaN or an undercharged bill
+  // 4. Currency conversion: Axme example, $2 × 50 + $11 shipping = $111 -> 10,656 INR at 96
   {
-    const throws = (fn: () => unknown) => {
-      try {
-        fn();
-        return false;
-      } catch {
-        return true;
-      }
-    };
-    check("rejects-zero-quantity", throws(() => calculateInvoice(makeQuote(), 0)));
-    check("rejects-fractional-quantity", throws(() => calculateInvoice(makeQuote(), 2.5)));
+    const invoice = calculateInvoice(makeQuote({ currency: "USD", unitPrice: 2, shippingCost: 11 }), 50, rates);
+    check("usd-supplier-converted-to-inr", invoice.total === 10656, `got ${invoice.total}`);
+    check("supplier-total-kept-in-original-currency", invoice.supplierTotal === 111 && invoice.supplierCurrency === "USD");
+    check("fx-rate-recorded", invoice.fxRate === 96, `got ${invoice.fxRate}`);
+  }
+
+  // 5. Tax added on top: 10 × 100 = 1000, 18% = 180, shipping 50 -> 1230
+  {
+    const invoice = calculateInvoice(makeQuote({ shippingCost: 50, taxRate: 18 }), 10, rates);
+    check("tax-exclusive-adds-tax", invoice.totalMinor === 123000, `got ${invoice.totalMinor}`);
+    check("tax-line-present", invoice.lineItems.some((li) => /tax/i.test(li.label) && li.amount === 180));
+  }
+
+  // 6. Price already includes tax: total must NOT grow, tax is shown as contained in it
+  {
+    const invoice = calculateInvoice(makeQuote({ shippingCost: 50, taxRate: 18, taxInclusive: true }), 10, rates);
+    check("tax-inclusive-does-not-double-tax", invoice.totalMinor === 105000, `got ${invoice.totalMinor}`);
+    const taxLine = invoice.lineItems.find((li) => /tax/i.test(li.label));
+    check("tax-inclusive-shows-contained-tax", taxLine?.amount === 152.54, `got ${taxLine?.amount}`);
+  }
+
+  // 7. Zero tax rate behaves like no tax and adds no tax line
+  {
+    const invoice = calculateInvoice(makeQuote({ taxRate: 0 }), 10, rates);
+    check("zero-tax-has-no-tax-line", !invoice.lineItems.some((li) => /tax/i.test(li.label)));
+  }
+
+  // 8. Bad input must throw, never produce NaN or an undercharged bill
+  {
+    check("rejects-zero-quantity", throws(() => calculateInvoice(makeQuote(), 0, rates)));
+    check("rejects-fractional-quantity", throws(() => calculateInvoice(makeQuote(), 2.5, rates)));
     check(
       "rejects-missing-shipping",
-      throws(() => calculateInvoice(makeQuote({ shippingCost: undefined as unknown as number }), 10))
+      throws(() => calculateInvoice(makeQuote({ shippingCost: undefined as unknown as number }), 10, rates))
     );
-    check("rejects-nan-unit-price", throws(() => calculateInvoice(makeQuote({ unitPrice: NaN }), 10)));
-    check("rejects-negative-unit-price", throws(() => calculateInvoice(makeQuote({ unitPrice: -5 }), 10)));
+    check("rejects-nan-unit-price", throws(() => calculateInvoice(makeQuote({ unitPrice: NaN }), 10, rates)));
+    check("rejects-negative-unit-price", throws(() => calculateInvoice(makeQuote({ unitPrice: -5 }), 10, rates)));
+    check(
+      "rejects-currency-with-no-rate",
+      throws(() => calculateInvoice(makeQuote({ currency: "EUR" }), 10, rates))
+    );
   }
 
   console.log(`\n  ${passed} passed, ${failed} failed\n`);

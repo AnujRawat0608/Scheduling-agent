@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
+import { formatMoney } from "../../lib/format";
 import { createPortal } from "react-dom";
 import {
   Boxes,
@@ -677,13 +678,13 @@ export default function SupplyChainPage() {
                         </td>
                         <td className="px-6 py-3">
                           <div className="text-neutral-900">
-                            {formatUSD(o.unitPrice)}
+                            {formatMoney(o.unitPrice, o.currency)}
                             <span className="ml-1 text-xs font-normal text-neutral-400">
                               / {o.unitOfMeasure ?? "piece"}
                             </span>
                           </div>
                           <div className="text-xs text-neutral-400">
-                            {o.shippingCost ? `+ ${formatUSD(o.shippingCost)} ship` : "Free shipping"}
+                            {o.shippingCost ? `+ ${formatMoney(o.shippingCost, o.currency)} ship` : "Free shipping"}
                           </div>
                         </td>
                         <td className="px-6 py-3">
