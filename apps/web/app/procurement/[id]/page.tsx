@@ -1,14 +1,21 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Check, ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { RiskAssessmentBadge } from "../../../components/RiskAssessmentBadge";
+import { formatMoney } from "../../../lib/format";
+import { DISPLAY_CURRENCIES } from "../../../lib/fxApi";
+import { useMoneyDisplay } from "../../../lib/useMoneyDisplay";
 import {
   fetchProcurementTask,
   type QuoteScore,
   type FulfillmentPlan,
 } from "../../../lib/procurementApi";
+
+// The backend ranks and sums everything in this currency. The dropdown below only
+// changes how amounts are DISPLAYED.
+const BUYER_CURRENCY = "INR";
 
 const STATUS_STYLES: Record<string, string> = {
   extracting: "bg-neutral-100 text-neutral-600",
@@ -29,6 +36,9 @@ export default function ProcurementDetailPage({ params }: { params: { id: string
       return status === "done" || status === "failed" ? false : 2000;
     },
   });
+
+  // Hooks must run before any early return below.
+  const md = useMoneyDisplay(BUYER_CURRENCY);
 
   if (error) {
     return (
@@ -57,18 +67,45 @@ export default function ProcurementDetailPage({ params }: { params: { id: string
       </Link>
 
       <div className="rounded-2xl border border-neutral-200 bg-white p-6 space-y-5">
-        <div>
-          <h1 className="text-lg font-medium text-neutral-900">{task.itemsSummary}</h1>
-          <div className="mt-1 flex items-center gap-2">
-            <span
-              className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[state.status] ?? ""}`}
-            >
-              {state.status.replace("_", " ")}
-            </span>
-            {state.request?.requiredBy && (
-              <span className="text-xs text-neutral-500">
-                needed by {new Date(state.request.requiredBy).toLocaleDateString()}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-lg font-medium text-neutral-900">{task.itemsSummary}</h1>
+            <div className="mt-1 flex items-center gap-2">
+              <span
+                className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[state.status] ?? ""}`}
+              >
+                {state.status.replace("_", " ")}
               </span>
+              {state.request?.requiredBy && (
+                <span className="text-xs text-neutral-500">
+                  needed by {new Date(state.request.requiredBy).toLocaleDateString()}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Display currency: changes how amounts are shown, not how suppliers are ranked */}
+          <div className="flex shrink-0 flex-col items-end gap-1.5">
+            <label className="flex items-center gap-1.5 text-xs text-neutral-500">
+              Show totals in
+              <select
+                value={md.displayCurrency}
+                onChange={(e) => md.setDisplayCurrency(e.target.value)}
+                className="rounded-md border border-neutral-300 bg-white px-1.5 py-1 text-xs font-medium text-neutral-800 outline-none focus:border-[#3d6bff]"
+              >
+                {DISPLAY_CURRENCIES.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {md.displayCurrency !== BUYER_CURRENCY && (
+              <p className="max-w-[260px] text-right text-[11px] text-neutral-400">
+                {md.fx
+                  ? `Approximate, converted at rates from ${md.ratesAsOf}. Suppliers invoice in their own currency.`
+                  : "Exchange rates unavailable right now, showing original currencies."}
+              </p>
             )}
           </div>
         </div>
@@ -94,7 +131,7 @@ export default function ProcurementDetailPage({ params }: { params: { id: string
             <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
               Recommended plan
             </h2>
-            <PlanCard plan={state.recommendedPlan} highlight />
+            <PlanCard plan={state.recommendedPlan} show={md.money} highlight />
 
             {state.alternativePlans && state.alternativePlans.length > 0 && (
               <details className="rounded-lg border border-neutral-200">
@@ -104,7 +141,7 @@ export default function ProcurementDetailPage({ params }: { params: { id: string
                 </summary>
                 <div className="space-y-2 border-t border-neutral-100 p-3">
                   {state.alternativePlans.map((plan, i) => (
-                    <PlanCard key={i} plan={plan} />
+                    <PlanCard key={i} plan={plan} show={md.money} />
                   ))}
                 </div>
               </details>
@@ -141,28 +178,41 @@ export default function ProcurementDetailPage({ params }: { params: { id: string
                         </tr>
                       </thead>
                       <tbody>
-                        {liq.topQuotes.map((q: QuoteScore) => (
-                          <tr key={q.supplierName} className="border-t border-neutral-100">
-                            <td className="px-4 py-2 font-medium text-neutral-900">
-                              {q.supplierId ? (
-                                
-                                  <a href={`/suppliers/${q.supplierId}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-[#3d6bff] hover:underline"
-                                >
-                                  {q.supplierName}
-                                </a>
-                              ) : (
-                                q.supplierName
-                              )}
-                            </td>
-                            <td className="px-4 py-2">₹{q.unitPrice.toLocaleString("en-IN")}</td>
-                            <td className="px-4 py-2">{q.leadTimeDays}d</td>
-                            <td className="px-4 py-2">₹{q.totalCost.toLocaleString("en-IN")}</td>
-                            <td className="px-4 py-2 text-xs text-neutral-500">{q.rationale}</td>
-                          </tr>
-                        ))}
+                        {liq.topQuotes.map((q: QuoteScore, j: number) => {
+                          const approx = md.unitApprox(q);
+                          const detail = md.quoteDetail(q);
+                          return (
+                            // One supplier can have several offers, so the supplier name alone is not a unique key.
+                            <tr key={`${q.supplierId ?? q.supplierName}-${j}`} className="border-t border-neutral-100">
+                              <td className="px-4 py-2 font-medium text-neutral-900">
+                                {q.supplierId ? (
+                                  <a
+                                    href={`/suppliers/${q.supplierId}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-[#3d6bff] hover:underline"
+                                  >
+                                    {q.supplierName}
+                                  </a>
+                                ) : (
+                                  q.supplierName
+                                )}
+                              </td>
+                              {/* Unit price: always the supplier's own price, plus an approximation */}
+                              <td className="px-4 py-2">
+                                <div>{formatMoney(q.unitPrice, q.currency)}</div>
+                                {approx && <div className="text-xs text-neutral-400">≈ {approx}</div>}
+                              </td>
+                              <td className="px-4 py-2">{q.leadTimeDays}d</td>
+                              {/* Total, in the display currency */}
+                              <td className="px-4 py-2">
+                                <div className="font-medium">{md.quoteAmount(q, "total")}</div>
+                                {detail && <div className="text-xs text-neutral-400">{detail}</div>}
+                              </td>
+                              <td className="px-4 py-2 text-xs text-neutral-500">{q.rationale}</td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -189,7 +239,16 @@ export default function ProcurementDetailPage({ params }: { params: { id: string
   );
 }
 
-function PlanCard({ plan, highlight }: { plan: FulfillmentPlan; highlight?: boolean }) {
+function PlanCard({
+  plan,
+  show,
+  highlight,
+}: {
+  plan: FulfillmentPlan;
+  /** Formats an amount (in the given source currency) in the buyer's display currency. */
+  show: (amount: number, from: string) => string;
+  highlight?: boolean;
+}) {
   return (
     <div
       className={`rounded-lg border p-3 ${
@@ -201,7 +260,7 @@ function PlanCard({ plan, highlight }: { plan: FulfillmentPlan; highlight?: bool
           {plan.legs.length === 1 ? "Single supplier" : `Split across ${plan.legs.length} suppliers`}
         </span>
         <span className="text-sm font-semibold text-neutral-900">
-          ₹{plan.totalCost.toLocaleString("en-IN")}
+          {show(plan.totalCost, BUYER_CURRENCY)}
         </span>
       </div>
       <p className="mt-1 text-xs text-neutral-500">{plan.rationale}</p>
@@ -211,7 +270,7 @@ function PlanCard({ plan, highlight }: { plan: FulfillmentPlan; highlight?: bool
             <span>
               {leg.supplierName} — {leg.lineItems.map((li) => li.item).join(", ")}
             </span>
-            <span>₹{leg.legCost.toLocaleString("en-IN")}</span>
+            <span>{show(leg.legCost, BUYER_CURRENCY)}</span>
           </div>
         ))}
       </div>

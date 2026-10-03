@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Receipt, TriangleAlert, X, FileText, ChevronLeft, ChevronRight } from "lucide-react";
 import { fetchAllSupplierOrders, confirmSupplierOrder, type SupplierOrder } from "../../lib/supplierOrdersApi";
+import { formatMoney } from "../../lib/format";
 
 const STATUS_STYLES: Record<string, string> = {
   pending: "bg-orange-100 text-orange-700",
@@ -20,57 +21,82 @@ type Filter = (typeof FILTERS)[number];
 const PAGE_SIZE = 10;
 
 /* ---------- Money helpers ---------- */
-/** Order money fields are order-level rollups now (summed across items on
- * the backend), not derived from a single unitPrice/quantity pair. */
-function toPaise(value: unknown): number | null {
+// Amounts are handled in minor units (cents/paise) so sums stay exact, and every order
+// is shown in ITS OWN currency. Orders in different currencies are never added together.
+
+/** Order money fields are order-level rollups (summed across items on the backend). */
+function toMinor(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
-  const n = typeof value === "number" ? value : Number(String(value).replace(/[₹,\s]/g, ""));
+  const n = typeof value === "number" ? value : Number(String(value).replace(/[₹$€£,\s]/g, ""));
   return Number.isFinite(n) ? Math.round(n * 100) : null;
 }
 
-function subtotalPaise(o: SupplierOrder): number | null {
-  return toPaise(o.subtotal);
+/** The currency an order was placed in. Orders saved before currencies existed were backfilled as USD. */
+function currencyOf(o: SupplierOrder): string {
+  return o.currency || "USD";
 }
 
-function taxPaise(o: SupplierOrder): number {
-  return toPaise(o.taxAmount) ?? 0;
+function formatMinor(minor: number, currency: string) {
+  return formatMoney(minor / 100, currency);
 }
 
-function shippingPaise(o: SupplierOrder): number {
-  return toPaise(o.shippingCost) ?? 0;
+function subtotalMinor(o: SupplierOrder): number | null {
+  return toMinor(o.subtotal);
+}
+
+function taxMinor(o: SupplierOrder): number {
+  return toMinor(o.taxAmount) ?? 0;
+}
+
+function shippingMinor(o: SupplierOrder): number {
+  return toMinor(o.shippingCost) ?? 0;
 }
 
 /** The backend already computes this as subtotal + tax + shipping across
  * all items; fall back to computing it client-side only if `total` itself
  * is missing (e.g. an order created before this field existed). */
 function lineTotal(o: SupplierOrder): number | null {
-  const fromServer = toPaise(o.total);
+  const fromServer = toMinor(o.total);
   if (fromServer !== null) return fromServer;
 
-  const sub = subtotalPaise(o);
+  const sub = subtotalMinor(o);
   if (sub === null) return null;
-  return sub + taxPaise(o) + shippingPaise(o);
-}
-
-function formatINR(paise: number) {
-  return (paise / 100).toLocaleString("en-IN", {
-    style: "currency",
-    currency: "INR",
-    minimumFractionDigits: paise % 100 === 0 ? 0 : 2,
-    maximumFractionDigits: 2,
-  });
+  return sub + taxMinor(o) + shippingMinor(o);
 }
 
 /** Every item that does carry a unit price, summed — used in the detail
  * modal's per-item breakdown, not for the order-level total (that's
  * o.subtotal/o.total, computed server-side). */
 function itemLineTotal(item: SupplierOrder["items"][number]): number | null {
-  const unit = toPaise(item.unitPrice);
+  const unit = toMinor(item.unitPrice);
   if (unit === null) return null;
   return unit * item.quantity;
 }
 
-const sumPaise = (orders: SupplierOrder[]) => orders.reduce((sum, o) => sum + (lineTotal(o) ?? 0), 0);
+/** Sum order totals separately for each currency. */
+function sumByCurrency(orders: SupplierOrder[]): Map<string, number> {
+  const totals = new Map<string, number>();
+  for (const o of orders) {
+    const t = lineTotal(o);
+    if (t === null) continue;
+    const cur = currencyOf(o);
+    totals.set(cur, (totals.get(cur) ?? 0) + t);
+  }
+  return totals;
+}
+
+/** One line per currency, e.g. "$12,345.00" and "€88.98". */
+function MoneyTotals({ totals }: { totals: Map<string, number> }) {
+  const entries = [...totals.entries()].sort(([a], [b]) => a.localeCompare(b));
+  if (entries.length === 0) return <span className="text-neutral-400">—</span>;
+  return (
+    <>
+      {entries.map(([cur, minor]) => (
+        <div key={cur}>{formatMinor(minor, cur)}</div>
+      ))}
+    </>
+  );
+}
 
 const totalQuantity = (o: SupplierOrder) => o.items.reduce((sum, item) => sum + item.quantity, 0);
 
@@ -84,9 +110,10 @@ function itemsSummary(o: SupplierOrder): string {
 
 /* ---------- Order detail / invoice modal ---------- */
 function OrderDetailModal({ order, onClose }: { order: SupplierOrder; onClose: () => void }) {
-  const sub = subtotalPaise(order);
-  const tax = taxPaise(order);
-  const shipping = shippingPaise(order);
+  const currency = currencyOf(order);
+  const sub = subtotalMinor(order);
+  const tax = taxMinor(order);
+  const shipping = shippingMinor(order);
   const total = lineTotal(order);
 
   return (
@@ -157,13 +184,16 @@ function OrderDetailModal({ order, onClose }: { order: SupplierOrder; onClose: (
 
           {/* Line items */}
           <div className="rounded-xl border border-neutral-200 p-4 space-y-3">
-            <span className="text-xs font-medium text-neutral-500">
-              {order.items.length} {order.items.length === 1 ? "item" : "items"}
-            </span>
+            <div className="flex items-center justify-between text-xs font-medium text-neutral-500">
+              <span>
+                {order.items.length} {order.items.length === 1 ? "item" : "items"}
+              </span>
+              <span>Priced in {currency}</span>
+            </div>
 
             <div className="divide-y divide-neutral-100">
               {order.items.map((item) => {
-                const unit = toPaise(item.unitPrice);
+                const unit = toMinor(item.unitPrice);
                 const itemTotal = itemLineTotal(item);
                 return (
                   <div key={item.id} className="py-2.5 first:pt-0 last:pb-0">
@@ -172,8 +202,8 @@ function OrderDetailModal({ order, onClose }: { order: SupplierOrder; onClose: (
                       <span className="text-neutral-500">Qty {item.quantity}</span>
                     </div>
                     <div className="mt-1 flex items-center justify-between text-xs text-neutral-400">
-                      <span>{unit !== null ? `${formatINR(unit)} / unit` : "No unit price recorded"}</span>
-                      {itemTotal !== null && <span className="tabular-nums">{formatINR(itemTotal)}</span>}
+                      <span>{unit !== null ? `${formatMinor(unit, currency)} / unit` : "No unit price recorded"}</span>
+                      {itemTotal !== null && <span className="tabular-nums">{formatMinor(itemTotal, currency)}</span>}
                     </div>
                   </div>
                 );
@@ -183,19 +213,19 @@ function OrderDetailModal({ order, onClose }: { order: SupplierOrder; onClose: (
             <div className="mt-1 space-y-1.5 border-t border-neutral-100 pt-3 text-sm">
               <div className="flex justify-between text-neutral-600">
                 <span>Subtotal</span>
-                <span className="tabular-nums">{sub !== null ? formatINR(sub) : "—"}</span>
+                <span className="tabular-nums">{sub !== null ? formatMinor(sub, currency) : "—"}</span>
               </div>
               <div className="flex justify-between text-neutral-600">
                 <span>Tax</span>
-                <span className="tabular-nums">{formatINR(tax)}</span>
+                <span className="tabular-nums">{formatMinor(tax, currency)}</span>
               </div>
               <div className="flex justify-between text-neutral-600">
                 <span>Shipping</span>
-                <span className="tabular-nums">{shipping > 0 ? formatINR(shipping) : "Free"}</span>
+                <span className="tabular-nums">{shipping > 0 ? formatMinor(shipping, currency) : "Free"}</span>
               </div>
               <div className="flex justify-between border-t border-neutral-200 pt-2 font-semibold text-neutral-900">
                 <span>Total</span>
-                <span className="tabular-nums">{total !== null ? formatINR(total) : "—"}</span>
+                <span className="tabular-nums">{total !== null ? formatMinor(total, currency) : "—"}</span>
               </div>
             </div>
           </div>
@@ -253,15 +283,18 @@ function BillingContent() {
   const cancelledCount = orders.length - billable.length;
   const missingPrice = useMemo(() => billable.filter((o) => lineTotal(o) === null), [billable]);
 
+  // Totals are kept per currency: dollars, euros and rupees are never added together.
   const totals = useMemo(() => {
     const open = billable.filter((o) => o.status !== "delivered");
     const delivered = billable.filter((o) => o.status === "delivered");
     return {
-      total: sumPaise(billable),
-      outstanding: sumPaise(open),
-      delivered: sumPaise(delivered),
+      total: sumByCurrency(billable),
+      outstanding: sumByCurrency(open),
+      delivered: sumByCurrency(delivered),
     };
   }, [billable]);
+
+  const hasMultipleCurrencies = totals.total.size > 1;
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: orders.length };
@@ -274,7 +307,7 @@ function BillingContent() {
     [orders, filter]
   );
   const filteredSubtotal = useMemo(
-    () => sumPaise(filtered.filter((o) => o.status !== "cancelled")),
+    () => sumByCurrency(filtered.filter((o) => o.status !== "cancelled")),
     [filtered]
   );
 
@@ -351,21 +384,30 @@ function BillingContent() {
           <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div className="rounded-xl border border-neutral-200 bg-white p-5">
               <div className="mb-1 text-xs text-neutral-500">Total order value</div>
-              <div className="text-xl font-semibold tabular-nums text-neutral-900">{formatINR(totals.total)}</div>
+              <div className="text-xl font-semibold tabular-nums text-neutral-900">
+                <MoneyTotals totals={totals.total} />
+              </div>
               {cancelledCount > 0 && (
                 <div className="mt-1 text-xs text-neutral-400">
                   Excludes {cancelledCount} cancelled {cancelledCount === 1 ? "order" : "orders"}
                 </div>
               )}
+              {hasMultipleCurrencies && (
+                <div className="mt-1 text-xs text-neutral-400">Shown per currency, not converted</div>
+              )}
             </div>
             <div className="rounded-xl border border-neutral-200 bg-white p-5">
               <div className="mb-1 text-xs text-neutral-500">Outstanding</div>
-              <div className="text-xl font-semibold tabular-nums text-neutral-900">{formatINR(totals.outstanding)}</div>
+              <div className="text-xl font-semibold tabular-nums text-neutral-900">
+                <MoneyTotals totals={totals.outstanding} />
+              </div>
               <div className="mt-1 text-xs text-neutral-400">Pending, confirmed and shipped</div>
             </div>
             <div className="rounded-xl border border-neutral-200 bg-white p-5">
               <div className="mb-1 text-xs text-neutral-500">Delivered</div>
-              <div className="text-xl font-semibold tabular-nums text-neutral-900">{formatINR(totals.delivered)}</div>
+              <div className="text-xl font-semibold tabular-nums text-neutral-900">
+                <MoneyTotals totals={totals.delivered} />
+              </div>
             </div>
           </div>
 
@@ -423,7 +465,11 @@ function BillingContent() {
                           cancelled ? "line-through" : ""
                         }`}
                       >
-                        {total !== null ? formatINR(total) : <span className="text-amber-600">No price</span>}
+                        {total !== null ? (
+                          formatMinor(total, currencyOf(o))
+                        ) : (
+                          <span className="text-amber-600">No price</span>
+                        )}
                       </td>
                       <td className="px-5 py-3 text-neutral-500">
                         {new Date(o.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
@@ -477,9 +523,12 @@ function BillingContent() {
                   <tr className="border-t border-neutral-200 bg-neutral-50">
                     <td colSpan={3} className="px-5 py-3 text-sm text-neutral-500">
                       {filter === "all" ? "Total" : `Total for ${filter} orders`}
+                      {filteredSubtotal.size > 1 && (
+                        <span className="ml-1 text-xs text-neutral-400">(per currency)</span>
+                      )}
                     </td>
                     <td className="px-5 py-3 text-right font-semibold tabular-nums text-neutral-900">
-                      {formatINR(filteredSubtotal)}
+                      <MoneyTotals totals={filteredSubtotal} />
                     </td>
                     <td colSpan={3} />
                   </tr>

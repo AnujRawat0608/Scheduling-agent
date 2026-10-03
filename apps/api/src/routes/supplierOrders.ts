@@ -1,9 +1,10 @@
 import { Router } from "express";
 import { and, eq, desc, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { supplierOrders, supplierOrderItems } from "../db/suppliersSchema.js";
+import { supplierOrders, supplierOrderItems,suppliers } from "../db/suppliersSchema.js";
 import { supplierOffers } from "../db/supplyChainSchema.js";
 import { requireSupplierAuth } from "../agent/lib/supplierAuth.js";
+import { notifyBuyerOrderShipped } from "../lib/orderNotifications.js";
 
 export const supplierOrdersRouter = Router();
 
@@ -259,22 +260,16 @@ supplierOrdersRouter.get("/supplier-orders/mine", requireSupplierAuth, async (re
  * Marks an order as confirmed. Only the supplier the order was placed with
  * can confirm it.
  */
-supplierOrdersRouter.patch("/supplier-orders/:id/confirm", requireSupplierAuth, async (req, res) => {
+supplierOrdersRouter.patch("/supplier-orders/:id/confirm", async (req, res) => {
   try {
     const [order] = await db
       .update(supplierOrders)
       .set({ status: "confirmed" })
-      .where(
-        and(
-          eq(supplierOrders.id, req.params.id),
-          eq(supplierOrders.supplierId, req.supplier!.supplierId)
-        )
-      )
+      .where(and(eq(supplierOrders.id, req.params.id), eq(supplierOrders.status, "pending")))
       .returning();
 
-    // Same answer for "doesn't exist" and "not yours", so ids can't be probed.
     if (!order) {
-      return res.status(404).json({ error: "Order not found" });
+      return res.status(404).json({ error: "Order not found, or it was already confirmed" });
     }
 
     const items = await db
@@ -286,5 +281,63 @@ supplierOrdersRouter.patch("/supplier-orders/:id/confirm", requireSupplierAuth, 
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Could not confirm the order" });
+  }
+});
+
+/**
+ * PATCH /api/supplier-orders/:id/ship
+ * Supplier starts shipping an order the buyer has confirmed. Only that supplier can do it,
+ * and only from "confirmed", so it can't be repeated or applied to the wrong order.
+ */
+supplierOrdersRouter.patch("/supplier-orders/:id/ship", requireSupplierAuth, async (req, res) => {
+  try {
+    if (!UUID_RE.test(req.params.id)) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    const [order] = await db
+      .update(supplierOrders)
+      .set({ status: "shipped" })
+      .where(
+        and(
+          eq(supplierOrders.id, req.params.id),
+          eq(supplierOrders.supplierId, req.supplier!.supplierId),
+          eq(supplierOrders.status, "confirmed")
+        )
+      )
+      .returning();
+
+    // Same answer for "doesn't exist", "not yours" and "not confirmed yet".
+    if (!order) {
+      return res.status(404).json({ error: "Order not found, or it isn't confirmed yet" });
+    }
+
+    const items = await db
+      .select()
+      .from(supplierOrderItems)
+      .where(eq(supplierOrderItems.orderId, order.id));
+
+    const [supplier] = await db
+      .select({ businessName: suppliers.businessName })
+      .from(suppliers)
+      .where(eq(suppliers.id, order.supplierId))
+      .limit(1);
+
+    // The order is already shipped at this point; a mail failure must not undo that.
+    let notified = false;
+    try {
+      notified = await notifyBuyerOrderShipped({
+        order,
+        items,
+        supplierName: supplier?.businessName ?? "Your supplier",
+      });
+    } catch (mailErr) {
+      console.error("Failed to notify buyer of shipment", mailErr);
+    }
+
+    res.json({ order: serializeOrder(order, items), notified });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Could not start shipping" });
   }
 });

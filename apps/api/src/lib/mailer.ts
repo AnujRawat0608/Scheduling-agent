@@ -28,6 +28,27 @@ function getTransporter() {
 }
 
 /**
+ * Sends one email from the platform's address, e.g. the "your order has shipped" notice.
+ * The subject has line breaks stripped so a value taken from user input can't add headers.
+ */
+export async function sendEmail(opts: {
+  to: string;
+  subject: string;
+  text: string;
+  html: string;
+  replyTo?: string;
+}) {
+  await getTransporter().sendMail({
+    from: process.env.MAIL_FROM ?? process.env.SMTP_USER,
+    to: opts.to,
+    replyTo: opts.replyTo,
+    subject: opts.subject.replace(/[\r\n]+/g, " ").trim(),
+    text: opts.text,
+    html: opts.html,
+  });
+}
+
+/**
  * Emails a buyer's inquiry to a supplier.
  * SMTP servers only let you send "from" the account you log in with, so the
  * buyer goes in Reply-To: the supplier just hits Reply to answer them.

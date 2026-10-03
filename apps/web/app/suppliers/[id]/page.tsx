@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { CertificationsCard } from "../../../components/CertificationsCard";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Building2,
@@ -19,6 +20,7 @@ import {
 } from "lucide-react";
 import { fetchSupplierProfile } from "../../../lib/supplierProfileApi";
 import { createSupplierOrder, type SupplierOrderItemInput } from "../../../lib/supplierOrdersApi";
+import { formatMoney } from "../../../lib/format";
 
 type Tab = "overview" | "products" | "rd" | "trade" | "performance";
 
@@ -42,13 +44,14 @@ const primaryBtn =
 /** API decimals often arrive as strings ("250.00"). Always coerce before doing maths. */
 function toNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
-  const n = typeof value === "number" ? value : Number(String(value).replace(/[₹,\s]/g, ""));
+  const n = typeof value === "number" ? value : Number(String(value).replace(/[₹$€£,\s]/g, ""));
   return Number.isFinite(n) ? n : null;
 }
 
-function formatINR(value: unknown) {
+/** A price in the currency the supplier listed it in. */
+function formatPrice(value: unknown, currency: string) {
   const n = toNumber(value);
-  return n === null ? "—" : `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+  return n === null ? "—" : formatMoney(n, currency);
 }
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
@@ -77,6 +80,7 @@ type CartLine = {
   productId?: string;
   itemName: string;
   unitPrice: number | null;
+  currency: string;
   quantity: number;
   moq: number;
 };
@@ -114,6 +118,17 @@ export default function SupplierProfilePage() {
   const pickerHasQty = Number.isInteger(pickerQty) && pickerQty > 0;
   const pickerBelowMoq = !!pickerProduct && pickerHasQty && pickerQty < pickerMoq;
 
+  // One order = one currency (the server rejects mixed-currency orders), so the
+  // first item in the cart decides it.
+  const cartCurrency = cart[0]?.currency ?? null;
+
+  function currencyConflictMessage(productCurrency: string): string | null {
+    if (cartCurrency && cartCurrency !== productCurrency) {
+      return `Your cart is in ${cartCurrency}. This product is priced in ${productCurrency}, so it needs a separate order.`;
+    }
+    return null;
+  }
+
   function handleAddToCart() {
     setAddError(null);
     if (!pickerProduct) {
@@ -126,6 +141,11 @@ export default function SupplierProfilePage() {
     }
     if (pickerQty < pickerMoq) {
       setAddError(`The minimum order for this product is ${pickerMoq} units.`);
+      return;
+    }
+    const conflict = currencyConflictMessage(pickerProduct.currency);
+    if (conflict) {
+      setAddError(conflict);
       return;
     }
 
@@ -144,6 +164,7 @@ export default function SupplierProfilePage() {
           productId: pickerProduct.id,
           itemName: pickerProduct.item,
           unitPrice: pickerUnitPrice,
+          currency: pickerProduct.currency,
           quantity: pickerQty,
           moq: pickerMoq,
         },
@@ -160,11 +181,19 @@ export default function SupplierProfilePage() {
 
   function removeFromCart(key: string) {
     setCart((prev) => prev.filter((line) => line.key !== key));
+    setAddError(null);
   }
 
   // Quick add from a product card: first add uses the minimum order quantity,
   // each further click adds 1 more unit.
-  function addProductToCart(p: { id: string; item: string; unitPrice?: unknown; moq?: unknown }) {
+  function addProductToCart(p: { id: string; item: string; unitPrice?: unknown; moq?: unknown; currency: string }) {
+    const conflict = currencyConflictMessage(p.currency);
+    if (conflict) {
+      setAddError(conflict);
+      return;
+    }
+    setAddError(null);
+
     const moq = toNumber(p.moq) ?? 1;
     setCart((prev) => {
       const existing = prev.find((line) => line.productId === p.id);
@@ -173,17 +202,27 @@ export default function SupplierProfilePage() {
       }
       return [
         ...prev,
-        { key: p.id, productId: p.id, itemName: p.item, unitPrice: toNumber(p.unitPrice), quantity: moq, moq },
+        {
+          key: p.id,
+          productId: p.id,
+          itemName: p.item,
+          unitPrice: toNumber(p.unitPrice),
+          currency: p.currency,
+          quantity: moq,
+          moq,
+        },
       ];
     });
   }
 
   const qtyInCart = (id: string) => cart.find((line) => line.productId === id)?.quantity ?? 0;
 
+  // Subtotal of goods only. Tax and shipping are added by the server when the order is placed.
   const cartTotal = cart.reduce(
     (sum, line) => (line.unitPrice === null ? sum : sum + line.unitPrice * line.quantity),
     0
   );
+  const totalCurrency = cartCurrency ?? "INR";
   const cartUnits = cart.reduce((n, l) => n + l.quantity, 0);
   const cartHasBelowMoqLine = cart.some(
     (line) => Number.isInteger(line.quantity) && line.quantity > 0 && line.quantity < line.moq
@@ -196,10 +235,11 @@ export default function SupplierProfilePage() {
       if (cartHasInvalidQty) throw new Error("Every line needs a whole-number quantity greater than 0.");
       if (cartHasBelowMoqLine) throw new Error("One or more lines are below that product's minimum order quantity.");
 
+      // The server reads price, currency, tax and shipping from the catalog, so only
+      // the product and quantity matter here.
       const items: SupplierOrderItemInput[] = cart.map((line) => ({
         productId: line.productId,
         itemName: line.itemName,
-        unitPrice: line.unitPrice ?? undefined,
         quantity: line.quantity,
       }));
 
@@ -264,7 +304,7 @@ export default function SupplierProfilePage() {
     );
   }
 
-  const { supplier, products } = data;
+  const { supplier, products , certificates} = data;
 
   return (
     <main className="mx-auto max-w-[1400px] space-y-6 px-6 py-16">
@@ -331,7 +371,7 @@ export default function SupplierProfilePage() {
             </div>
 
             <div className="p-6">
-              {activeTab === "overview" && (
+                            {activeTab === "overview" && (
                 <div className="space-y-6">
                   {supplier.companyOverview && (
                     <p className="text-sm leading-relaxed text-neutral-500">{supplier.companyOverview}</p>
@@ -345,7 +385,6 @@ export default function SupplierProfilePage() {
                     <div>
                       <InfoRow label="Total employees" value={supplier.totalEmployees} />
                       <InfoRow label="Year established" value={supplier.yearEstablished} />
-                      <InfoRow label="Certifications" value={supplier.certifications} />
                     </div>
                   </div>
                 </div>
@@ -363,7 +402,10 @@ export default function SupplierProfilePage() {
                           {p.description && (
                             <div className="mt-1 line-clamp-2 text-xs text-neutral-400">{p.description}</div>
                           )}
-<div className="mt-2 text-sm font-medium tabular-nums text-[#c2410c]">{formatINR(p.unitPrice)}</div>                          <div className="mt-1 text-xs text-neutral-400">
+                          <div className="mt-2 text-sm font-medium tabular-nums text-[#c2410c]">
+                            {formatPrice(p.unitPrice, p.currency)}
+                          </div>
+                          <div className="mt-1 text-xs text-neutral-400">
                             MOQ {p.moq} · {p.leadTimeDays}d lead time
                           </div>
                           <button
@@ -460,6 +502,12 @@ export default function SupplierProfilePage() {
               )}
             </div>
           </div>
+          {activeTab === "overview" && (
+            <CertificationsCard
+              certifications={supplier.certifications}
+              certificates={certificates ?? []}
+            />
+          )}
         </div>
 
         {/* RIGHT: place an order + order status */}
@@ -493,7 +541,7 @@ export default function SupplierProfilePage() {
                       <option value="">Select a product…</option>
                       {products.map((p) => (
                         <option key={p.id} value={p.id}>
-                          {p.item} — {formatINR(p.unitPrice)}/unit
+                          {p.item} — {formatPrice(p.unitPrice, p.currency)}/unit
                         </option>
                       ))}
                     </select>
@@ -533,48 +581,55 @@ export default function SupplierProfilePage() {
 
                 {/* Cart */}
                 {cart.length > 0 && (
-                  <div className="overflow-hidden rounded-lg border border-neutral-200">
-                    <div className={`${CART_GRID} bg-neutral-50 px-3 py-2 text-[11px] font-medium text-neutral-500`}>
-                      <span>Item</span>
-                      <span>Unit price</span>
-                      <span>Qty</span>
-                      <span>Subtotal</span>
-                      <span />
-                    </div>
-                    {cart.map((line) => {
-                      const lineBelowMoq =
-                        Number.isInteger(line.quantity) && line.quantity > 0 && line.quantity < line.moq;
-                      const lineSubtotal = line.unitPrice !== null ? line.unitPrice * line.quantity : null;
-                      return (
-                        <div key={line.key} className={`${CART_GRID} border-t border-neutral-100 px-3 py-2.5 text-xs`}>
-                          <span className="font-medium text-neutral-900">{line.itemName}</span>
-                          <span className="tabular-nums text-neutral-600">{formatINR(line.unitPrice)}</span>
-                          <div>
-                            <input
-                              type="number"
-                              min={1}
-                              step="1"
-                              value={line.quantity}
-                              onChange={(e) => updateCartQuantity(line.key, Number(e.target.value))}
-                              aria-invalid={lineBelowMoq}
-                              className="w-full rounded-md border border-neutral-200 px-1.5 py-1 text-xs outline-none focus:border-[#F97316]"
-                            />
-                            {lineBelowMoq && <span className="block text-[10px] text-red-600">Min {line.moq}</span>}
+                  <div className="space-y-1.5">
+                    <div className="overflow-hidden rounded-lg border border-neutral-200">
+                      <div className={`${CART_GRID} bg-neutral-50 px-3 py-2 text-[11px] font-medium text-neutral-500`}>
+                        <span>Item</span>
+                        <span>Unit price</span>
+                        <span>Qty</span>
+                        <span>Subtotal</span>
+                        <span />
+                      </div>
+                      {cart.map((line) => {
+                        const lineBelowMoq =
+                          Number.isInteger(line.quantity) && line.quantity > 0 && line.quantity < line.moq;
+                        const lineSubtotal = line.unitPrice !== null ? line.unitPrice * line.quantity : null;
+                        return (
+                          <div key={line.key} className={`${CART_GRID} border-t border-neutral-100 px-3 py-2.5 text-xs`}>
+                            <span className="font-medium text-neutral-900">{line.itemName}</span>
+                            <span className="tabular-nums text-neutral-600">
+                              {formatPrice(line.unitPrice, line.currency)}
+                            </span>
+                            <div>
+                              <input
+                                type="number"
+                                min={1}
+                                step="1"
+                                value={line.quantity}
+                                onChange={(e) => updateCartQuantity(line.key, Number(e.target.value))}
+                                aria-invalid={lineBelowMoq}
+                                className="w-full rounded-md border border-neutral-200 px-1.5 py-1 text-xs outline-none focus:border-[#F97316]"
+                              />
+                              {lineBelowMoq && <span className="block text-[10px] text-red-600">Min {line.moq}</span>}
+                            </div>
+                            <span className="font-semibold tabular-nums text-neutral-900">
+                              {lineSubtotal !== null ? formatPrice(lineSubtotal, line.currency) : "—"}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => removeFromCart(line.key)}
+                              className="text-neutral-400 transition hover:text-red-600"
+                              aria-label={`Remove ${line.itemName}`}
+                            >
+                              <Trash2 size={14} />
+                            </button>
                           </div>
-                          <span className="font-semibold tabular-nums text-neutral-900">
-                              {lineSubtotal !== null ? formatINR(lineSubtotal) : "—"}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => removeFromCart(line.key)}
-                            className="text-neutral-400 transition hover:text-red-600"
-                            aria-label={`Remove ${line.itemName}`}
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                    </div>
+                    <p className="text-[11px] text-neutral-400">
+                      This order is in {totalCurrency}. Products priced in another currency need a separate order.
+                    </p>
                   </div>
                 )}
 
@@ -642,9 +697,13 @@ export default function SupplierProfilePage() {
                         <span className="tabular-nums">{cartUnits} units total</span>
                       </div>
                       <div className="mt-3 flex justify-between border-t border-neutral-200 pt-3 font-semibold text-neutral-900">
-                        <span>Order total</span>
-                        <span className="tabular-nums">{formatINR(cartTotal)}</span>
+                        <span>Subtotal</span>
+                        <span className="tabular-nums">{formatPrice(cartTotal, totalCurrency)}</span>
                       </div>
+                      <p className="mt-2 text-[11px] font-normal text-neutral-400">
+                        Tax and shipping are calculated when you place the order. The final total is shown on your
+                        order confirmation.
+                      </p>
                     </div>
 
                     <button
@@ -652,14 +711,8 @@ export default function SupplierProfilePage() {
                       disabled={placeOrder.isPending || cartInvalid}
                       className={`${primaryBtn} w-full`}
                     >
-                        {placeOrder.isPending ? (
-                          "Placing order…"
-                        ) : (
-                          <>
-                            Place order · <span className="tabular-nums">{formatINR(cartTotal)}</span>
-                          </>
-                        )}                    
-                        </button>
+                      {placeOrder.isPending ? "Placing order…" : "Place order"}
+                    </button>
                   </form>
                 )}
               </div>

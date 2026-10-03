@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { IncomingOrders } from "../../../components/IncomingOrders";
 import { formatMoney } from "../../../lib/format";
 import {
   AlertCircle,
@@ -13,6 +14,7 @@ import {
   FileText,
   FlaskConical,
   Globe2,
+  Inbox,
   LogOut,
   Package,
   Pencil,
@@ -499,6 +501,15 @@ export default function SupplierDashboardPage() {
               <ExternalLink size={13} />
               View public profile
             </Link>
+
+                        <Link
+              href="/suppliers/orders"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
+            >
+              <Inbox size={13} />
+              Orders
+            </Link>
+            
             <button
               type="button"
               onClick={handleLogout}
@@ -608,6 +619,8 @@ export default function SupplierDashboardPage() {
             </div>
           )}
         </SectionCard>
+
+               <IncomingOrders />
 
         {/* Business details */}
         <SectionCard icon={Building2} title="Business details">

@@ -42,6 +42,13 @@ export interface SupplierProfile {
   updatedAt: string;
  
 }
+export interface SupplierCertificate {
+  id: string;
+  label: string;          // e.g. "ISO 9001 certificate"
+  fileUrl: string;        // full public URL (Cloudinary / S3 / Supabase)
+  mimeType?: string | null;
+  expiresAt?: string | null;
+}
 
 export interface SupplierProduct {
   id: string;
@@ -67,10 +74,11 @@ async function parseErrorOr<T>(res: Response, fallback: string): Promise<T> {
 
 export async function fetchSupplierProfile(supplierId: string) {
   const res = await fetch(`${API_BASE}/suppliers/${supplierId}`);
-  return parseErrorOr<{ supplier: SupplierProfile; products: SupplierProduct[] }>(
-    res,
-    "Failed to load supplier profile"
-  );
+  return parseErrorOr<{
+    supplier: SupplierProfile;
+    products: SupplierProduct[];
+    certificates?: SupplierCertificate[];
+  }>(res, "Failed to load supplier profile");
 }
 
 export async function updateMyProfile(updates: Partial<SupplierProfile>) {
