@@ -87,7 +87,7 @@ function sumByCurrency(orders: SupplierOrder[]): Map<string, number> {
 
 /** One line per currency, e.g. "$12,345.00" and "€88.98". */
 function MoneyTotals({ totals }: { totals: Map<string, number> }) {
-  const entries = [...totals.entries()].sort(([a], [b]) => a.localeCompare(b));
+  const entries = Array.from(totals.entries()).sort(([a], [b]) => a.localeCompare(b));
   if (entries.length === 0) return <span className="text-neutral-400">—</span>;
   return (
     <>
