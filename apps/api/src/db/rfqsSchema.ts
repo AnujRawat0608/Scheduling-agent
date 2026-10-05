@@ -1,6 +1,6 @@
 import { pgTable, uuid, text, integer, timestamp, jsonb, boolean } from "drizzle-orm/pg-core";
-import { suppliers } from "./suppliersSchema";
-import { procurers } from "./procurersSchema";
+import { suppliers } from "./suppliersSchema.js";
+import { procurers } from "./procurersSchema.js";
 
 /**
  * One row per RFQ sent from a procurer to a supplier.
