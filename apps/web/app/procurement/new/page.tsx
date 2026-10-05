@@ -1,23 +1,34 @@
 "use client";
 
-import { useState, useRef } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useState, useRef, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { formatMoney } from "../../../lib/format";
 import { useFxRates, useDisplayCurrency, convertAmount, DISPLAY_CURRENCIES } from "../../../lib/fxApi";
+import { hasProcurerToken } from "../../../lib/procurerAuthApi";
 import { GlobalRiskOverview } from "../../../components/GlobalRiskOverview";
 import { RiskAssessmentBadge } from "../../../components/RiskAssessmentBadge";
 import { Paperclip, ArrowUp, X, ExternalLink, Check } from "lucide-react";
+
 import {
   createProcurementTask,
   fetchProcurementTask,
+  approveProcurementTask,
   type QuoteScore,
   type FulfillmentPlan,
 } from "../../../lib/procurementApi";
 
 type SourceMode = "plm" | "bom" | "type";
+type Priority = "balanced" | "cheapest" | "fastest";
 
-const DEFAULT_REQUESTER_EMAIL = "team@procurement.local";
-const EXAMPLE_PROMPT = "We need 50 units of Raspberry Pi 5 for the hardware team by [Date].";
+const MAX_FILE_BYTES = 200 * 1024; // 200 KB is plenty for a BOM
+
+// Builds the example with a real date (14 days out) so "[Date]" never reaches the agent.
+function buildExamplePrompt() {
+  const d = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+  const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return `We need 50 units of AS9100 Certified CNC Machined Aerospace Fasteners for the hardware team by ${iso}.`;
+}
 
 // The backend ranks and sums everything in this currency. The dropdown below only
 // changes how amounts are DISPLAYED, so the ranking never changes when it is switched.
@@ -27,24 +38,43 @@ const STATUS_STYLES: Record<string, string> = {
   extracting: "bg-neutral-100 text-neutral-600",
   sourcing: "bg-neutral-100 text-neutral-600",
   comparing: "bg-neutral-100 text-neutral-600",
+  needs_info: "bg-amber-100 text-amber-800",
+  awaiting_approval: "bg-amber-100 text-amber-800",
   purchasing: "bg-[#EA580C]/10 text-[#EA580C]",
+  rfq_sent: "bg-green-100 text-green-700",
   done: "bg-green-100 text-green-700",
   failed: "bg-red-100 text-red-700",
 };
 
+// Date-only strings ("2026-10-12") are parsed as UTC by `new Date()`, which can show the
+// previous day in some timezones. Parse them as local dates instead.
+function formatDate(value: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(value);
+  return Number.isNaN(d.getTime()) ? value : d.toLocaleDateString();
+}
+
 export default function NewProcurementPage() {
+  const qc = useQueryClient();
+  const router = useRouter();
+
+  // Buyers must be signed in: the server takes their identity from the login token.
+  useEffect(() => {
+    if (!hasProcurerToken()) router.replace("/procurement/login");
+  }, [router]);
+
   const [mode, setMode] = useState<SourceMode>("type");
   const [text, setText] = useState("");
   const [attachedFile, setAttachedFile] = useState<{ name: string; content: string } | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
   const [useRiskAnalysis, setUseRiskAnalysis] = useState(false);
+  const [priority, setPriority] = useState<Priority>("balanced");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
-  const [hasSubmitted, setHasSubmitted] = useState(false);
 
-  // Shared hover / selection state for the supplier link + Select button
-  const [hoveredKey, setHoveredKey] = useState<string | null>(null);
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  // Suppliers whose page the buyer has opened (keyed by supplierId, so reordering is safe)
+  const [viewed, setViewed] = useState<Set<string>>(new Set());
 
   // Display currency (buyer's choice, remembered in the browser) + live exchange rates
   const { data: fx } = useFxRates();
@@ -54,50 +84,75 @@ export default function NewProcurementPage() {
     mutationFn: createProcurementTask,
     onSuccess: (data) => {
       setActiveTaskId(data.taskId);
+      setViewed(new Set());
       setText("");
       setAttachedFile(null);
     },
   });
 
-  const { data, isLoading: isLoadingResult } = useQuery({
+  const {
+    data,
+    isLoading: isLoadingResult,
+    isError: isResultError,
+    error: resultError,
+  } = useQuery({
     queryKey: ["procurement", activeTaskId],
     queryFn: () => fetchProcurementTask(activeTaskId as string),
     enabled: !!activeTaskId,
     refetchInterval: (query) => {
+      if (query.state.status === "error") return false; // don't poll forever on failures
       const status = query.state.data?.state.status;
-      return status === "done" || status === "failed" ? false : 2000;
+      return status === "done" || status === "failed" || status === "rfq_sent" ? false : 2000;
     },
   });
 
+  const approve = useMutation({
+    mutationFn: () => approveProcurementTask(activeTaskId as string),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["procurement", activeTaskId] }),
+  });
+
   function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+    const input = e.target;
+    const file = input.files?.[0];
     if (!file) return;
+    setFileError(null);
+
+    if (file.size > MAX_FILE_BYTES) {
+      setFileError(`File is too large (max ${MAX_FILE_BYTES / 1024} KB).`);
+      input.value = "";
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = () => {
       setAttachedFile({ name: file.name, content: String(reader.result ?? "") });
+      input.value = ""; // lets the same file be selected again later
+    };
+    reader.onerror = () => {
+      setFileError("Couldn't read that file. Please try again.");
+      input.value = "";
     };
     reader.readAsText(file);
   }
 
+  const canSubmit =
+    (mode === "bom" ? Boolean(attachedFile) : Boolean(text.trim())) && !text.includes("[Date]");
+
   function handleSubmit() {
+    if (!canSubmit || create.isPending) return;
+
     const requestText = attachedFile
       ? `${attachedFile.content}${text.trim() ? `\n\nAdditional instructions: ${text.trim()}` : ""}`
       : text.trim();
 
     if (!requestText) return;
 
-    setHasSubmitted(true);
-
+    // No requester email here: the server reads it from the buyer's login token.
     create.mutate({
       text: requestText,
-      requesterEmail: DEFAULT_REQUESTER_EMAIL,
       useRiskAnalysis,
+      priority,
     });
-  }
-
-  function handleSelect(key: string) {
-    setSelectedKey(key);
-    // TODO: call your API / mutation here if selecting should also record the choice
   }
 
   /* ---------- display-currency helpers ---------- */
@@ -113,7 +168,7 @@ export default function NewProcurementPage() {
    *  When the display currency is the buyer currency, use the server's own numbers
    *  so they match the plan card and the saved total exactly. */
   function quoteAmount(q: QuoteScore, field: "total" | "taxAmount" | "shipping"): string {
-    if (!q.pricing) return money(q.totalCost, q.buyerCurrency);
+    if (!q.pricing) return q.totalCost === null ? "—" : money(q.totalCost, q.buyerCurrency);
     if (displayCurrency === q.pricing.buyerCurrency) {
       return formatMoney(q.pricing.converted[field], q.pricing.buyerCurrency);
     }
@@ -152,13 +207,13 @@ export default function NewProcurementPage() {
       })
     : null;
 
-  const canSubmit = mode === "bom" ? Boolean(attachedFile) : Boolean(text.trim());
-
   const state = data?.state;
   const task = data?.task;
+  const isProcessing =
+    !!state && ["extracting", "sourcing", "comparing"].includes(state.status);
 
   return (
-    <main className="m-full bg-[#FAF8F2] px-6 py-16">
+    <main className="w-full bg-[#FAF8F2] px-6 py-16">
       <GlobalRiskOverview />
 
       <div className="rounded-lg border border-neutral-200 bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
@@ -175,19 +230,34 @@ export default function NewProcurementPage() {
           </div>
         </div>
 
-        <label className="mb-4 flex items-center gap-2 text-xs text-neutral-500">
-          <input
-            type="checkbox"
-            checked={useRiskAnalysis}
-            onChange={(e) => setUseRiskAnalysis(e.target.checked)}
-            className="h-3.5 w-3.5 rounded border-neutral-300 text-[#EA580C] focus:ring-[#EA580C]"
-          />
-          Use supply chain risk analysis
-        </label>
+        <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-2">
+          <label className="flex items-center gap-2 text-xs text-neutral-500">
+            <input
+              type="checkbox"
+              checked={useRiskAnalysis}
+              onChange={(e) => setUseRiskAnalysis(e.target.checked)}
+              className="h-3.5 w-3.5 rounded border-neutral-300 text-[#EA580C] focus:ring-[#EA580C]"
+            />
+            Use supply chain risk analysis
+          </label>
+
+          <label className="flex items-center gap-1.5 text-xs text-neutral-500">
+            Prioritise
+            <select
+              value={priority}
+              onChange={(e) => setPriority(e.target.value as Priority)}
+              className="rounded-md border border-neutral-300 bg-white px-1.5 py-1 text-[11px] font-medium text-neutral-800 outline-none focus:border-[#EA580C]"
+            >
+              <option value="balanced">Balanced</option>
+              <option value="cheapest">Cheapest</option>
+              <option value="fastest">Fastest</option>
+            </select>
+          </label>
+        </div>
 
         {mode === "type" && (
           <button
-            onClick={() => setText(EXAMPLE_PROMPT)}
+            onClick={() => setText(buildExamplePrompt())}
             className="block w-full rounded-md bg-[#EA580C]/10 p-3.5 text-left transition hover:bg-[#EA580C]/20"
           >
             <p className="text-xs leading-relaxed text-neutral-800">
@@ -225,6 +295,7 @@ export default function NewProcurementPage() {
                 Attach a BOM file (.csv or .txt)
               </button>
             )}
+            {fileError && <p className="mt-2 text-xs text-red-600">{fileError}</p>}
             <input
               ref={fileInputRef}
               type="file"
@@ -236,12 +307,18 @@ export default function NewProcurementPage() {
         )}
 
         {create.isError && <p className="mt-3 text-sm text-red-600">{(create.error as Error).message}</p>}
+        {text.includes("[Date]") && (
+          <p className="mt-3 text-xs text-amber-700">Replace [Date] with the date you need the items by.</p>
+        )}
 
         <div className="mt-4 flex items-center gap-2 rounded-lg border border-neutral-200 bg-white px-4 py-2.5">
           <input
             value={text}
             onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) handleSubmit();
+            }}
+            aria-label="Procurement request"
             placeholder={
               mode === "bom"
                 ? "Add any instructions for this BOM…"
@@ -270,16 +347,14 @@ export default function NewProcurementPage() {
               </h2>
               {state && (
                 <div className="mt-1 flex items-center gap-2">
-                  {state.status !== "awaiting_approval" && (
-                    <span
-                      className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[state.status] ?? ""}`}
-                    >
-                      {state.status.replace("_", " ")}
-                    </span>
-                  )}
+                  <span
+                    className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[state.status] ?? "bg-neutral-100 text-neutral-600"}`}
+                  >
+                    {state.status.replace(/_/g, " ")}
+                  </span>
                   {state.request?.requiredBy && (
                     <span className="text-xs text-neutral-500">
-                      needed by {new Date(state.request.requiredBy).toLocaleDateString()}
+                      needed by {formatDate(state.request.requiredBy)}
                     </span>
                   )}
                 </div>
@@ -322,6 +397,12 @@ export default function NewProcurementPage() {
             </div>
           </div>
 
+          {isResultError && (
+            <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+              {(resultError as Error)?.message ?? "Couldn't load this request."} Refresh the page to try again.
+            </div>
+          )}
+
           {state?.riskCheckStatus && state.riskAssessment && (
             <div className="flex flex-wrap gap-2">
               {Object.entries(state.riskAssessment).map(([region, assessment]) => (
@@ -337,8 +418,8 @@ export default function NewProcurementPage() {
             <RiskAssessmentBadge riskCheckStatus={state.riskCheckStatus} riskAssessment={null} />
           )}
 
-          {hasSubmitted && state?.status !== "done" && state?.status !== "failed" && (
-            <ProcessTracker currentIndex={toStageIndex(hasSubmitted, state?.status)} />
+          {(isProcessing || (!!activeTaskId && !state && !isResultError)) && (
+            <ProcessTracker currentIndex={toStageIndex(state?.status)} />
           )}
 
           {/* Consolidated view — the recommended plan, plus other viable combinations */}
@@ -348,6 +429,21 @@ export default function NewProcurementPage() {
                 Recommended plan
               </h3>
               <PlanCard plan={state.recommendedPlan} show={money} highlight />
+
+              {state.status === "awaiting_approval" && (
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => approve.mutate()}
+                    disabled={approve.isPending}
+                    className="rounded-md bg-[#EA580C] px-4 py-2 text-xs font-medium text-white transition hover:bg-[#EA580C]/90 disabled:opacity-40"
+                  >
+                    {approve.isPending ? "Approving…" : "Approve this plan"}
+                  </button>
+                  {approve.isError && (
+                    <span className="text-xs text-red-600">{(approve.error as Error).message}</span>
+                  )}
+                </div>
+              )}
 
               {state.alternativePlans && state.alternativePlans.length > 0 && (
                 <details className="rounded-lg border border-neutral-200">
@@ -371,165 +467,184 @@ export default function NewProcurementPage() {
               <h3 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
                 Per-item options
               </h3>
-              {state.lineItemQuotes.map((liq, i) => (
-                <div key={i} className="space-y-2">
-                  <p className="text-xs font-semibold text-neutral-800">
-                    {liq.lineItem.item}{" "}
-                    <span className="font-normal text-neutral-400">× {liq.lineItem.quantity}</span>
-                  </p>
-                  {!liq.hasMatch ? (
-                    <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                      No supplier found for this item.
+              {state.lineItemQuotes.map((liq, i) => {
+                const noneOnTime =
+                  liq.topQuotes.length > 0 && liq.topQuotes.every((q) => q.meetsDeadline === false);
+                return (
+                  <div key={i} className="space-y-2">
+                    <p className="text-xs font-semibold text-neutral-800">
+                      {liq.lineItem.item}{" "}
+                      <span className="font-normal text-neutral-400">× {liq.lineItem.quantity}</span>
                     </p>
-                  ) : (
-                    <div className="overflow-hidden rounded-lg border border-neutral-300">
-                      <table className="w-full text-xs">
-                        <thead className="border-b border-neutral-300 bg-neutral-50 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
-                          <tr>
-                            <th className="px-4 py-3 text-left">Supplier</th>
-                            <th className="px-4 py-3 text-right">Unit price</th>
-                            <th className="px-4 py-3 text-center">Lead time</th>
-                            <th className="px-4 py-3 text-right">Estimated total</th>
-                            <th className="px-4 py-3 text-left">AI sourcing notes</th>
-                            <th className="px-4 py-3 text-right">Action</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-neutral-200">
-                          {liq.topQuotes.map((q: QuoteScore, j: number) => {
-                            const rowKey = `${i}-${j}`;
-                            const isHovered = hoveredKey === rowKey;
-                            const isSelected = selectedKey === rowKey;
-                            const href = q.supplierId ? `/suppliers/${q.supplierId}` : undefined;
-                            const isBest = q.isBest;
 
-                            const linkHandlers = {
-                              onMouseEnter: () => setHoveredKey(rowKey),
-                              onMouseLeave: () => setHoveredKey(null),
-                              onFocus: () => setHoveredKey(rowKey),
-                              onBlur: () => setHoveredKey(null),
-                              onClick: () => handleSelect(rowKey),
-                            };
-
-                            // Small grey line under the total: tax, shipping, and the rate used.
-                            const detailParts: string[] = [];
-                            if (q.pricing) {
-                              if (q.pricing.converted.taxAmount > 0) {
-                                detailParts.push(
-                                  `${q.pricing.taxInclusive ? "incl." : "+"} ${quoteAmount(q, "taxAmount")} tax`
-                                );
-                              }
-                              detailParts.push(
-                                q.pricing.converted.shipping > 0
-                                  ? `${quoteAmount(q, "shipping")} shipping`
-                                  : "free shipping"
-                              );
-                              const rl = rateLine(q);
-                              if (rl) detailParts.push(rl);
-                            }
-                            const approx = unitApprox(q);
-
-                            return (
-                              <tr key={rowKey} className={isSelected ? "bg-[#EA580C]/5" : ""}>
-                                {/* Supplier */}
-                                <td className="px-4 py-3 font-medium">
-                                  {href ? (
-                                    <a
-                                      href={href}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      {...linkHandlers}
-                                      className={`text-[#EA580C] ${isHovered || isSelected ? "underline" : ""}`}
-                                    >
-                                      {q.supplierName}
-                                    </a>
-                                  ) : (
-                                    <span className="text-neutral-900">{q.supplierName}</span>
-                                  )}
-                                </td>
-
-                                {/* Unit price: always the supplier's own price, plus an approximation */}
-                                <td className="px-4 py-3 text-right font-mono text-xs text-neutral-700">
-                                  <div>{formatMoney(q.unitPrice, q.currency)}</div>
-                                  {approx && <div className="text-[10px] text-neutral-400">≈ {approx}</div>}
-                                </td>
-
-                                {/* Lead time */}
-                                <td className="px-4 py-3 text-center">
-                                  <span
-                                    className={`inline-block rounded-md px-2 py-0.5 text-xs font-medium ${
-                                      q.leadTimeDays <= 1
-                                        ? "bg-green-100 text-green-700"
-                                        : "bg-neutral-100 text-neutral-600"
-                                    }`}
-                                  >
-                                    {q.leadTimeDays} {q.leadTimeDays === 1 ? "day" : "days"}
-                                  </span>
-                                </td>
-
-                                {/* Estimated total, in the display currency */}
-                                <td className="px-4 py-3 text-right font-mono text-xs font-semibold text-neutral-900">
-                                  <div>{quoteAmount(q, "total")}</div>
-                                  {detailParts.length > 0 && (
-                                    <div className="text-[10px] font-normal text-neutral-400">
-                                      {detailParts.join(" · ")}
-                                    </div>
-                                  )}
-                                </td>
-
-                                {/* AI sourcing notes */}
-                                <td className="px-4 py-3 text-xs">
-                                  {isBest ? (
-                                    <span className="inline-block rounded-md bg-green-50 px-2 py-1 font-medium text-green-700">
-                                      {q.rationale}
-                                    </span>
-                                  ) : (
-                                    <span className="text-neutral-500">{q.rationale}</span>
-                                  )}
-                                </td>
-
-                                {/* Action */}
-                                <td className="px-4 py-3 text-right">
-                                  {href ? (
-                                    <a
-                                      href={href}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      {...linkHandlers}
-                                      className={`inline-block rounded-md border px-3.5 py-1.5 text-[11px] font-medium transition ${
-                                        isHovered || isSelected
-                                          ? "border-[#EA580C] bg-[#EA580C]/10 text-[#EA580C]"
-                                          : "border-neutral-300 bg-white text-neutral-800"
-                                      }`}
-                                    >
-                                      {isSelected ? "Selected" : "Select"}
-                                    </a>
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      disabled
-                                      title="No supplier page available"
-                                      className="cursor-not-allowed rounded-md border border-neutral-200 px-3.5 py-1.5 text-[11px] font-medium text-neutral-300"
-                                    >
-                                      Select
-                                    </button>
-                                  )}
-                                </td>
+                    {!liq.hasMatch ? (
+                      <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                        No supplier found for this item.
+                      </p>
+                    ) : (
+                      <>
+                        {noneOnTime && (
+                          <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                            No supplier can deliver by the required date. The earliest is{" "}
+                            {Math.min(...liq.topQuotes.map((q) => q.leadTimeDays))} days.
+                          </p>
+                        )}
+                        <div className="overflow-x-auto rounded-lg border border-neutral-300">
+                          <table className="w-full text-xs">
+                            <thead className="border-b border-neutral-300 bg-neutral-50 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+                              <tr>
+                                <th className="px-4 py-3 text-left">Supplier</th>
+                                <th className="px-4 py-3 text-right">Unit price</th>
+                                <th className="px-4 py-3 text-center">Lead time</th>
+                                <th className="px-4 py-3 text-right">Estimated total</th>
+                                <th className="px-4 py-3 text-left">AI sourcing notes</th>
+                                <th className="px-4 py-3 text-right">Action</th>
                               </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              ))}
+                            </thead>
+                            <tbody className="divide-y divide-neutral-200">
+                              {liq.topQuotes.map((q: QuoteScore, j: number) => {
+                                const rowKey = `${i}-${q.supplierId ?? q.supplierName}-${j}`;
+                                const href = q.supplierId ? `/suppliers/${q.supplierId}` : undefined;
+                                const isViewed = !!q.supplierId && viewed.has(q.supplierId);
+
+                                // Small grey line under the total: tax, shipping, and the rate used.
+                                const detailParts: string[] = [];
+                                if (q.pricing) {
+                                  if (q.pricing.converted.taxAmount > 0) {
+                                    detailParts.push(
+                                      `${q.pricing.taxInclusive ? "incl." : "+"} ${quoteAmount(q, "taxAmount")} tax`
+                                    );
+                                  }
+                                  detailParts.push(
+                                    q.pricing.converted.shipping > 0
+                                      ? `${quoteAmount(q, "shipping")} shipping`
+                                      : "free shipping"
+                                  );
+                                  const rl = rateLine(q);
+                                  if (rl) detailParts.push(rl);
+                                }
+                                const approx = unitApprox(q);
+
+                                return (
+                                  <tr key={rowKey} className={q.isBest ? "bg-green-50/40" : ""}>
+                                    {/* Supplier */}
+                                    <td className="px-4 py-3 font-medium">
+                                      {href ? (
+                                        <a
+                                          href={href}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-[#EA580C] hover:underline"
+                                        >
+                                          {q.supplierName}
+                                        </a>
+                                      ) : (
+                                        <span className="text-neutral-900">{q.supplierName}</span>
+                                      )}
+                                    </td>
+
+                                    {/* Unit price: always the supplier's own price, plus an approximation */}
+                                    <td className="px-4 py-3 text-right font-mono text-xs text-neutral-700">
+                                      <div>{formatMoney(q.unitPrice, q.currency)}</div>
+                                      {approx && <div className="text-[10px] text-neutral-400">≈ {approx}</div>}
+                                    </td>
+
+                                    {/* Lead time, judged against the deadline when the backend provides it */}
+                                    <td className="px-4 py-3 text-center">
+                                      <span
+                                        className={`inline-block rounded-md px-2 py-0.5 text-xs font-medium ${
+                                          q.meetsDeadline === false
+                                            ? "bg-red-100 text-red-700"
+                                            : q.meetsDeadline === true
+                                              ? "bg-green-100 text-green-700"
+                                              : "bg-neutral-100 text-neutral-600"
+                                        }`}
+                                      >
+                                        {q.leadTimeDays} {q.leadTimeDays === 1 ? "day" : "days"}
+                                      </span>
+                                      {q.meetsDeadline === false && (
+                                        <div className="mt-1 text-[10px] font-medium text-red-600">
+                                          Misses deadline
+                                        </div>
+                                      )}
+                                    </td>
+
+                                    {/* Estimated total, in the display currency ("—" if it couldn't be priced) */}
+                                    <td className="px-4 py-3 text-right font-mono text-xs font-semibold text-neutral-900">
+                                      <div>{quoteAmount(q, "total")}</div>
+                                      {detailParts.length > 0 && (
+                                        <div className="text-[10px] font-normal text-neutral-400">
+                                          {detailParts.join(" · ")}
+                                        </div>
+                                      )}
+                                    </td>
+
+                                    {/* AI sourcing notes */}
+                                    <td className="px-4 py-3 text-xs">
+                                      {q.isBest ? (
+                                        <span className="inline-block rounded-md bg-green-50 px-2 py-1 font-medium text-green-700">
+                                          {q.rationale}
+                                        </span>
+                                      ) : (
+                                        <span className="text-neutral-500">{q.rationale}</span>
+                                      )}
+                                    </td>
+
+                                    {/* Action: view the supplier page (navigation only, nothing is committed) */}
+                                    <td className="px-4 py-3 text-right">
+                                      {href ? (
+                                        <a
+                                          href={href}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          onClick={() =>
+                                            q.supplierId &&
+                                            setViewed((s) => new Set(s).add(q.supplierId as string))
+                                          }
+                                          className="inline-block rounded-md border border-neutral-300 bg-white px-3.5 py-1.5 text-[11px] font-medium text-neutral-800 transition hover:border-[#EA580C] hover:text-[#EA580C]"
+                                        >
+                                          {isViewed ? "Viewed" : "View supplier"}
+                                        </a>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          disabled
+                                          title="No supplier page available"
+                                          className="cursor-not-allowed rounded-md border border-neutral-200 px-3.5 py-1.5 text-[11px] font-medium text-neutral-300"
+                                        >
+                                          View supplier
+                                        </button>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
 
-          {state?.status === "done" && state.purchaseConfirmations && state.purchaseConfirmations.length > 0 && (
-            <div className="rounded-md border border-green-200 bg-green-50 p-4 text-sm text-green-800">
-              Purchase confirmed with{" "}
-              {state.purchaseConfirmations.map((c) => c.supplierName).join(", ")}.
+          {state?.status === "rfq_sent" && state.rfqResults && state.rfqResults.length > 0 && (
+            <div className="space-y-1 rounded-md border border-green-200 bg-green-50 p-4 text-sm text-green-800">
+              <p className="font-medium">
+                RFQ sent to {state.rfqResults.map((r) => r.supplierName).join(", ")}. Waiting for supplier
+                replies. No order is final until a supplier confirms.
+              </p>
+              {state.rfqResults.map((r) => (
+                <p key={r.supplierId} className="text-xs">
+                  {r.supplierName}
+                  {r.referenceNumber ? ` · ${r.referenceNumber}` : ""}
+                  {r.emailed === false
+                    ? " · email not delivered; the supplier will see it in their dashboard"
+                    : ""}
+                </p>
+              ))}
             </div>
           )}
 
@@ -566,6 +681,13 @@ function PlanCard({
   show: (amount: number, from: string) => string;
   highlight?: boolean;
 }) {
+  const title =
+    plan.type === "partial"
+      ? "Partial fulfilment"
+      : plan.legs.length === 1
+        ? "Single Supplier"
+        : `Split across ${plan.legs.length} suppliers`;
+
   return (
     <div
       className={`rounded-lg border p-3 ${
@@ -573,9 +695,7 @@ function PlanCard({
       }`}
     >
       <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold text-neutral-900">
-          {plan.legs.length === 1 ? "Single Supplier" : `Split across ${plan.legs.length} suppliers`}
-        </span>
+        <span className="text-xs font-semibold text-neutral-900">{title}</span>
         <span className="text-xs font-semibold text-neutral-900">
           {show(plan.totalCost, BUYER_CURRENCY)}
         </span>
@@ -660,6 +780,7 @@ function ProcessTracker({ currentIndex }: { currentIndex: number }) {
                 {active && (
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#EA580C]/60 opacity-40" />
                 )}
+                {/* NOTE: animate-[pop_...] needs a "pop" keyframe in tailwind.config, otherwise it does nothing */}
                 <span className={`transition-all duration-300 ${done ? "animate-[pop_0.3s_ease-out]" : ""}`}>
                   {done ? <Check size={12} strokeWidth={3} /> : i + 1}
                 </span>
@@ -687,8 +808,7 @@ function ProcessTracker({ currentIndex }: { currentIndex: number }) {
   );
 }
 
-function toStageIndex(hasSubmitted: boolean, status?: string) {
-  if (!hasSubmitted) return -1;
+function toStageIndex(status?: string) {
   if (!status || status === "extracting") return 0;
   if (status === "sourcing") return 1;
   if (status === "comparing") return 2;

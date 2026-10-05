@@ -13,8 +13,9 @@ export default defineConfig({
   "./src/db/supplyChainSchema.ts",
   "./src/db/suppliersSchema.ts",
   "./src/db/supplierMessagesSchema.ts",
-  "./src/db/adminSchema.ts",   // add this
+  "./src/db/adminSchema.ts",
   "./src/db/rfqsSchema.ts",
+  "./src/db/procurersSchema.ts",
 
 ],
 

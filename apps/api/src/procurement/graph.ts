@@ -2,28 +2,26 @@ import { StateGraph, START, END } from "@langchain/langgraph";
 import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
 import { ProcurementState, type ProcurementStateType } from "./state.js";
 import { extractProcurementRequest } from "./nodes/extractRequest.js";
-import { generateRfq } from "./nodes/generateRfq.js";
 import { contactSuppliers } from "./nodes/contactSuppliers.js";
 import { compareQuotes } from "./nodes/compareQuotes.js";
 import { riskCheckNode } from "./nodes/riskCheckNode.js";
 import { humanApproval } from "./nodes/humanApproval.js";
-import { confirmPurchase } from "./nodes/confirmPurchase.js";
+import { sendRfqs } from "./nodes/sendRfqs.js";
 
 function routeAfterCompare(state: ProcurementStateType) {
   return state.status === "failed" ? END : "riskCheck";
 }
 
 function routeAfterApproval(state: ProcurementStateType) {
-  return state.status === "failed" ? END : "generateRfq";
+  return state.status === "failed" ? END : "sendRfqs";
 }
 
 const builder = new StateGraph(ProcurementState)
-  .addNode("generateRfq", generateRfq)
   .addNode("contactSuppliers", contactSuppliers)
   .addNode("compareQuotes", compareQuotes)
   .addNode("riskCheck", riskCheckNode)
   .addNode("humanApproval", humanApproval)
-  .addNode("confirmPurchase", confirmPurchase)
+  .addNode("sendRfqs", sendRfqs)
   .addEdge(START, "contactSuppliers")
   .addEdge("contactSuppliers", "compareQuotes")
   .addConditionalEdges("compareQuotes", routeAfterCompare, {
@@ -32,11 +30,10 @@ const builder = new StateGraph(ProcurementState)
   })
   .addEdge("riskCheck", "humanApproval")
   .addConditionalEdges("humanApproval", routeAfterApproval, {
-    generateRfq: "generateRfq",
+    sendRfqs: "sendRfqs",
     [END]: END,
   })
-  .addEdge("generateRfq", "confirmPurchase")
-  .addEdge("confirmPurchase", END);
+  .addEdge("sendRfqs", END);
 
 export async function buildProcurementGraph() {
   const checkpointer = PostgresSaver.fromConnString(process.env.DATABASE_URL!);

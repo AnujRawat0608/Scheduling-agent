@@ -29,7 +29,10 @@ export function signSupplierToken(payload: SupplierTokenPayload): string {
 
 export function verifySupplierToken(token: string): SupplierTokenPayload | null {
   try {
-    return jwt.verify(token, JWT_SECRET as string) as SupplierTokenPayload;
+    const p = jwt.verify(token, JWT_SECRET as string) as SupplierTokenPayload & { role?: string };
+    if (typeof p.supplierId !== "string") return null;      // not a supplier token
+    if (p.role && p.role !== "supplier") return null;       // e.g. a procurer token
+    return { supplierId: p.supplierId, email: p.email };
   } catch {
     return null;
   }

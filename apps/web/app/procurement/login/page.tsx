@@ -60,7 +60,7 @@ export default function ProcurerLoginPage() {
     setIsSubmitting(true);
     try {
       await loginProcurer(email, password);
-      router.push("/procurement");
+router.push("/procurement/new");
     } catch (err) {
       setFormError((err as Error).message);
       setIsSubmitting(false);

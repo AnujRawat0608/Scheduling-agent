@@ -101,3 +101,7 @@ export async function fetchCurrentProcurer(): Promise<Procurer | null> {
 }
 
 export { authHeaders as procurerAuthHeaders };
+
+export function hasProcurerToken(): boolean {
+  return "Authorization" in (authHeaders() as Record<string, string>);
+}

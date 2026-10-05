@@ -16,7 +16,7 @@ import path from "path";
 import { uploadsRouter } from "./routes/uploads.js";
 import { startFxRefreshJob } from "./procurement/lib/refreshFxRates.js";
 import { fxRatesRouter } from "./routes/fxRates.js";
-
+import { procurerAuthRouter } from "./routes/procurerAuth.js";
 
 startFxRefreshJob();
 
@@ -48,6 +48,7 @@ app.use("/api/supplier-auth", supplierAuthRouter);
 app.use("/api/suppliers", supplierProfileRouter);
 app.use("/api", supplierOrdersRouter);
 app.use("/api/admin-auth", adminAuthRouter);
+app.use("/api/procurer-auth", procurerAuthRouter);
 app.use("/api/admin/suppliers", adminSuppliersRouter);
 app.use("/api/rfqs", rfqRouter);
 app.use("/api", fxRatesRouter);

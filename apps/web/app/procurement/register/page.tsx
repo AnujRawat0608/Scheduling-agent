@@ -150,7 +150,7 @@ export default function ProcurerRegisterPage() {
 
       setIsSuccess(true);
       setTimeout(() => {
-        router.push("/procurement");
+        router.push("/procurement/new");
       }, 1500);
     } catch (err) {
       setFormError((err as Error).message);

@@ -12,4 +12,7 @@ export const supplierMessages = pgTable("supplier_messages", {
   senderEmail: text("sender_email").notNull(),
   message: text("message").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  taskId: uuid("task_id"),                          // use the same type as procurementTasks.id
+status: text("status").notNull().default("pending"),
+sentAt: timestamp("sent_at"),
 });

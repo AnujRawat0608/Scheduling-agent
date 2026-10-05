@@ -1,4 +1,4 @@
-import { scoreQuotes } from "../lib/scoreQuotes.js";
+import { scoreQuotes, WEIGHT_PRESETS } from "../lib/scoreQuotes.js";
 import { getRates, type RateTable } from "../lib/fx.js";
 import type {
   ProcurementStateType,
@@ -11,21 +11,44 @@ import type {
 
 const MAX_COMBINATIONS = 5000; // safety cap — see note below buildAllPlans
 const TOP_QUOTES_LIMIT = 5;
+const BUYER_CURRENCY = "INR";
 
 /** Totals are in INR with 2 decimals; round after every sum so float drift can't creep in. */
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-/** Score every line item's quotes, sort best-first, and cap a display-only top-N. */
-function scoreAllLineItems(lineItemQuotes: LineItemQuotes[], rates: RateTable): LineItemQuotes[] {
+type Priority = keyof typeof WEIGHT_PRESETS;
+
+/**
+ * Whole days from today until `requiredBy`. Date-only strings ("2026-10-12") are parsed
+ * as LOCAL dates so the day doesn't shift with the server's timezone.
+ * Returns undefined when there is no usable deadline (then nothing is judged against it).
+ */
+function daysUntil(requiredBy?: string | null): number | undefined {
+  if (!requiredBy) return undefined;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(requiredBy);
+  const due = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(requiredBy);
+  if (Number.isNaN(due.getTime())) return undefined;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((due.getTime() - today.getTime()) / 86_400_000);
+}
+
+/** Score every line item's quotes and cap a display-only top-N. */
+function scoreAllLineItems(
+  lineItemQuotes: LineItemQuotes[],
+  rates: RateTable,
+  opts: { daysUntilDeadline?: number; weights: (typeof WEIGHT_PRESETS)[Priority] }
+): LineItemQuotes[] {
   return lineItemQuotes.map((liq) => {
-    const scoredQuotes = scoreQuotes(liq.quotes, liq.lineItem.quantity, rates);
-    const sorted = [...scoredQuotes].sort((a, b) => b.score - a.score);
+    const scoredQuotes = scoreQuotes(liq.quotes, liq.lineItem.quantity, rates, BUYER_CURRENCY, opts);
+    // scoreQuotes already returns on-time quotes first, then by score. Do NOT re-sort by
+    // score here, or a cheap late quote would jump back above an on-time one.
     // score -1 means "cannot fulfill / cannot price"; 0 is a valid (worst-ranked) quote.
-    const hasMatch = scoredQuotes.some((q) => q.score >= 0); // recomputed here, not the stale pre-scoring flag
+    const hasMatch = scoredQuotes.some((q) => q.score >= 0);
     return {
       ...liq,
       scoredQuotes,
-      topQuotes: sorted.filter((q) => q.score >= 0).slice(0, TOP_QUOTES_LIMIT),
+      topQuotes: scoredQuotes.filter((q) => q.score >= 0).slice(0, TOP_QUOTES_LIMIT),
       hasMatch,
     };
   });
@@ -59,9 +82,19 @@ function legsFromAssignment(assignment: { lineItem: LineItem; quote: QuoteScore 
     const leg = bySupplier.get(key)!;
     leg.lineItems.push(lineItem);
     leg.quotes.push(quote);
+    // Unpriced quotes have score -1 and are filtered out in candidatesFor, so this should
+    // never fire. If it does, something upstream is wrong and we want to know.
+    if (quote.totalCost === null) {
+      throw new Error(`Cannot add unpriced quote from ${quote.supplierName} to a plan`);
+    }
     leg.legCost = round2(leg.legCost + quote.totalCost);
   }
   return Array.from(bySupplier.values());
+}
+
+/** True when every quote in the plan arrives by the deadline (or there is no deadline). */
+function planMeetsDeadline(plan: FulfillmentPlan): boolean {
+  return plan.legs.every((leg) => leg.quotes.every((q) => q.meetsDeadline !== false));
 }
 
 function planFromLegs(legs: FulfillmentLeg[], unmatchedItems: LineItem[]): FulfillmentPlan {
@@ -84,10 +117,20 @@ function avgScore(plan: FulfillmentPlan): number {
   return allQuotes.reduce((sum, q) => sum + q.score, 0) / allQuotes.length;
 }
 
-/** Sort: fewer suppliers wins first, higher average score (price+lead time) as tiebreaker. */
+/**
+ * Sort order:
+ *  1. plans that meet the deadline come first
+ *  2. fewer suppliers
+ *  3. higher average score (price + lead time)
+ *  4. lower total cost (final tiebreaker, so identical scores are deterministic)
+ */
 function comparePlans(a: FulfillmentPlan, b: FulfillmentPlan): number {
+  const onTime = Number(planMeetsDeadline(b)) - Number(planMeetsDeadline(a));
+  if (onTime !== 0) return onTime;
   if (a.legs.length !== b.legs.length) return a.legs.length - b.legs.length;
-  return avgScore(b) - avgScore(a); // higher score first
+  const score = avgScore(b) - avgScore(a);
+  if (Math.abs(score) > 1e-9) return score;
+  return a.totalCost - b.totalCost;
 }
 
 /**
@@ -112,9 +155,15 @@ function buildAllPlans(scored: LineItemQuotes[]): { plans: FulfillmentPlan[]; ca
   const combinationCount = perItemCandidates.reduce((n, cands) => n * Math.max(cands.length, 1), 1);
 
   if (combinationCount > MAX_COMBINATIONS) {
+    // Greedy fallback: prefer on-time quotes, then the highest score.
     const assignment = fulfillable.map((liq, i) => ({
       lineItem: liq.lineItem,
-      quote: perItemCandidates[i].reduce((best, [, q]) => (q.score > best.score ? q : best), perItemCandidates[i][0][1]),
+      quote: perItemCandidates[i].reduce((best, [, q]) => {
+        const qOn = q.meetsDeadline !== false;
+        const bOn = best.meetsDeadline !== false;
+        if (qOn !== bOn) return qOn ? q : best;
+        return q.score > best.score ? q : best;
+      }, perItemCandidates[i][0][1]),
     }));
     const legs = legsFromAssignment(assignment);
     return { plans: [planFromLegs(legs, unmatchedItems)], capped: true };
@@ -141,7 +190,13 @@ function buildAllPlans(scored: LineItemQuotes[]): { plans: FulfillmentPlan[]; ca
 
 export async function compareQuotes(state: ProcurementStateType) {
   const rates = await getRates();
-  const scored = scoreAllLineItems(state.lineItemQuotes, rates);
+
+  // Deadline and priority come from the request. Unknown/missing priority falls back to balanced.
+  const daysUntilDeadline = daysUntil(state.request?.requiredBy);
+  const requested = state.request?.priority as Priority | undefined;
+  const weights = (requested && WEIGHT_PRESETS[requested]) || WEIGHT_PRESETS.balanced;
+
+  const scored = scoreAllLineItems(state.lineItemQuotes, rates, { daysUntilDeadline, weights });
   const anyMatch = scored.some((liq) => liq.hasMatch);
 
   if (!anyMatch) {
@@ -164,6 +219,11 @@ export async function compareQuotes(state: ProcurementStateType) {
     recommendedPlan.rationale = `${recommendedPlan.legs[0].supplierName} can fulfill your entire order in one place.`;
   } else if (recommendedPlan.unmatchedItems.length === 0) {
     recommendedPlan.rationale = `No single supplier covers everything — best split across ${recommendedPlan.legs.length} suppliers by consolidation and cost.`;
+  }
+
+  // If even the best plan is late, say so plainly instead of recommending it silently.
+  if (daysUntilDeadline !== undefined && !planMeetsDeadline(recommendedPlan)) {
+    recommendedPlan.rationale += " Warning: no combination of suppliers can deliver by the required date.";
   }
 
   return {

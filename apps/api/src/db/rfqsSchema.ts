@@ -1,5 +1,6 @@
 import { pgTable, uuid, text, integer, timestamp, jsonb, boolean } from "drizzle-orm/pg-core";
-import { suppliers } from "./suppliersSchema.js";
+import { suppliers } from "./suppliersSchema";
+import { procurers } from "./procurersSchema";
 
 /**
  * One row per RFQ sent from a procurer to a supplier.
@@ -17,11 +18,16 @@ export const rfqs = pgTable("rfqs", {
     .references(() => suppliers.id)
     .notNull(),
 
+    procurerId: uuid("procurer_id").references(() => procurers.id),
+
+  /** Set when the procurement agent created this RFQ (null for RFQs sent by hand). */
+  taskId: uuid("task_id"),
+
   referenceNumber: text("reference_number").notNull(),
   requesterName: text("requester_name").notNull(),
   requesterEmail: text("requester_email").notNull(),
 
-  status: text("status").notNull().default("sent"), // "draft" | "sent"
+  status: text("status").notNull().default("sent"), // "draft" | "sent" | "quoted"
 
   currency: text("currency"),
   dueDate: timestamp("due_date"),

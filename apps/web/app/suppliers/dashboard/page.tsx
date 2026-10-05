@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { IncomingOrders } from "../../../components/IncomingOrders";
+import { RfqInbox } from "../../../components/RfqInbox";
 import { formatMoney } from "../../../lib/format";
 import {
   AlertCircle,
@@ -621,6 +622,7 @@ export default function SupplierDashboardPage() {
         </SectionCard>
 
                <IncomingOrders />
+               <RfqInbox />
 
         {/* Business details */}
         <SectionCard icon={Building2} title="Business details">

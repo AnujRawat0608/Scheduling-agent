@@ -2,76 +2,110 @@ import type { QuoteScore, SupplierQuote } from "../state.js";
 import type { RateTable } from "./fxMath.js";
 import { priceQuote } from "./pricing.js";
 
+type Weights = { price: number; speed: number };
+export const WEIGHT_PRESETS: Record<string, Weights> = {
+  balanced: { price: 0.6, speed: 0.4 },
+  cheapest: { price: 0.85, speed: 0.15 },
+  fastest: { price: 0.2, speed: 0.8 },
+};
+
 export function scoreQuotes(
   quotes: SupplierQuote[],
   quantity: number,
   rates: RateTable,
-  buyerCurrency = "INR"
+  buyerCurrency = "INR",
+  opts: { daysUntilDeadline?: number; weights?: Weights } = {}
 ): QuoteScore[] {
+  const weights = opts.weights ?? WEIGHT_PRESETS.balanced;
+  const { daysUntilDeadline } = opts;
+
   const prepared = quotes.map((q) => {
     try {
       const pricing = priceQuote(q, quantity, rates, buyerCurrency);
-      const meetsQuantity = q.quantityAvailable >= quantity && quantity >= q.moq;
-      return { q, pricing, meetsQuantity, error: null as string | null };
+      const stockOk = q.quantityAvailable >= quantity;
+      const moqOk = quantity >= q.moq;
+      return { q, pricing, stockOk, moqOk, error: null as string | null };
     } catch (err) {
-      return { q, pricing: null, meetsQuantity: false, error: (err as Error).message };
+      return { q, pricing: null, stockOk: false, moqOk: false, error: (err as Error).message };
     }
   });
 
-  const qualifying = prepared.filter((p) => p.meetsQuantity && p.pricing);
+  const qualifying = prepared.filter((p) => p.stockOk && p.moqOk && p.pricing);
 
   const unscored = (p: (typeof prepared)[number]): QuoteScore => ({
     ...p.q,
-    totalCost: p.pricing?.converted.total ?? 0,
+    totalCost: p.pricing?.converted.total ?? null, // not 0
     buyerCurrency,
     pricing: p.pricing,
     score: -1,
     isBest: false,
     rationale: p.error
       ? `Cannot price this quote: ${p.error}`
-      : `Cannot fulfill: needs ${quantity} units, MOQ/availability doesn't match`,
+      : !p.stockOk
+        ? `Only ${p.q.quantityAvailable} in stock (need ${quantity})`
+        : `Minimum order is ${p.q.moq} (need ${quantity})`,
   });
 
   if (qualifying.length === 0) return prepared.map(unscored);
 
-  const prices = qualifying.map((p) => p.pricing!.converted.total);
-  const leadTimes = qualifying.map((p) => p.q.leadTimeDays);
-  const minPrice = Math.min(...prices);
-  const maxPrice = Math.max(...prices);
-  const minLead = Math.min(...leadTimes);
-  const maxLead = Math.max(...leadTimes);
+  const minPrice = Math.min(...qualifying.map((p) => p.pricing!.converted.total));
+  const minLead = Math.min(...qualifying.map((p) => p.q.leadTimeDays));
 
-  return prepared
-    .map((p): QuoteScore => {
-      if (!p.meetsQuantity || !p.pricing) return unscored(p);
+  const scored = prepared.map((p): QuoteScore => {
+    if (!p.stockOk || !p.moqOk || !p.pricing) return unscored(p);
 
-      const totalCost = p.pricing.converted.total;
-      const priceScore = maxPrice === minPrice ? 1 : 1 - (totalCost - minPrice) / (maxPrice - minPrice);
-      const leadScore = maxLead === minLead ? 1 : 1 - (p.q.leadTimeDays - minLead) / (maxLead - minLead);
-      const score = priceScore * 0.6 + leadScore * 0.4;
+    const total = p.pricing.converted.total;
+    const lead = p.q.leadTimeDays;
+    const meetsDeadline = daysUntilDeadline == null || lead <= daysUntilDeadline;
 
-      const isCheapest = totalCost === minPrice;
-      const isFastest = p.q.leadTimeDays === minLead;
-      const rationale =
-        isCheapest && isFastest
-          ? "Best price AND fastest lead time"
-          : isCheapest
-            ? `Cheapest option, but ${p.q.leadTimeDays}d lead time`
-            : isFastest
-              ? minPrice > 0
-                ? `Fastest lead time, ${(((totalCost - minPrice) / minPrice) * 100).toFixed(0)}% above cheapest`
-                : "Fastest lead time"
-              : "Balanced option";
+    // Ratios against the best option: cheapest = 1, twice the price = 0.5
+    const priceScore = total > 0 ? minPrice / total : 1;
+    const leadScore = (minLead + 1) / (lead + 1);
+    const score = priceScore * weights.price + leadScore * weights.speed;
 
-      return {
-        ...p.q,
-        totalCost,
-        buyerCurrency,
-        pricing: p.pricing,
-        score,
-        rationale,
-        isBest: isCheapest && isFastest,
-      };
-    })
-    .sort((a, b) => b.score - a.score);
+    const parts: string[] = [];
+    parts.push(
+      total === minPrice ? "Cheapest" : `${(((total - minPrice) / minPrice) * 100).toFixed(0)}% above cheapest`
+    );
+    parts.push(lead === minLead ? "fastest" : `${lead - minLead}d slower than fastest`);
+    if (daysUntilDeadline != null) {
+      const slack = daysUntilDeadline - lead;
+      parts.push(
+        !meetsDeadline
+          ? `misses deadline by ${lead - daysUntilDeadline}d`
+          : slack === 0
+            ? "arrives on deadline day"
+            : `arrives ${slack}d before deadline`
+      );
+    }
+
+    return {
+      ...p.q,
+      totalCost: total,
+      buyerCurrency,
+      pricing: p.pricing,
+      score,
+      meetsDeadline,
+      isBest: false,
+      rationale: parts.join(" · "),
+    };
+  });
+
+  // 1) usable quotes before unusable ones, 2) on-time before late, 3) higher score,
+  // 4) ties: lower price, then faster.
+  scored.sort((a, b) => {
+    const aValid = a.score >= 0;
+    const bValid = b.score >= 0;
+    if (aValid !== bValid) return aValid ? -1 : 1;
+
+    const aOn = a.meetsDeadline !== false;
+    const bOn = b.meetsDeadline !== false;
+    if (aOn !== bOn) return aOn ? -1 : 1;
+
+    if (Math.abs(b.score - a.score) > 1e-9) return b.score - a.score;
+    return (a.totalCost ?? Infinity) - (b.totalCost ?? Infinity) || a.leadTimeDays - b.leadTimeDays;
+  });
+
+  if (scored[0].score >= 0 && (scored[0].meetsDeadline ?? true)) scored[0].isBest = true;
+  return scored;
 }

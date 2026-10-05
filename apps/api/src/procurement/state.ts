@@ -19,6 +19,7 @@ export interface SupplierQuote {
   taxType: string | null;
   taxRate: number | null;     // percent, as declared by the supplier
   taxInclusive: boolean;
+  offerItem?: string;         // the product title the supplier actually listed
   simulated?: boolean;        // true = invented fallback quote, not a real offer
   respondedAt: string;
 }
@@ -35,12 +36,13 @@ export interface PricingBreakdown {
 }
 
 export interface QuoteScore extends SupplierQuote {
-  totalCost: number;          // buyer currency (INR). compareQuotes keeps using this.
+  totalCost: number | null;
   buyerCurrency: string;
-  pricing: PricingBreakdown | null; // null if the quote couldn't be priced (e.g. no exchange rate)
+  pricing: PricingBreakdown | null;
   score: number;
-  rationale: string;
   isBest: boolean;
+  rationale: string;
+  meetsDeadline?: boolean;
 }
 
 export interface LineItemQuotes {
@@ -78,8 +80,21 @@ export interface PurchaseConfirmation {
 export interface ProcurementRequest {
   requesterName: string;
   requesterEmail: string;
+  procurerId?: string;      // new
   lineItems: LineItem[];
   requiredBy?: string;
+  priority?: "balanced" | "cheapest" | "fastest";
+}
+/** Result of creating/sending the RFQ to one supplier after the plan was approved. */
+export interface RfqResult {
+  supplierName: string;
+  supplierId: string;
+  status: "sent" | "failed";
+  rfqId?: string;
+  referenceNumber?: string;
+  emailed?: boolean;          // false = saved but email failed; undefined = RFQ already existed, nothing sent
+  sentAt?: string;
+  error?: string;
 }
 
 export type ProcurementStatus =
@@ -89,6 +104,7 @@ export type ProcurementStatus =
   | "comparing"
   | "awaiting_approval"
   | "purchasing"
+  | "rfq_sent"
   | "done"
   | "failed";
 
@@ -98,6 +114,11 @@ export const ProcurementState = Annotation.Root({
   rfqEmails: Annotation<Record<string, string>>({
     reducer: (_e, u) => u,
     default: () => ({}),
+  }),
+
+  rfqResults: Annotation<RfqResult[]>({
+    reducer: (_e, u) => u,
+    default: () => [],
   }),
 
   lineItemQuotes: Annotation<LineItemQuotes[]>({

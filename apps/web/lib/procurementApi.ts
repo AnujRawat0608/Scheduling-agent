@@ -1,4 +1,27 @@
+import { procurerAuthHeaders as authHeaders, logoutProcurer } from "./procurerAuthApi";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
+
+/**
+ * fetch() for buyer-only endpoints: attaches the buyer's login token and, if the server says
+ * the buyer isn't signed in (401), clears the stale token and sends them to the login page.
+ */
+async function authedFetch(path: string, init?: RequestInit): Promise<Response> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(),
+      ...(init?.headers ?? {}),
+    },
+  });
+  if (res.status === 401 && typeof window !== "undefined") {
+    await logoutProcurer();
+    window.location.href = "/procurement/login";
+    throw new Error("Please sign in to continue.");
+  }
+  return res;
+}
 
 export interface LineItem {
   item: string;
@@ -20,6 +43,8 @@ export interface SupplierQuote {
   supplierName: string;
   supplierId: string | null;
   supplierRegion: string | null;
+  /** The product title the supplier actually listed, so the buyer can verify the match. */
+  offerItem?: string;
   unitPrice: number;
   quantityAvailable: number;
   leadTimeDays: number;
@@ -34,12 +59,13 @@ export interface SupplierQuote {
 }
 
 export interface QuoteScore extends SupplierQuote {
-  totalCost: number;
-  score: number;
-  rationale: string;
+  totalCost: number | null;
   buyerCurrency: string;
   pricing: PricingBreakdown | null;
+  score: number;
   isBest: boolean;
+  rationale: string;
+  meetsDeadline?: boolean;
 }
 
 export interface LineItemQuotes {
@@ -74,11 +100,28 @@ export interface PurchaseConfirmation {
   confirmedAt: string;
 }
 
+/** Result of sending an RFQ to one supplier after the plan was approved. */
+export interface RfqResult {
+  supplierName: string;
+  supplierId: string;
+  status: "sent" | "failed";
+  rfqId?: string;
+  referenceNumber?: string;
+  /** false = the RFQ was saved (supplier sees it in their dashboard) but the email did not go out. */
+  emailed?: boolean;
+  error?: string;
+}
+
+export type Priority = "balanced" | "cheapest" | "fastest";
+
 export interface ProcurementRequest {
   requesterName: string;
   requesterEmail: string;
+  /** The buyer who owns this request (set by the server from the login token). */
+  procurerId?: string;
   lineItems: LineItem[];
   requiredBy?: string;
+  priority?: Priority;
 }
 
 export interface ProcurementTaskSummary {
@@ -111,6 +154,7 @@ export interface ProcurementSnapshot {
   state: {
     request: ProcurementRequest;
     rfqEmails: Record<string, string>;
+    rfqResults?: RfqResult[];
     lineItemQuotes: LineItemQuotes[];
     recommendedPlan: FulfillmentPlan | null;
     alternativePlans: FulfillmentPlan[];
@@ -123,24 +167,21 @@ export interface ProcurementSnapshot {
   next: string[];
 }
 
-
-
 export async function listProcurementTasks(): Promise<ProcurementTaskSummary[]> {
-  const res = await fetch(`${API_BASE}/procurement`);
+  const res = await authedFetch("/procurement");
   if (!res.ok) throw new Error("Failed to fetch procurement tasks");
   const data = await res.json();
   return data.tasks;
 }
 
+// The requester's name and email are NOT sent: the server reads them from the buyer's login token.
 export async function createProcurementTask(input: {
   text: string;
-  requesterEmail: string;
-  requesterName?: string;
   useRiskAnalysis?: boolean;
+  priority?: Priority;
 }): Promise<{ taskId: string }> {
-  const res = await fetch(`${API_BASE}/procurement`, {
+  const res = await authedFetch("/procurement", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
   if (!res.ok) {
@@ -151,30 +192,32 @@ export async function createProcurementTask(input: {
 }
 
 export async function fetchProcurementTask(id: string): Promise<ProcurementSnapshot> {
-  const res = await fetch(`${API_BASE}/procurement/${id}`);
+  const res = await authedFetch(`/procurement/${id}`);
   if (!res.ok) throw new Error(`Failed to fetch task ${id}`);
   return res.json();
 }
 
 // selectedPlanIndex: omitted/0 = accept recommendedPlan, 1+ = pick that index from alternativePlans.
-// Kept here even though the main request page doesn't use it, since other
-// pages (or a future approval view) may still need to approve a task.
 export async function approveProcurementTask(id: string, selectedPlanIndex?: number) {
-  const res = await fetch(`${API_BASE}/procurement/${id}/approve`, {
+  const res = await authedFetch(`/procurement/${id}/approve`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ approved: true, selectedPlanIndex }),
   });
-  if (!res.ok) throw new Error(`Failed to approve task ${id}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to approve task ${id}`);
+  }
   return res.json();
 }
 
 export async function rejectProcurementTask(id: string, note: string) {
-  const res = await fetch(`${API_BASE}/procurement/${id}/approve`, {
+  const res = await authedFetch(`/procurement/${id}/approve`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ approved: false, note }),
   });
-  if (!res.ok) throw new Error(`Failed to reject task ${id}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to reject task ${id}`);
+  }
   return res.json();
 }
