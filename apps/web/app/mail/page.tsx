@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { Mail as MailIcon, Send, Inbox as InboxIcon } from "lucide-react";
 
 type ReceivedMail = {
@@ -63,18 +64,34 @@ function WindowDots() {
 }
 
 export default function MailPage() {
+  const searchParams = useSearchParams();
   const [tab, setTab] = useState<"inbox" | "compose">("inbox");
   const [selected, setSelected] = useState<ReceivedMail | null>(mockInbox[0]);
 
-  const [form, setForm] = useState({ name: "", from: "", subject: "", message: "" });
+  const [form, setForm] = useState({ to: "", name: "", from: "", subject: "", message: "" });
   const [sent, setSent] = useState(false);
+
+  // Prefills compose from a URL (?compose=1&to=...&subject=...&body=...).
+  // Procurement's "Trigger Auto-RFQ" links here this way.
+  useEffect(() => {
+    if (searchParams.get("compose") === "1") {
+      setTab("compose");
+      setForm((f) => ({
+        ...f,
+        to: searchParams.get("to") ?? f.to,
+        subject: searchParams.get("subject") ?? f.subject,
+        message: searchParams.get("body") ?? f.message,
+      }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function handleSend() {
     // No real send yet — this is a UI mockup. Wire this up to your backend
     // once mail sending exists (e.g. POST to lib/api.ts).
     setSent(true);
     setTimeout(() => setSent(false), 2500);
-    setForm({ name: "", from: "", subject: "", message: "" });
+    setForm({ to: "", name: "", from: "", subject: "", message: "" });
   }
 
   return (
@@ -177,6 +194,15 @@ export default function MailPage() {
         <div className="max-w-xl rounded-2xl border border-neutral-200 bg-white overflow-hidden">
           <WindowDots />
           <div className="divide-y divide-neutral-200">
+            <div className="flex items-center px-5 py-3 gap-3">
+              <span className="text-sm text-neutral-400 w-16 shrink-0">To:</span>
+              <input
+                value={form.to}
+                onChange={(e) => setForm({ ...form, to: e.target.value })}
+                placeholder="supplier@example.com"
+                className="flex-1 text-sm text-neutral-900 placeholder-neutral-400 outline-none"
+              />
+            </div>
             <div className="flex items-center px-5 py-3 gap-3">
               <span className="text-sm text-neutral-400 w-16 shrink-0">Name:</span>
               <input

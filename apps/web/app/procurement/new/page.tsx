@@ -8,6 +8,8 @@ import { useFxRates, useDisplayCurrency, convertAmount, DISPLAY_CURRENCIES } fro
 import { hasProcurerToken } from "../../../lib/procurerAuthApi";
 import { GlobalRiskOverview } from "../../../components/GlobalRiskOverview";
 import { RiskAssessmentBadge } from "../../../components/RiskAssessmentBadge";
+import { SupplierBadge } from "../../../components/SupplierBadge";
+import { findApprovalTarget, buildRfqMailHref } from "../../../lib/procurementSourcing";
 import { Paperclip, ArrowUp, X, ExternalLink, Check } from "lucide-react";
 
 import {
@@ -76,6 +78,10 @@ export default function NewProcurementPage() {
   // Suppliers whose page the buyer has opened (keyed by supplierId, so reordering is safe)
   const [viewed, setViewed] = useState<Set<string>>(new Set());
 
+  // Plan the buyer approved in this session (0 = recommended, n = alternativePlans[n - 1]).
+  // After a reload this is null and rows fall back to matching the RFQ results by supplier.
+  const [approvedPlan, setApprovedPlan] = useState<number | null>(null);
+
   // Display currency (buyer's choice, remembered in the browser) + live exchange rates
   const { data: fx } = useFxRates();
   const [displayCurrency, setDisplayCurrency] = useDisplayCurrency(BUYER_CURRENCY);
@@ -84,6 +90,7 @@ export default function NewProcurementPage() {
     mutationFn: createProcurementTask,
     onSuccess: (data) => {
       setActiveTaskId(data.taskId);
+      setApprovedPlan(null);
       setViewed(new Set());
       setText("");
       setAttachedFile(null);
@@ -106,10 +113,34 @@ export default function NewProcurementPage() {
     },
   });
 
+  // NOTE: accepts an optional selectedPlanIndex so per-row "Approve & Order"
+  // can target the exact plan that matches that row's supplier, instead of
+  // always approving the recommended plan.
+  //
+  // ⚠️ VERIFY: this assumes selectedPlanIndex 1 → alternativePlans[0],
+  // 2 → alternativePlans[1], etc. (a 1-based offset, since 0/undefined means
+  // "recommended"). Confirm this matches your backend's /approve handler
+  // before relying on it for a real purchase — if your backend instead treats
+  // selectedPlanIndex as a direct array index into alternativePlans, every
+  // non-recommended approval here would target the wrong plan.
   const approve = useMutation({
-    mutationFn: () => approveProcurementTask(activeTaskId as string),
+    mutationFn: ({ plan }: { plan?: number; source: string }) =>
+      approveProcurementTask(activeTaskId as string, plan),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["procurement", activeTaskId] }),
   });
+
+  // Which exact button was clicked? e.g. "recommended", "alt-0", "row-0-2".
+  // null = nothing in flight. Each button compares against its own key, so only the
+  // clicked one shows "Approving…" even when several buttons approve the same plan.
+  const approvingSource: string | null = approve.isPending
+    ? (approve.variables?.source ?? null)
+    : null;
+
+  // Blocks a second approval while one is in flight, without greying out the other buttons.
+  function startApprove(plan: number | undefined, source: string) {
+    if (approve.isPending) return;
+    approve.mutate({ plan, source }, { onSuccess: () => setApprovedPlan(plan ?? 0) });
+  }
 
   function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
     const input = e.target;
@@ -209,6 +240,8 @@ export default function NewProcurementPage() {
 
   const state = data?.state;
   const task = data?.task;
+  // Once approved, the task leaves "awaiting_approval" and per-row actions are no longer valid.
+  const isLocked = !!state && ["purchasing", "rfq_sent", "done"].includes(state.status);
   const isProcessing =
     !!state && ["extracting", "sourcing", "comparing"].includes(state.status);
 
@@ -433,11 +466,11 @@ export default function NewProcurementPage() {
               {state.status === "awaiting_approval" && (
                 <div className="flex items-center gap-3">
                   <button
-                    onClick={() => approve.mutate()}
-                    disabled={approve.isPending}
+                    onClick={() => startApprove(undefined, "recommended")}
+                    disabled={approvingSource === "recommended"}
                     className="rounded-md bg-[#EA580C] px-4 py-2 text-xs font-medium text-white transition hover:bg-[#EA580C]/90 disabled:opacity-40"
                   >
-                    {approve.isPending ? "Approving…" : "Approve this plan"}
+                    {approvingSource === "recommended" ? "Approving…" : "Approve this plan"}
                   </button>
                   {approve.isError && (
                     <span className="text-xs text-red-600">{(approve.error as Error).message}</span>
@@ -453,7 +486,17 @@ export default function NewProcurementPage() {
                   </summary>
                   <div className="space-y-2 border-t border-neutral-100 p-3">
                     {state.alternativePlans.map((plan, i) => (
-                      <PlanCard key={i} plan={plan} show={money} />
+                      <PlanCard
+                        key={i}
+                        plan={plan}
+                        show={money}
+                        onApprove={
+                          state.status === "awaiting_approval"
+                            ? () => startApprove(i + 1, `alt-${i}`)
+                            : undefined
+                        }
+                        approving={approvingSource === `alt-${i}`}
+                      />
                     ))}
                   </div>
                 </details>
@@ -498,6 +541,7 @@ export default function NewProcurementPage() {
                                 <th className="px-4 py-3 text-center">Lead time</th>
                                 <th className="px-4 py-3 text-right">Estimated total</th>
                                 <th className="px-4 py-3 text-left">AI sourcing notes</th>
+                                <th className="px-4 py-3 text-left">Compliance</th>
                                 <th className="px-4 py-3 text-right">Action</th>
                               </tr>
                             </thead>
@@ -506,6 +550,34 @@ export default function NewProcurementPage() {
                                 const rowKey = `${i}-${q.supplierId ?? q.supplierName}-${j}`;
                                 const href = q.supplierId ? `/suppliers/${q.supplierId}` : undefined;
                                 const isViewed = !!q.supplierId && viewed.has(q.supplierId);
+
+                                // Reuses the real risk data already fetched for this task —
+                                // matched by region, not a separate per-row risk system.
+                                const rowRisk = q.supplierRegion
+                                  ? state.riskAssessment?.[q.supplierRegion]
+                                  : null;
+
+                                const approvalTarget = findApprovalTarget(
+                                  liq.lineItem.item,
+                                  q,
+                                  state.recommendedPlan,
+                                  state.alternativePlans
+                                );
+
+                                // Plan number this row's button approves:
+                                // 0 = recommended, n = alternativePlans[n - 1].
+                                const planNumber = approvalTarget
+                                  ? approvalTarget.kind === "recommended"
+                                    ? 0
+                                    : approvalTarget.index + 1
+                                  : null;
+
+                                // Is this row the supplier that was actually approved?
+                                const isApprovedRow =
+                                  approvedPlan !== null
+                                    ? planNumber === approvedPlan
+                                    : !!q.supplierId &&
+                                      !!state.rfqResults?.some((r) => r.supplierId === q.supplierId);
 
                                 // Small grey line under the total: tax, shipping, and the rate used.
                                 const detailParts: string[] = [];
@@ -534,6 +606,10 @@ export default function NewProcurementPage() {
                                           href={href}
                                           target="_blank"
                                           rel="noopener noreferrer"
+                                          onClick={() =>
+                                            q.supplierId &&
+                                            setViewed((s) => new Set(s).add(q.supplierId as string))
+                                          }
                                           className="text-[#EA580C] hover:underline"
                                         >
                                           {q.supplierName}
@@ -541,6 +617,25 @@ export default function NewProcurementPage() {
                                       ) : (
                                         <span className="text-neutral-900">{q.supplierName}</span>
                                       )}
+                                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                                        <SupplierBadge quote={q} />
+                                        {rowRisk && (
+                                          <span
+                                            title={rowRisk.recommendation}
+                                            className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                                              rowRisk.overall_status === "red"
+                                                ? "bg-red-100 text-red-700"
+                                                : rowRisk.overall_status === "yellow"
+                                                  ? "bg-yellow-100 text-yellow-700"
+                                                  : rowRisk.overall_status === "green"
+                                                    ? "bg-green-100 text-green-700"
+                                                    : "bg-neutral-100 text-neutral-500"
+                                            }`}
+                                          >
+                                            {rowRisk.overall_status} route
+                                          </span>
+                                        )}
+                                      </div>
                                     </td>
 
                                     {/* Unit price: always the supplier's own price, plus an approximation */}
@@ -590,31 +685,64 @@ export default function NewProcurementPage() {
                                       )}
                                     </td>
 
-                                    {/* Action: view the supplier page (navigation only, nothing is committed) */}
+                                    {/* Compliance — no backend field exists yet. Add
+                                        complianceVerified?: boolean and complianceDocs?: string[]
+                                        to SupplierQuote to replace this placeholder with real data. */}
+                                    <td className="px-4 py-3 text-[10px] text-neutral-400">
+                                      Not tracked yet
+                                    </td>
+
+                                    {/* Action: approve the exact plan that uses this supplier for
+                                        this item (when one exists), otherwise trigger an RFQ. */}
                                     <td className="px-4 py-3 text-right">
-                                      {href ? (
-                                        <a
-                                          href={href}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          onClick={() =>
-                                            q.supplierId &&
-                                            setViewed((s) => new Set(s).add(q.supplierId as string))
-                                          }
-                                          className="inline-block rounded-md border border-neutral-300 bg-white px-3.5 py-1.5 text-[11px] font-medium text-neutral-800 transition hover:border-[#EA580C] hover:text-[#EA580C]"
-                                        >
-                                          {isViewed ? "Viewed" : "View supplier"}
-                                        </a>
-                                      ) : (
-                                        <button
-                                          type="button"
-                                          disabled
-                                          title="No supplier page available"
-                                          className="cursor-not-allowed rounded-md border border-neutral-200 px-3.5 py-1.5 text-[11px] font-medium text-neutral-300"
-                                        >
-                                          View supplier
-                                        </button>
-                                      )}
+                                      <div className="flex flex-col items-end gap-1.5">
+                                        {planNumber !== null && state.status === "awaiting_approval" ? (
+                                          <button
+                                            onClick={() =>
+                                              startApprove(
+                                                planNumber === 0 ? undefined : planNumber,
+                                                `row-${i}-${j}`
+                                              )
+                                            }
+                                            disabled={approvingSource === `row-${i}-${j}`}
+                                            className="whitespace-nowrap rounded-md bg-[#EA580C] px-3 py-1.5 text-[11px] font-medium text-white transition hover:bg-[#EA580C]/90 disabled:opacity-40"
+                                          >
+                                            {approvingSource === `row-${i}-${j}` ? "Approving…" : "Approve & Order"}
+                                          </button>
+                                        ) : isLocked ? (
+                                          isApprovedRow ? (
+                                            <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-green-100 px-3 py-1.5 text-[11px] font-medium text-green-700">
+                                              <Check size={12} strokeWidth={3} />
+                                              Approved
+                                            </span>
+                                          ) : (
+                                            <span className="whitespace-nowrap px-3 py-1.5 text-[11px] text-neutral-400">
+                                              Not selected
+                                            </span>
+                                          )
+                                        ) : (
+                                          <a
+                                            href={buildRfqMailHref(liq.lineItem, q)}
+                                            className="inline-block whitespace-nowrap rounded-md border border-[#EA580C] px-3 py-1.5 text-[11px] font-medium text-[#EA580C] transition hover:bg-[#EA580C]/10"
+                                          >
+                                            Trigger Auto-RFQ
+                                          </a>
+                                        )}
+                                        {href && (
+                                          <a
+                                            href={href}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            onClick={() =>
+                                              q.supplierId &&
+                                              setViewed((s) => new Set(s).add(q.supplierId as string))
+                                            }
+                                            className="text-[10px] font-medium text-neutral-400 hover:text-neutral-700"
+                                          >
+                                            {isViewed ? "Viewed" : "View supplier"}
+                                          </a>
+                                        )}
+                                      </div>
                                     </td>
                                   </tr>
                                 );
@@ -675,11 +803,17 @@ function PlanCard({
   plan,
   show,
   highlight,
+  onApprove,
+  approving,
 }: {
   plan: FulfillmentPlan;
   /** Formats an amount (in the given source currency) in the buyer's display currency. */
   show: (amount: number, from: string) => string;
   highlight?: boolean;
+  /** When provided, shows an "Approve this plan" button for an alternative plan. */
+  onApprove?: () => void;
+  /** True only while THIS plan is the one being approved (drives the "Approving…" label). */
+  approving?: boolean;
 }) {
   const title =
     plan.type === "partial"
@@ -715,6 +849,15 @@ function PlanCard({
         <p className="mt-2 text-xs text-amber-700">
           No supplier found for: {plan.unmatchedItems.map((li) => li.item).join(", ")}
         </p>
+      )}
+      {onApprove && (
+        <button
+          onClick={onApprove}
+          disabled={approving}
+          className="mt-3 rounded-md border border-[#EA580C] px-3 py-1.5 text-[11px] font-medium text-[#EA580C] transition hover:bg-[#EA580C]/10 disabled:opacity-40"
+        >
+          {approving ? "Approving…" : "Approve this plan instead"}
+        </button>
       )}
     </div>
   );

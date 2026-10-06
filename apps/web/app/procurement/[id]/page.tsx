@@ -1,14 +1,17 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { RiskAssessmentBadge } from "../../../components/RiskAssessmentBadge";
+import { SupplierBadge } from "../../../components/SupplierBadge";
+import { findApprovalTarget, buildRfqMailHref } from "../../../lib/procurementSourcing";
 import { formatMoney } from "../../../lib/format";
 import { DISPLAY_CURRENCIES } from "../../../lib/fxApi";
 import { useMoneyDisplay } from "../../../lib/useMoneyDisplay";
 import {
   fetchProcurementTask,
+  approveProcurementTask,
   type QuoteScore,
   type FulfillmentPlan,
 } from "../../../lib/procurementApi";
@@ -23,18 +26,29 @@ const STATUS_STYLES: Record<string, string> = {
   comparing: "bg-neutral-100 text-neutral-600",
   awaiting_approval: "bg-blue-100 text-blue-700",
   purchasing: "bg-blue-100 text-blue-700",
+  rfq_sent: "bg-green-100 text-green-700",
   done: "bg-green-100 text-green-700",
   failed: "bg-red-100 text-red-700",
 };
 
 export default function ProcurementDetailPage({ params }: { params: { id: string } }) {
+  const qc = useQueryClient();
+
   const { data, isLoading, error } = useQuery({
     queryKey: ["procurement", params.id],
     queryFn: () => fetchProcurementTask(params.id),
     refetchInterval: (query) => {
       const status = query.state.data?.state.status;
-      return status === "done" || status === "failed" ? false : 2000;
+      return status === "done" || status === "failed" || status === "rfq_sent" ? false : 2000;
     },
+  });
+
+  // ⚠️ VERIFY: same assumption as the new-request page — selectedPlanIndex 1 means
+  // alternativePlans[0], 2 means alternativePlans[1], etc. Confirm this matches your
+  // backend's /approve handler before relying on it for a real purchase.
+  const approve = useMutation({
+    mutationFn: (selectedPlanIndex?: number) => approveProcurementTask(params.id, selectedPlanIndex),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["procurement", params.id] }),
   });
 
   // Hooks must run before any early return below.
@@ -55,6 +69,7 @@ export default function ProcurementDetailPage({ params }: { params: { id: string
   }
 
   const { task, state } = data;
+  const canApprove = state.status === "awaiting_approval";
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-12 space-y-6">
@@ -72,9 +87,9 @@ export default function ProcurementDetailPage({ params }: { params: { id: string
             <h1 className="text-lg font-medium text-neutral-900">{task.itemsSummary}</h1>
             <div className="mt-1 flex items-center gap-2">
               <span
-                className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[state.status] ?? ""}`}
+                className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[state.status] ?? "bg-neutral-100 text-neutral-600"}`}
               >
-                {state.status.replace("_", " ")}
+                {state.status.replace(/_/g, " ")}
               </span>
               {state.request?.requiredBy && (
                 <span className="text-xs text-neutral-500">
@@ -133,6 +148,21 @@ export default function ProcurementDetailPage({ params }: { params: { id: string
             </h2>
             <PlanCard plan={state.recommendedPlan} show={md.money} highlight />
 
+            {canApprove && (
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => approve.mutate(undefined)}
+                  disabled={approve.isPending}
+                  className="rounded-md bg-[#3d6bff] px-4 py-2 text-xs font-medium text-white transition hover:bg-[#3d6bff]/90 disabled:opacity-40"
+                >
+                  {approve.isPending ? "Approving…" : "Approve this plan"}
+                </button>
+                {approve.isError && (
+                  <span className="text-xs text-red-600">{(approve.error as Error).message}</span>
+                )}
+              </div>
+            )}
+
             {state.alternativePlans && state.alternativePlans.length > 0 && (
               <details className="rounded-lg border border-neutral-200">
                 <summary className="cursor-pointer px-4 py-2 text-xs font-medium text-neutral-500 hover:text-neutral-700">
@@ -141,7 +171,13 @@ export default function ProcurementDetailPage({ params }: { params: { id: string
                 </summary>
                 <div className="space-y-2 border-t border-neutral-100 p-3">
                   {state.alternativePlans.map((plan, i) => (
-                    <PlanCard key={i} plan={plan} show={md.money} />
+                    <PlanCard
+                      key={i}
+                      plan={plan}
+                      show={md.money}
+                      onApprove={canApprove ? () => approve.mutate(i + 1) : undefined}
+                      approving={approve.isPending}
+                    />
                   ))}
                 </div>
               </details>
@@ -166,7 +202,7 @@ export default function ProcurementDetailPage({ params }: { params: { id: string
                     No supplier found for this item.
                   </p>
                 ) : (
-                  <div className="overflow-hidden rounded-lg border border-neutral-200">
+                  <div className="overflow-x-auto rounded-lg border border-neutral-200">
                     <table className="w-full text-sm">
                       <thead className="bg-neutral-50 text-left text-xs font-semibold uppercase tracking-wider text-neutral-500">
                         <tr>
@@ -175,12 +211,28 @@ export default function ProcurementDetailPage({ params }: { params: { id: string
                           <th className="px-4 py-2">Lead time</th>
                           <th className="px-4 py-2">Total cost</th>
                           <th className="px-4 py-2">Notes</th>
+                          <th className="px-4 py-2">Compliance</th>
+                          <th className="px-4 py-2 text-right">Action</th>
                         </tr>
                       </thead>
                       <tbody>
                         {liq.topQuotes.map((q: QuoteScore, j: number) => {
                           const approx = md.unitApprox(q);
                           const detail = md.quoteDetail(q);
+
+                          // Reuses the real risk data already fetched for this task —
+                          // matched by region, not a separate per-row risk system.
+                          const rowRisk = q.supplierRegion
+                            ? state.riskAssessment?.[q.supplierRegion]
+                            : null;
+
+                          const approvalTarget = findApprovalTarget(
+                            liq.lineItem.item,
+                            q,
+                            state.recommendedPlan,
+                            state.alternativePlans
+                          );
+
                           return (
                             // One supplier can have several offers, so the supplier name alone is not a unique key.
                             <tr key={`${q.supplierId ?? q.supplierName}-${j}`} className="border-t border-neutral-100">
@@ -197,6 +249,25 @@ export default function ProcurementDetailPage({ params }: { params: { id: string
                                 ) : (
                                   q.supplierName
                                 )}
+                                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                                  <SupplierBadge quote={q} />
+                                  {rowRisk && (
+                                    <span
+                                      title={rowRisk.recommendation}
+                                      className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                                        rowRisk.overall_status === "red"
+                                          ? "bg-red-100 text-red-700"
+                                          : rowRisk.overall_status === "yellow"
+                                            ? "bg-yellow-100 text-yellow-700"
+                                            : rowRisk.overall_status === "green"
+                                              ? "bg-green-100 text-green-700"
+                                              : "bg-neutral-100 text-neutral-500"
+                                      }`}
+                                    >
+                                      {rowRisk.overall_status} route
+                                    </span>
+                                  )}
+                                </div>
                               </td>
                               {/* Unit price: always the supplier's own price, plus an approximation */}
                               <td className="px-4 py-2">
@@ -210,6 +281,34 @@ export default function ProcurementDetailPage({ params }: { params: { id: string
                                 {detail && <div className="text-xs text-neutral-400">{detail}</div>}
                               </td>
                               <td className="px-4 py-2 text-xs text-neutral-500">{q.rationale}</td>
+                              {/* Compliance — no backend field exists yet. Add
+                                  complianceVerified?: boolean and complianceDocs?: string[]
+                                  to SupplierQuote to replace this placeholder with real data. */}
+                              <td className="px-4 py-2 text-[10px] text-neutral-400">Not tracked yet</td>
+                              <td className="px-4 py-2 text-right">
+                                {approvalTarget && canApprove ? (
+                                  <button
+                                    onClick={() =>
+                                      approve.mutate(
+                                        approvalTarget.kind === "recommended"
+                                          ? undefined
+                                          : approvalTarget.index + 1
+                                      )
+                                    }
+                                    disabled={approve.isPending}
+                                    className="whitespace-nowrap rounded-md bg-[#3d6bff] px-3 py-1.5 text-[11px] font-medium text-white transition hover:bg-[#3d6bff]/90 disabled:opacity-40"
+                                  >
+                                    {approve.isPending ? "Approving…" : "Approve & Order"}
+                                  </button>
+                                ) : (
+                                  <a
+                                    href={buildRfqMailHref(liq.lineItem, q)}
+                                    className="inline-block whitespace-nowrap rounded-md border border-[#3d6bff] px-3 py-1.5 text-[11px] font-medium text-[#3d6bff] transition hover:bg-[#eef2ff]"
+                                  >
+                                    Trigger Auto-RFQ
+                                  </a>
+                                )}
+                              </td>
                             </tr>
                           );
                         })}
@@ -218,6 +317,24 @@ export default function ProcurementDetailPage({ params }: { params: { id: string
                   </div>
                 )}
               </div>
+            ))}
+          </div>
+        )}
+
+        {state.status === "rfq_sent" && state.rfqResults && state.rfqResults.length > 0 && (
+          <div className="space-y-1 rounded-md border border-green-200 bg-green-50 p-4 text-sm text-green-800">
+            <p className="font-medium">
+              RFQ sent to {state.rfqResults.map((r) => r.supplierName).join(", ")}. Waiting for supplier
+              replies. No order is final until a supplier confirms.
+            </p>
+            {state.rfqResults.map((r) => (
+              <p key={r.supplierId} className="text-xs">
+                {r.supplierName}
+                {r.referenceNumber ? ` · ${r.referenceNumber}` : ""}
+                {r.emailed === false
+                  ? " · email not delivered; the supplier will see it in their dashboard"
+                  : ""}
+              </p>
             ))}
           </div>
         )}
@@ -243,11 +360,16 @@ function PlanCard({
   plan,
   show,
   highlight,
+  onApprove,
+  approving,
 }: {
   plan: FulfillmentPlan;
   /** Formats an amount (in the given source currency) in the buyer's display currency. */
   show: (amount: number, from: string) => string;
   highlight?: boolean;
+  /** When provided, shows an "Approve this plan" button for an alternative plan. */
+  onApprove?: () => void;
+  approving?: boolean;
 }) {
   return (
     <div
@@ -278,6 +400,15 @@ function PlanCard({
         <p className="mt-2 text-xs text-amber-700">
           No supplier found for: {plan.unmatchedItems.map((li) => li.item).join(", ")}
         </p>
+      )}
+      {onApprove && (
+        <button
+          onClick={onApprove}
+          disabled={approving}
+          className="mt-3 rounded-md border border-[#3d6bff] px-3 py-1.5 text-[11px] font-medium text-[#3d6bff] transition hover:bg-[#eef2ff] disabled:opacity-40"
+        >
+          {approving ? "Approving…" : "Approve this plan instead"}
+        </button>
       )}
     </div>
   );

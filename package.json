@@ -1,12 +1,16 @@
 {
   "name": "scheduling-agent",
   "private": true,
-  "workspaces": ["apps/*"],
-  
+  "workspaces": [
+    "apps/*"
+  ],
   "scripts": {
     "dev:api": "npm run dev --workspace=apps/api",
     "dev:web": "npm run dev --workspace=apps/web",
     "db:generate": "npm run db:generate --workspace=apps/api",
     "db:migrate": "npm run db:migrate --workspace=apps/api"
+  },
+  "dependencies": {
+    "@vercel/analytics": "^2.0.1"
   }
 }
