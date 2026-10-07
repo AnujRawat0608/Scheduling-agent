@@ -31,7 +31,7 @@ const MAX_FILE_BYTES = 200 * 1024; // 200 KB is plenty for a BOM
 function buildExamplePrompt() {
   const d = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
   const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  return `We need 50 units of AS9100 Certified CNC Machined Aerospace Fasteners for the hardware team by ${iso}.`;
+  return `We need 50 units of SanDisk Ultra 64GB microSD card for the hardware team by ${iso}.`;
 }
 
 /** Mail link for a supplier found on the web (not registered). Falls back to their page when no email is known. */
