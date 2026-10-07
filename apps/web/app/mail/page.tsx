@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { Suspense, useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { Mail as MailIcon, Send, Inbox as InboxIcon } from "lucide-react";
 
@@ -63,7 +63,9 @@ function WindowDots() {
   );
 }
 
-export default function MailPage() {
+// The page body lives in its own component because useSearchParams() must be rendered
+// inside a <Suspense> boundary, otherwise `next build` fails while prerendering this page.
+function MailContent() {
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<"inbox" | "compose">("inbox");
   const [selected, setSelected] = useState<ReceivedMail | null>(mockInbox[0]);
@@ -255,5 +257,13 @@ export default function MailPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function MailPage() {
+  return (
+    <Suspense fallback={null}>
+      <MailContent />
+    </Suspense>
   );
 }
