@@ -546,7 +546,7 @@ export default function NewProcurementPage() {
             !state.recommendedPlan &&
             state.lineItemQuotes?.some((liq) => liq.topQuotes.some((q) => q.source && q.source !== "registered")) && (
               <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                No registered supplier could fulfil this request. These results were found on the web and are
+                These results were found on the web and are
                 unverified, so request a quote from the supplier directly.
               </div>
             )}
@@ -569,7 +569,7 @@ export default function NewProcurementPage() {
 
                     {!liq.hasMatch ? (
                       <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                        No supplier found for this item.
+                        Finding suppliers for your request.
                       </p>
                     ) : (
                       <>
