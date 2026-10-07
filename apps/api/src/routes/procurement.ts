@@ -2,6 +2,7 @@ import { Router } from "express";
 import { randomUUID } from "node:crypto";
 import { Command } from "@langchain/langgraph";
 import { buildProcurementGraph, extractProcurementRequest } from "../procurement/graph.js";
+import { webSourcingAvailable } from "../procurement/lib/webSourcing/index.js";
 import { db } from "../db/client.js";
 import { procurementTasks } from "../db/procurementSchema.js";
 import { eq, desc } from "drizzle-orm";
@@ -12,6 +13,7 @@ export const procurementRouter = Router();
 const graphPromise = buildProcurementGraph();
 
 const PRIORITIES = ["balanced", "cheapest", "fastest"] as const;
+const SOURCE_MODES = ["registered", "both", "web"] as const;
 const MAX_TEXT_LENGTH = 20_000;
 
 function summarizeItems(lineItems: { item: string }[]): string {
@@ -46,10 +48,11 @@ procurementRouter.get("/procurement", async (_req, res) => {
 
 procurementRouter.post("/procurement", requireProcurerAuth, async (req, res) => {
   try {
-    const { text, useRiskAnalysis, priority } = req.body as {
+    const { text, useRiskAnalysis, priority, sourceMode } = req.body as {
       text: string;
       useRiskAnalysis?: boolean;
       priority?: string;
+      sourceMode?: string;
     };
 
     // Identity comes from the login token, never from the form.
@@ -61,6 +64,16 @@ procurementRouter.post("/procurement", requireProcurerAuth, async (req, res) => 
     }
     if (typeof text !== "string" || text.length > MAX_TEXT_LENGTH) {
       return res.status(400).json({ error: `Request is too long (max ${MAX_TEXT_LENGTH} characters).` });
+    }
+
+    // Unknown or missing values fall back to the existing behaviour (registered suppliers only).
+    const safeSourceMode = SOURCE_MODES.find((m) => m === sourceMode) ?? "registered";
+
+    // Fail loudly instead of silently returning no web results when the search key is missing.
+    if (safeSourceMode !== "registered" && !webSourcingAvailable()) {
+      return res.status(400).json({
+        error: "Web search isn't set up on the server (TAVILY_API_KEY is missing). Choose 'Registered suppliers' for now.",
+      });
     }
 
     const extracted = await extractProcurementRequest(text);
@@ -84,6 +97,7 @@ procurementRouter.post("/procurement", requireProcurerAuth, async (req, res) => 
       })),
       requiredBy: extracted.requiredBy ?? undefined,
       priority: safePriority,
+      sourceMode: safeSourceMode,
     };
 
     const threadId = randomUUID();

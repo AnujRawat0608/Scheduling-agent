@@ -83,9 +83,14 @@ async function sourceOneItem(item: string, quantity: number): Promise<SupplierQu
 export async function contactSuppliers(state: ProcurementStateType) {
   const { request } = state;
 
+  // "registered" (default) | "both" | "web". Web-only skips the catalog lookup entirely.
+  const mode = request.sourceMode ?? "registered";
+  const useRegistered = mode !== "web";
+  const willSearchWeb = mode !== "registered";
+
   const lineItemQuotes: LineItemQuotes[] = await Promise.all(
     request.lineItems.map(async (lineItem) => {
-      const quotes = await sourceOneItem(lineItem.item, lineItem.quantity);
+      const quotes = useRegistered ? await sourceOneItem(lineItem.item, lineItem.quantity) : [];
       return {
         lineItem,
         quotes,
@@ -96,5 +101,7 @@ export async function contactSuppliers(state: ProcurementStateType) {
     })
   );
 
-  return { lineItemQuotes, status: "comparing" as const };
+  // When the web step runs next, stay in "sourcing" so the progress tracker is honest
+  // about what is happening (web search is the slow part).
+  return { lineItemQuotes, status: willSearchWeb ? ("sourcing" as const) : ("comparing" as const) };
 }

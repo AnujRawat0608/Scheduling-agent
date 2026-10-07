@@ -39,6 +39,12 @@ export interface PricingBreakdown {
   converted: { subtotal: number; taxAmount: number; shipping: number; total: number };
 }
 
+/** Where a quote came from. Undefined means "registered". */
+export type QuoteSource = "registered" | "web" | "catalog";
+
+/** Which suppliers to search: only registered ones, registered + the web, or only the web. */
+export type SourceMode = "registered" | "both" | "web";
+
 export interface SupplierQuote {
   supplierName: string;
   supplierId: string | null;
@@ -56,6 +62,21 @@ export interface SupplierQuote {
   taxRate: number | null;
   taxInclusive: boolean;
   simulated?: boolean;
+
+  // Web / catalog quotes only (registered quotes leave these unset).
+  source?: QuoteSource;
+  /** Page the price was found on. */
+  sourceUrl?: string;
+  /** 0–1: how sure the backend is that the extracted offer is correct. */
+  confidence?: number;
+  fetchedAt?: string;
+  contactEmail?: string;
+  stockKnown?: boolean;
+  moqKnown?: boolean;
+  /** false = shippingCost 0 means "not quoted", not "free". */
+  shippingKnown?: boolean;
+  /** true = the backend assumed a default lead time. */
+  leadTimeAssumed?: boolean;
 }
 
 export interface QuoteScore extends SupplierQuote {
@@ -122,6 +143,8 @@ export interface ProcurementRequest {
   lineItems: LineItem[];
   requiredBy?: string;
   priority?: Priority;
+  /** Which suppliers were searched. Undefined means "registered". */
+  sourceMode?: SourceMode;
 }
 
 export interface ProcurementTaskSummary {
@@ -179,6 +202,8 @@ export async function createProcurementTask(input: {
   text: string;
   useRiskAnalysis?: boolean;
   priority?: Priority;
+  /** Omit or "registered" = current behaviour. "both" / "web" also search the web. */
+  sourceMode?: SourceMode;
 }): Promise<{ taskId: string }> {
   const res = await authedFetch("/procurement", {
     method: "POST",

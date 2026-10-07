@@ -1,4 +1,5 @@
 import { scoreQuotes, WEIGHT_PRESETS } from "../lib/scoreQuotes.js";
+import { isVerifiedQuote } from "../lib/quoteSource.js";
 import { getRates, type RateTable } from "../lib/fx.js";
 import type {
   ProcurementStateType,
@@ -11,6 +12,7 @@ import type {
 
 const MAX_COMBINATIONS = 5000; // safety cap — see note below buildAllPlans
 const TOP_QUOTES_LIMIT = 5;
+const TOP_WEB_QUOTES_LIMIT = 3; // web quotes shown next to registered ones (up to 5 when there are none)
 const BUYER_CURRENCY = "INR";
 
 /** Totals are in INR with 2 decimals; round after every sum so float drift can't creep in. */
@@ -44,21 +46,33 @@ function scoreAllLineItems(
     // scoreQuotes already returns on-time quotes first, then by score. Do NOT re-sort by
     // score here, or a cheap late quote would jump back above an on-time one.
     // score -1 means "cannot fulfill / cannot price"; 0 is a valid (worst-ranked) quote.
-    const hasMatch = scoredQuotes.some((q) => q.score >= 0);
+    const valid = scoredQuotes.filter((q) => q.score >= 0);
+
+    // Web quotes score lower than verified ones, so a plain top-5 would hide them whenever
+    // there are 5+ registered quotes. Keep the top verified quotes AND a few web quotes.
+    const verifiedTop = valid.filter(isVerifiedQuote).slice(0, TOP_QUOTES_LIMIT);
+    const webLimit = verifiedTop.length > 0 ? TOP_WEB_QUOTES_LIMIT : TOP_QUOTES_LIMIT;
+    const webTop = valid.filter((q) => !isVerifiedQuote(q)).slice(0, webLimit);
+
     return {
       ...liq,
       scoredQuotes,
-      topQuotes: scoredQuotes.filter((q) => q.score >= 0).slice(0, TOP_QUOTES_LIMIT),
-      hasMatch,
+      topQuotes: [...verifiedTop, ...webTop],
+      hasMatch: valid.length > 0,
     };
   });
 }
 
-/** For one item, the best viable quote per supplier (supplier -> its best quote for this item). */
+/**
+ * For one item, the best viable quote per supplier (supplier -> its best quote for this item).
+ * Only VERIFIED quotes are eligible: web quotes are never part of a plan, because plans can be
+ * approved and turned into orders.
+ */
 function candidatesFor(liq: LineItemQuotes): Map<string, QuoteScore> {
   const bySupplier = new Map<string, QuoteScore>();
   for (const q of liq.scoredQuotes) {
     if (q.score < 0) continue; // only skip unfulfillable quotes (-1), not a valid score of 0
+    if (!isVerifiedQuote(q)) continue;
     const key = q.supplierId ?? q.supplierName;
     const existing = bySupplier.get(key);
     if (!existing || q.score > existing.score) bySupplier.set(key, q);
@@ -137,6 +151,9 @@ function comparePlans(a: FulfillmentPlan, b: FulfillmentPlan): number {
  * Generate every valid one-supplier-per-item assignment across fulfillable
  * items, score each as a FulfillmentPlan, and return them sorted best-first.
  *
+ * Items with no VERIFIED quote (for example only web quotes were found) are treated as
+ * unmatched here. If no item has a verified quote, there are no plans at all.
+ *
  * Safety cap: the number of combinations is the product of each item's
  * candidate-supplier count. For a small request (2-3 items, a handful of
  * suppliers each) this is trivial. For a large BOM this can explode
@@ -147,10 +164,14 @@ function comparePlans(a: FulfillmentPlan, b: FulfillmentPlan): number {
  * worth revisiting (e.g. capped beam search) if large BOMs become common.
  */
 function buildAllPlans(scored: LineItemQuotes[]): { plans: FulfillmentPlan[]; capped: boolean } {
-  const unmatchedItems = scored.filter((liq) => !liq.hasMatch).map((liq) => liq.lineItem);
-  const fulfillable = scored.filter((liq) => liq.hasMatch);
+  const withCandidates = scored.map((liq) => ({ liq, cands: [...candidatesFor(liq).entries()] }));
 
-  const perItemCandidates = fulfillable.map((liq) => [...candidatesFor(liq).entries()]);
+  const unmatchedItems = withCandidates.filter((p) => p.cands.length === 0).map((p) => p.liq.lineItem);
+  const fulfillableEntries = withCandidates.filter((p) => p.cands.length > 0);
+  const fulfillable = fulfillableEntries.map((p) => p.liq);
+  const perItemCandidates = fulfillableEntries.map((p) => p.cands);
+
+  if (fulfillable.length === 0) return { plans: [], capped: false };
 
   const combinationCount = perItemCandidates.reduce((n, cands) => n * Math.max(cands.length, 1), 1);
 
@@ -200,16 +221,32 @@ export async function compareQuotes(state: ProcurementStateType) {
   const anyMatch = scored.some((liq) => liq.hasMatch);
 
   if (!anyMatch) {
+    const mode = state.request?.sourceMode ?? "registered";
     return {
       lineItemQuotes: scored,
       recommendedPlan: null,
       alternativePlans: [],
       status: "failed" as const,
-      failureReason: "No supplier in the catalog could fulfill any of the requested items.",
+      failureReason:
+        mode === "registered"
+          ? "No supplier in the catalog could fulfill any of the requested items."
+          : "No supplier (registered or found on the web) could fulfill any of the requested items.",
     };
   }
 
   const { plans, capped } = buildAllPlans(scored);
+
+  // Quotes exist but none are from registered suppliers (web-only results). There is nothing
+  // to approve, so finish here: the buyer reviews the web quotes and requests quotes directly.
+  if (plans.length === 0) {
+    return {
+      lineItemQuotes: scored,
+      recommendedPlan: null,
+      alternativePlans: [],
+      status: "done" as const,
+    };
+  }
+
   const recommendedPlan = plans[0];
   const alternativePlans = capped ? [] : plans.slice(1);
 

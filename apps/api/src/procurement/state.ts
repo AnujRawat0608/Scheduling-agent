@@ -6,6 +6,12 @@ export interface LineItem {
   specifications?: string;
 }
 
+/** Where a quote came from. Undefined is treated as "registered" so existing data keeps working. */
+export type QuoteSource = "registered" | "web" | "catalog";
+
+/** Which suppliers the buyer wants searched. */
+export type SourceMode = "registered" | "both" | "web";
+
 export interface SupplierQuote {
   supplierName: string;
   supplierId: string | null;
@@ -22,6 +28,17 @@ export interface SupplierQuote {
   offerItem?: string;         // the product title the supplier actually listed
   simulated?: boolean;        // true = invented fallback quote, not a real offer
   respondedAt: string;
+
+  // ── Web / catalog quotes (all optional: registered quotes never set these) ──
+  source?: QuoteSource;
+  sourceUrl?: string;
+  confidence?: number;        // 0–1, how sure we are the extraction is right
+  fetchedAt?: string;
+  contactEmail?: string;
+  stockKnown?: boolean;       // false = page didn't say; quantityAvailable is a placeholder
+  moqKnown?: boolean;         // false = page didn't say; moq is a placeholder
+  shippingKnown?: boolean;    // false = shippingCost 0 means "not quoted", NOT free
+  leadTimeAssumed?: boolean;  // true = a default lead time was used
 }
 
 export interface PricingBreakdown {
@@ -84,6 +101,7 @@ export interface ProcurementRequest {
   lineItems: LineItem[];
   requiredBy?: string;
   priority?: "balanced" | "cheapest" | "fastest";
+  sourceMode?: SourceMode;  // undefined = "registered"
 }
 /** Result of creating/sending the RFQ to one supplier after the plan was approved. */
 export interface RfqResult {
