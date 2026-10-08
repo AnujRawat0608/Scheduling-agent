@@ -10,7 +10,7 @@ import { GlobalRiskOverview } from "../../../components/GlobalRiskOverview";
 import { RiskAssessmentBadge } from "../../../components/RiskAssessmentBadge";
 import { SupplierBadge } from "../../../components/SupplierBadge";
 import { findApprovalTarget, buildRfqMailHref } from "../../../lib/procurementSourcing";
-import { Paperclip, ArrowUp, X, ExternalLink, Check } from "lucide-react";
+import { Paperclip, ArrowUp, X, ExternalLink, Check, ChevronDown } from "lucide-react";
 import { AgentActivity } from "../../../components/AgentActivity";
 
 import {
@@ -77,6 +77,41 @@ function formatDate(value: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(value);
   return Number.isNaN(d.getTime()) ? value : d.toLocaleDateString();
+}
+
+// NOTE: not exported on purpose. A Next.js page file may only export the page itself
+// (plus a few special names), otherwise `next build` fails.
+/** Labelled dropdown with a custom arrow, a consistent height and an orange focus ring. */
+function SelectField({
+  label,
+  value,
+  onChange,
+  children,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-xs font-medium text-neutral-600">
+      {label}
+      <span className="relative">
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="h-8 cursor-pointer appearance-none rounded-lg border border-neutral-200 bg-white pl-3 pr-8 text-xs font-medium text-neutral-900 shadow-sm outline-none transition hover:border-neutral-300 focus:border-[#EA580C] focus:ring-2 focus:ring-[#EA580C]/20"
+        >
+          {children}
+        </select>
+        <ChevronDown
+          size={14}
+          className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400"
+          aria-hidden
+        />
+      </span>
+    </label>
+  );
 }
 
 export default function NewProcurementPage() {
@@ -293,44 +328,34 @@ export default function NewProcurementPage() {
           </div>
         </div>
 
-        <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-2">
-          <label className="flex items-center gap-2 text-xs text-neutral-500">
+        {/* Request options */}
+        <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-2.5 rounded-lg bg-neutral-50 px-3.5 py-2.5">
+          <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-neutral-700">
             <input
               type="checkbox"
               checked={useRiskAnalysis}
               onChange={(e) => setUseRiskAnalysis(e.target.checked)}
-              className="h-3.5 w-3.5 rounded border-neutral-300 text-[#EA580C] focus:ring-[#EA580C]"
+              className="h-4 w-4 cursor-pointer rounded border-neutral-300 accent-[#EA580C] focus:ring-[#EA580C]"
             />
             Use supply chain risk analysis
           </label>
 
-          <label className="flex items-center gap-1.5 text-xs text-neutral-500">
-            Prioritise
-            <select
-              value={priority}
-              onChange={(e) => setPriority(e.target.value as Priority)}
-              className="rounded-md border border-neutral-300 bg-white px-1.5 py-1 text-[11px] font-medium text-neutral-800 outline-none focus:border-[#EA580C]"
-            >
-              <option value="balanced">Balanced</option>
-              <option value="cheapest">Cheapest</option>
-              <option value="fastest">Fastest</option>
-            </select>
-          </label>
+          <span className="hidden h-5 w-px bg-neutral-200 sm:block" aria-hidden />
 
-          <label className="flex items-center gap-1.5 text-xs text-neutral-500">
-            Search
-            <select
-              value={scope}
-              onChange={(e) => setScope(e.target.value as SearchScope)}
-              className="rounded-md border border-neutral-300 bg-white px-1.5 py-1 text-[11px] font-medium text-neutral-800 outline-none focus:border-[#EA580C]"
-            >
-              <option value="registered">Registered suppliers</option>
-              <option value="both">Registered + web</option>
-              <option value="web">Web only</option>
-            </select>
-          </label>
+          <SelectField label="Prioritise" value={priority} onChange={(v) => setPriority(v as Priority)}>
+            <option value="balanced">Balanced</option>
+            <option value="cheapest">Cheapest</option>
+            <option value="fastest">Fastest</option>
+          </SelectField>
+
+          <SelectField label="Search" value={scope} onChange={(v) => setScope(v as SearchScope)}>
+            <option value="registered">Registered suppliers</option>
+            <option value="both">Registered + web</option>
+            <option value="web">Web only</option>
+          </SelectField>
+
           {scope !== "registered" && (
-            <span className="text-[10px] text-neutral-400">
+            <span className="rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-800">
               Web results are unverified and slower to load. Confirm prices with the supplier.
             </span>
           )}
@@ -454,20 +479,13 @@ export default function NewProcurementPage() {
               </a>
 
               {/* Display currency: changes how amounts are shown, not how suppliers are ranked */}
-              <label className="flex items-center gap-1.5 text-[11px] text-neutral-500">
-                Show Estimated Total in
-                <select
-                  value={displayCurrency}
-                  onChange={(e) => setDisplayCurrency(e.target.value)}
-                  className="rounded-md border border-neutral-300 bg-white px-1.5 py-1 text-[11px] font-medium text-neutral-800 outline-none focus:border-[#EA580C]"
-                >
-                  {DISPLAY_CURRENCIES.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <SelectField label="Show Estimated Total in" value={displayCurrency} onChange={setDisplayCurrency}>
+                {DISPLAY_CURRENCIES.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </SelectField>
               {displayCurrency !== BUYER_CURRENCY && (
                 <p className="max-w-[260px] text-right text-[10px] text-neutral-400">
                   {fx
