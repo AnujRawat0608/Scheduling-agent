@@ -50,17 +50,26 @@ function webRfqHref(item: { item: string; quantity: number }, q: QuoteScore): st
 // changes how amounts are DISPLAYED, so the ranking never changes when it is switched.
 const BUYER_CURRENCY = "INR";
 
+// Keys must match the backend's status values exactly (lowercase, snake_case).
+// Capitalise only the DISPLAYED label (see statusLabel), never these keys or any
+// `state.status === "..."` comparison.
 const STATUS_STYLES: Record<string, string> = {
-  Extracting: "bg-neutral-100 text-neutral-600",
-  Courcing: "bg-neutral-100 text-neutral-600",
-  Comparing: "bg-neutral-100 text-neutral-600",
-  Needs_info: "bg-amber-100 text-amber-800",
-  Awaiting_approval: "bg-amber-100 text-amber-800",
-  Purchasing: "bg-[#EA580C]/10 text-[#EA580C]",
-  Rfq_sent: "bg-green-100 text-green-700",
-  Done: "bg-green-100 text-green-700",
-  Failed: "bg-red-100 text-red-700",
+  extracting: "bg-neutral-100 text-neutral-600",
+  sourcing: "bg-neutral-100 text-neutral-600",
+  comparing: "bg-neutral-100 text-neutral-600",
+  needs_info: "bg-amber-100 text-amber-800",
+  awaiting_approval: "bg-amber-100 text-amber-800",
+  purchasing: "bg-[#EA580C]/10 text-[#EA580C]",
+  rfq_sent: "bg-green-100 text-green-700",
+  done: "bg-green-100 text-green-700",
+  failed: "bg-red-100 text-red-700",
 };
+
+/** "awaiting_approval" -> "Awaiting approval" (display only) */
+function statusLabel(status: string): string {
+  const s = status.replace(/_/g, " ");
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
 
 // Date-only strings ("2026-10-12") are parsed as UTC by `new Date()`, which can show the
 // previous day in some timezones. Parse them as local dates instead.
@@ -422,7 +431,7 @@ export default function NewProcurementPage() {
                   <span
                     className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[state.status] ?? "bg-neutral-100 text-neutral-600"}`}
                   >
-                    {state.status.replace(/_/g, " ")}
+                    {statusLabel(state.status)}
                   </span>
                   {state.request?.requiredBy && (
                     <span className="text-xs text-neutral-500">
@@ -490,9 +499,7 @@ export default function NewProcurementPage() {
             <RiskAssessmentBadge riskCheckStatus={state.riskCheckStatus} riskAssessment={null} />
           )}
 
-          {activeTaskId && !isResultError && (
-          <AgentActivity status={state?.status} state={state} />
-          )}
+          {!isResultError && <AgentActivity status={state?.status} state={state} />}
 
           {/* Consolidated view — the recommended plan, plus other viable combinations */}
           {state?.recommendedPlan && (
@@ -570,7 +577,9 @@ export default function NewProcurementPage() {
 
                     {!liq.hasMatch ? (
                       <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                        Finding suppliers for your request.
+                        {isProcessing
+                          ? "Finding suppliers for your request."
+                          : "No supplier found for this item."}
                       </p>
                     ) : (
                       <>
@@ -711,7 +720,7 @@ export default function NewProcurementPage() {
                                     {/* Lead time, judged against the deadline when the backend provides it */}
                                     <td className="px-4 py-3 text-center">
                                       <span
-                                        className={`inline-block rounded-md px-2 py-0.5 text-xs font-medium ${
+                                        className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
                                           q.meetsDeadline === false
                                             ? "bg-red-100 text-red-700"
                                             : q.meetsDeadline === true
@@ -790,18 +799,18 @@ export default function NewProcurementPage() {
                                                 Placing order…
                                               </span>
                                             ) : (
-                                            <>
-                                              <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-green-100 px-3 py-1.5 text-[11px] font-medium text-green-700">
-                                                <Check size={12} strokeWidth={3} />
-                                                Approved
-                                              </span>
-                                              <a
-                                                href={buildRfqMailHref(liq.lineItem, q)}
-                                                className="inline-block whitespace-nowrap rounded-md border border-[#EA580C] px-3 py-1.5 text-[11px] font-medium text-[#EA580C] transition hover:bg-[#EA580C]/10"
-                                              >
-                                                Trigger Auto-RFQ
-                                              </a>
-                                            </>
+                                              <>
+                                                <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-green-100 px-3 py-1.5 text-[11px] font-medium text-green-700">
+                                                  <Check size={12} strokeWidth={3} />
+                                                  Approved
+                                                </span>
+                                                <a
+                                                  href={buildRfqMailHref(liq.lineItem, q)}
+                                                  className="inline-block whitespace-nowrap rounded-md border border-[#EA580C] px-3 py-1.5 text-[11px] font-medium text-[#EA580C] transition hover:bg-[#EA580C]/10"
+                                                >
+                                                  Trigger Auto-RFQ
+                                                </a>
+                                              </>
                                             )
                                           ) : (
                                             <button
@@ -1000,70 +1009,4 @@ function SourceTab({
       {label}
     </button>
   );
-}
-
-const STAGES = [
-  { key: "extracting", label: "Reviewing your prompt" },
-  { key: "sourcing", label: "Finding supplier" },
-  { key: "comparing", label: "Matching data" },
-  { key: "result", label: "Result" },
-] as const;
-
-function ProcessTracker({ currentIndex }: { currentIndex: number }) {
-  if (currentIndex < 0) return null;
-
-  return (
-    <div className="flex items-center">
-      {STAGES.map((stage, i) => {
-        const done = i < currentIndex;
-        const active = i === currentIndex;
-        const isLast = i === STAGES.length - 1;
-        return (
-          <div key={stage.key} className="flex flex-1 items-center last:flex-none">
-            <div className="flex flex-col items-center gap-1.5">
-              <div
-                className={`relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 text-[10px] font-semibold transition-all duration-500 ${
-                  done
-                    ? "scale-100 border-green-500 bg-green-500 text-white"
-                    : active
-                      ? "scale-110 border-[#EA580C] bg-white text-[#EA580C]"
-                      : "scale-100 border-neutral-200 bg-white text-neutral-300"
-                }`}
-              >
-                {active && (
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#EA580C]/60 opacity-40" />
-                )}
-                {/* NOTE: animate-[pop_...] needs a "pop" keyframe in tailwind.config, otherwise it does nothing */}
-                <span className={`transition-all duration-300 ${done ? "animate-[pop_0.3s_ease-out]" : ""}`}>
-                  {done ? <Check size={12} strokeWidth={3} /> : i + 1}
-                </span>
-              </div>
-              <span
-                className={`whitespace-nowrap text-[11px] font-medium transition-colors duration-500 ${
-                  done || active ? "text-neutral-700" : "text-neutral-400"
-                }`}
-              >
-                {stage.label}
-              </span>
-            </div>
-            {!isLast && (
-              <div className="mx-1.5 h-0.5 flex-1 overflow-hidden rounded-full bg-neutral-200">
-                <div
-                  className="h-full rounded-full bg-green-500 transition-all duration-700 ease-out"
-                  style={{ width: done ? "100%" : "0%" }}
-                />
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function toStageIndex(status?: string) {
-  if (!status || status === "extracting") return 0;
-  if (status === "sourcing") return 1;
-  if (status === "comparing") return 2;
-  return 3;
 }
