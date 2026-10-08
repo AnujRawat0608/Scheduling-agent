@@ -1,4 +1,6 @@
 /** @type {import('tailwindcss').Config} */
+const colors = require("tailwindcss/colors");
+
 module.exports = {
   content: [
     "./app/**/*.{js,ts,jsx,tsx,mdx}",
@@ -6,6 +8,10 @@ module.exports = {
   ],
   theme: {
     extend: {
+      // Every neutral-* class (text, border, bg) now uses the cool slate scale.
+      colors: {
+        neutral: colors.slate,
+      },
       keyframes: {
         pop: {
           "0%": { transform: "scale(0.5)", opacity: "0" },

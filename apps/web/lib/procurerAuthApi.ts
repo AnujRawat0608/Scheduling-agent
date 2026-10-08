@@ -31,15 +31,15 @@ export interface RegisterProcurerInput {
 
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
-  return sessionStorage.getItem(TOKEN_KEY);
+  return localStorage.getItem(TOKEN_KEY);
 }
 
 function setToken(token: string) {
-  sessionStorage.setItem(TOKEN_KEY, token);
+  localStorage.setItem(TOKEN_KEY, token);
 }
 
 function clearToken() {
-  sessionStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(TOKEN_KEY);
 }
 
 function authHeaders(): HeadersInit {

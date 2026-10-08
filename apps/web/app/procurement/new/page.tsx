@@ -11,6 +11,7 @@ import { RiskAssessmentBadge } from "../../../components/RiskAssessmentBadge";
 import { SupplierBadge } from "../../../components/SupplierBadge";
 import { findApprovalTarget, buildRfqMailHref } from "../../../lib/procurementSourcing";
 import { Paperclip, ArrowUp, X, ExternalLink, Check } from "lucide-react";
+import { AgentActivity } from "../../../components/AgentActivity";
 
 import {
   createProcurementTask,
@@ -50,15 +51,15 @@ function webRfqHref(item: { item: string; quantity: number }, q: QuoteScore): st
 const BUYER_CURRENCY = "INR";
 
 const STATUS_STYLES: Record<string, string> = {
-  extracting: "bg-neutral-100 text-neutral-600",
-  sourcing: "bg-neutral-100 text-neutral-600",
-  comparing: "bg-neutral-100 text-neutral-600",
-  needs_info: "bg-amber-100 text-amber-800",
-  awaiting_approval: "bg-amber-100 text-amber-800",
-  purchasing: "bg-[#EA580C]/10 text-[#EA580C]",
-  rfq_sent: "bg-green-100 text-green-700",
-  done: "bg-green-100 text-green-700",
-  failed: "bg-red-100 text-red-700",
+  Extracting: "bg-neutral-100 text-neutral-600",
+  Courcing: "bg-neutral-100 text-neutral-600",
+  Comparing: "bg-neutral-100 text-neutral-600",
+  Needs_info: "bg-amber-100 text-amber-800",
+  Awaiting_approval: "bg-amber-100 text-amber-800",
+  Purchasing: "bg-[#EA580C]/10 text-[#EA580C]",
+  Rfq_sent: "bg-green-100 text-green-700",
+  Done: "bg-green-100 text-green-700",
+  Failed: "bg-red-100 text-red-700",
 };
 
 // Date-only strings ("2026-10-12") are parsed as UTC by `new Date()`, which can show the
@@ -266,10 +267,10 @@ export default function NewProcurementPage() {
     !!state && ["extracting", "sourcing", "comparing"].includes(state.status);
 
   return (
-    <main className="w-full bg-[#FAF8F2] px-6 py-16">
+    <main className="min-h-screen w-full bg-slate-100 px-6 py-16">
       <GlobalRiskOverview />
 
-      <div className="rounded-lg border border-neutral-200 bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+      <div className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm">
         <div className="mb-5 flex items-start justify-between">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">Your team</p>
@@ -410,7 +411,7 @@ export default function NewProcurementPage() {
 
       {/* Results panel — appears once a request has been sent, updates in place */}
       {activeTaskId && (
-        <div className="mt-6 space-y-5 rounded-lg border border-neutral-200 bg-white p-5">
+        <div className="mt-6 space-y-5 rounded-xl border border-neutral-200 bg-white p-5 shadow-sm">
           <div className="flex items-start justify-between">
             <div>
               <h2 className="text-sm font-semibold text-neutral-900">
@@ -489,8 +490,8 @@ export default function NewProcurementPage() {
             <RiskAssessmentBadge riskCheckStatus={state.riskCheckStatus} riskAssessment={null} />
           )}
 
-          {(isProcessing || (!!activeTaskId && !state && !isResultError)) && (
-            <ProcessTracker currentIndex={toStageIndex(state?.status)} />
+          {activeTaskId && !isResultError && (
+          <AgentActivity status={state?.status} state={state} />
           )}
 
           {/* Consolidated view — the recommended plan, plus other viable combinations */}
@@ -579,9 +580,9 @@ export default function NewProcurementPage() {
                             {Math.min(...liq.topQuotes.map((q) => q.leadTimeDays))} days.
                           </p>
                         )}
-                        <div className="overflow-x-auto rounded-lg border border-neutral-300">
+                        <div className="overflow-x-auto rounded-lg border border-neutral-200">
                           <table className="w-full text-xs">
-                            <thead className="border-b border-neutral-300 bg-neutral-50 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+                            <thead className="border-b border-neutral-200 bg-neutral-50 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
                               <tr>
                                 <th className="px-4 py-3 text-left">Supplier</th>
                                 <th className="px-4 py-3 text-right">Unit price</th>
@@ -652,7 +653,7 @@ export default function NewProcurementPage() {
                                 const approx = unitApprox(q);
 
                                 return (
-                                  <tr key={rowKey} className={q.isBest ? "bg-green-50/40" : ""}>
+                                  <tr key={rowKey} className={q.isBest ? "bg-green-50/40" : "hover:bg-slate-50"}>
                                     {/* Supplier */}
                                     <td className="px-4 py-3 font-medium">
                                       {href ? (
