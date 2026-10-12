@@ -17,6 +17,8 @@ import { uploadsRouter } from "./routes/uploads.js";
 import { startFxRefreshJob } from "./procurement/lib/refreshFxRates.js";
 import { fxRatesRouter } from "./routes/fxRates.js";
 import { procurerAuthRouter } from "./routes/procurerAuth.js";
+import { catalogRouter } from "./routes/catalog.js";
+
 
 startFxRefreshJob();
 
@@ -52,10 +54,10 @@ app.use("/api/procurer-auth", procurerAuthRouter);
 app.use("/api/admin/suppliers", adminSuppliersRouter);
 app.use("/api/rfqs", rfqRouter);
 app.use("/api", fxRatesRouter);
-
+app.use("/api/catalog", catalogRouter);
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
 const port = process.env.PORT ?? 3001;
 app.listen(port, () => {
-  console.log(`API listening on :${port}`);
+  console.log(`API listening on :${port} (catalog mounted at /api/catalog)`);
 });

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Calendar,
-  Clock,
+  ShoppingBag,
   Truck,
   Mail,
   Route,
@@ -31,11 +31,11 @@ const apps: DockApp[] = [
     isActive: (p) => p === "/",
   },
   {
-    id: "history",
-    label: "History",
-    icon: <Clock size={20} strokeWidth={2} />,
-    href: "/runs",
-    isActive: (p) => p === "/runs",
+    id: "catalog",
+    label: "Catalog",
+    icon: <ShoppingBag size={20} strokeWidth={2} />,
+    href: "/catalog",
+    isActive: (p) => !!p?.startsWith("/catalog"),
   },
   {
     id: "procurement",
@@ -51,23 +51,20 @@ const apps: DockApp[] = [
     href: "/supply-chain",
     isActive: (p) => !!p?.startsWith("/supply-chain"),
   },
-    {
-      id: "mail",
-      label: "Mail",
-      icon: <Mail size={20} strokeWidth={2} />,
-      href: "/mail",
-      isActive: (p) => !!p?.startsWith("/mail"),
-    },
-
-   {
-  id: "sendQuote",
-  label: "Send RFQ",
-  icon: <Send size={20} strokeWidth={2} />,
-  href: "/sendquote",
-  isActive: (p) => !!p?.startsWith("/sendquote"),
-},
-
-
+  {
+    id: "mail",
+    label: "Mail",
+    icon: <Mail size={20} strokeWidth={2} />,
+    href: "/mail",
+    isActive: (p) => !!p?.startsWith("/mail"),
+  },
+  {
+    id: "sendQuote",
+    label: "Send RFQ",
+    icon: <Send size={20} strokeWidth={2} />,
+    href: "/sendquote",
+    isActive: (p) => !!p?.startsWith("/sendquote"),
+  },
   {
     id: "routing",
     label: "Risk Analysis",
