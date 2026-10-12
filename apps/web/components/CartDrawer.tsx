@@ -51,7 +51,7 @@ export function CartDrawer({ open, onClose }: { open: boolean; onClose: () => vo
             <p className="py-10 text-center text-sm text-neutral-500">Your cart is empty.</p>
           )}
 
-          {[...groups.entries()].map(([key, g]) => {
+          {Array.from(groups.entries()).map(([key, g]) => {
             const subtotal = Math.round(g.lines.reduce((s, l) => s + l.product.unitPrice * l.quantity, 0) * 100) / 100;
             return (
               <section key={key} className="rounded-lg border border-neutral-200">

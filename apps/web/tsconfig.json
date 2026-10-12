@@ -15,6 +15,7 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
+    "target": "ES2017",
     "jsx": "preserve",
     "plugins": [
       {
