@@ -17,7 +17,8 @@ An AI-assisted procurement platform. A buyer describes what they need in plain E
 - Builds a **recommended fulfillment plan** (single supplier or split across suppliers) plus alternatives, with a plain-language rationale, e.g. *"Cheapest · fastest · arrives 12d before deadline"*.
 - Optionally runs a **supply chain risk check** on the supplier regions in the plan.
 - **Always stops for human approval.** The buyer approves the recommended plan, picks an alternative, or rejects.
-- After approval, creates and emails RFQs to the chosen suppliers. The UI also offers direct ordering ("Approve & Order") for catalog suppliers.
+- After approval, creates and emails RFQs to the chosen suppliers.
+- Buyers can also place a **direct order** with a catalog supplier (cart checkout). The server prices it from the catalog, so the browser can never set its own price. See [Orders](#orders).
 
 ### 2. Supplier portal
 - Suppliers register, build a public profile and manage their product catalog (price, MOQ, lead time, category, tax, certifications).
@@ -61,7 +62,7 @@ flowchart LR
 
 | Part | Stack | Responsibility |
 |---|---|---|
-| `apps/web` | Next.js, TypeScript, Tailwind | Buyer, supplier and admin UIs; routing/risk visualisation; cart, invoices (PDF), currency display |
+| `apps/web` | Next.js 14, React 18, TypeScript, Tailwind, TanStack Query | Buyer, supplier and admin UIs; risk map (`react-simple-maps`, `d3-geo`, `topojson-client`) and 3D globe (`react-globe.gl`); cart; client-side PDF invoices (`jspdf`); currency display |
 | `apps/api` | Express, LangGraph, Drizzle ORM, Postgres, Langfuse, Nodemailer | Auth, catalog, RFQs, orders, FX, and the procurement agent |
 | `apps/risk-agent` | FastAPI, psycopg2, Groq, PostGIS | News ingestion, risk scoring, route-risk API, Q&A agent |
 
@@ -81,7 +82,7 @@ The run state is checkpointed to Postgres (`PostgresSaver`), so a run can wait f
 |---|---|
 | `extractRequest` (before the graph, in the route) | LLM (Groq, structured output via Zod) turns free text into line items and a deadline |
 | `contactSuppliers` | Full-text search over the supplier catalog (Postgres `tsvector`, listing title only), with an accessory filter so a "case" is not returned for a "Raspberry Pi 5" |
-| `webDiscovery` | Runs only when the buyer chose web or both. Finds and extracts quotes from the web, de-duplicates against registered suppliers, and never fails the run |
+| `webDiscovery` | Runs only when the buyer chose web or both. Finds and extracts quotes from the web (see [Web sourcing](#web-sourcing)), de-duplicates against registered suppliers by normalised company name, and never fails the run |
 | `compareQuotes` | Deterministic scoring and plan building (see below) |
 | `riskCheck` | Optional. Calls the risk service for each distinct supplier region in the plan and stores the result. Advisory only |
 | `humanApproval` | Uses LangGraph `interrupt()`. The run always pauses here |
@@ -94,11 +95,80 @@ The run state is checkpointed to Postgres (`PostgresSaver`), so a run can wait f
 - **Failures degrade gracefully.** Web discovery and risk checks never break a procurement run.
 
 **How `compareQuotes` works**
-1. Scores each quote with weight presets for balanced, cheapest or fastest, and a deadline check. Quotes that cannot be fulfilled or priced are excluded.
-2. Converts everything to the buyer currency (INR) with stored FX rates, including tax and shipping.
+1. **Prices** each quote in integer cents: tax-inclusive prices have the tax extracted, tax-exclusive prices have it added, and shipping is added. Each component is then converted to the buyer currency (INR) with stored FX rates, and the rounded lines are summed so the breakdown always adds up. This assumes 2-decimal currencies.
+2. **Scores** each quote as `(priceScore × wPrice + leadScore × wSpeed) × trust`.
+   - `priceScore` is the cheapest total divided by this quote's total. `leadScore` is `(fastest lead time + 1) ÷ (this lead time + 1)`. Both are capped at 1.
+   - Weights (price / speed): balanced 0.6 / 0.4, cheapest 0.85 / 0.15, fastest 0.2 / 0.8.
+   - `trust` is 1 for verified quotes and `0.8 × confidence` for web quotes. The cheapest and fastest baselines come from verified quotes only, so one wrongly scraped price cannot drag every real supplier's score down.
+   - A quote whose stock is below the quantity, or whose MOQ is above it, scores −1 and is excluded. Unknown web stock or MOQ is not treated as zero.
+   - Ordering is: usable before unusable, on-time before late, higher score, then lower price, then faster. Only a verified, on-time quote can be marked "best".
+   - Each quote gets a plain-language rationale, e.g. *"Cheapest · fastest · arrives 12d before deadline"*.
 3. Enumerates every one-supplier-per-item combination (capped at 5,000, with a greedy fallback for large item lists).
 4. Sorts plans by: meets the deadline, then fewer suppliers, then higher average score, then lower total cost.
 5. Returns a recommended plan, alternatives, and a warning if no plan can meet the deadline.
+
+### Web sourcing
+
+Web sourcing uses a **search API, not an in-house crawler**. The server never fetches arbitrary URLs itself, which avoids SSRF and robots.txt handling.
+
+1. **Search.** The provider returns result pages with their text. [Firecrawl](https://www.firecrawl.dev) (`/v1/search`, page markdown) is preferred when `FIRECRAWL_API_KEY` is set. [Tavily](https://tavily.com) is the fallback when only `TAVILY_API_KEY` is set. With neither key, "web" and "both" requests are rejected with a 400. The query is the item, its specifications and the words "buy price supplier". Up to 8 pages are fetched per item (`WEB_MAX_PAGES`). Pages whose URL looks like a blog, article, news or guide, or that contain no price-like text, are skipped before any model call. Pages are read two at a time (`WEB_CONCURRENCY`) with a 45-second timeout per step (`WEB_TIMEOUT_MS`). Results are de-duplicated by site, price and currency, and the 6 most confident per item are kept (`WEB_MAX_QUOTES_PER_ITEM`).
+2. **Extraction.** For each page, an LLM on Groq (default `openai/gpt-oss-20b`, override with `WEB_EXTRACT_MODEL`) returns structured offers: supplier, product title, unit price, currency, MOQ, lead time, stock, contact email and region. Only the lines that mention the product or look like prices (about 6,000 characters) are sent to the model.
+3. **Validation in code.** The model's output is never trusted on its own. An offer is dropped unless:
+   - the model marked it as matching the requested product (not an accessory or another model),
+   - the page doesn't say it is out of stock,
+   - the price is positive and the currency is a valid 3-letter code,
+   - the model's `evidence` excerpt appears **verbatim on the page** and contains the claimed price.
+   
+   A contact email is kept only if it literally appears on the page. Confidence is computed in code (0.75 for an exact match, 0.5 for a likely match, plus 0.05 if in stock), not taken from the model.
+4. **Prompt-injection defence.** Page content is treated as untrusted data in the system prompt, and the verbatim-evidence check stops invented offers.
+5. **Honest gaps.** Web quotes are flagged `source: "web"` with the source URL and these markers: stock unknown, shipping unknown (0 means "not quoted", not free), MOQ defaults to 1 when unstated, and a 14-day lead time is assumed (and flagged) when the page gives none. They have no supplier region, so the risk check does not cover them.
+
+Set `WEB_DEBUG=true` to log why individual offers were rejected.
+
+### Procurement API
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/api/procurement` | Procurer login | Create a request. Returns `202` with `taskId` and `threadId`; the agent runs in the background and the UI polls for progress |
+| GET | `/api/procurement` | none | Last 50 tasks |
+| GET | `/api/procurement/:id` | none | Task plus live graph state |
+| POST | `/api/procurement/:id/approve` | none | Approve (optionally with `selectedPlanIndex`) or reject (with a note). Only accepted while the task is `awaiting_approval` |
+
+Input rules: the request text is limited to 20,000 characters, unknown `priority` or `sourceMode` values fall back to `balanced` and `registered`, and a required-by date in the past is rejected. The buyer's identity comes from the login token, never from the form.
+
+### Orders
+
+Direct orders (cart checkout) are separate from agent RFQs.
+
+- **`POST /api/supplier-orders`** places an order with one supplier (1–100 items). The client sends only `productId` and `quantity`. Name, price, currency, tax and shipping are read from the catalog.
+- Each item must belong to the supplier and satisfy **MOQ ≤ quantity ≤ stock**, and all items must share one currency.
+- Money is computed in **integer cents**. Tax-inclusive prices have the tax extracted, and tax-exclusive prices have it added. One shipping fee applies per order (the highest among the items). No platform fee is added.
+- The order and its items are saved as a **price snapshot in one transaction**.
+- **Lifecycle:** `pending` → `confirmed` (`PATCH /api/supplier-orders/:id/confirm`) → `shipped` (`PATCH /api/supplier-orders/:id/ship`). Shipping requires supplier login, only works on that supplier's own orders, and only from `confirmed`. It emails the buyer, and a mail failure does not undo the shipment.
+- `GET /api/supplier-orders/mine` returns the logged-in supplier's orders. `GET /api/supplier-orders` returns all orders for the billing page.
+
+### RFQs
+
+RFQs live in one `rfqs` table and have two origins, so a supplier sees both in the same inbox.
+
+**Agent RFQs** are created by `sendRfqs` (through `createAgentRfq`) after the buyer approves a plan.
+- One RFQ per supplier leg, with reference `RFQ-<first 8 characters of the task id>-<leg number>`. It is linked to the task and to the buyer (`procurerId`), so the buyer can see the supplier's quote later.
+- Line items carry the supplier's own listing title plus the buyer's specifications. The notes mention the supplier's listed price and lead time and ask them to confirm availability and a final price.
+- The supplier gets `RFQ_REPLY_WITHIN_DAYS` (default 3) to reply.
+- **Idempotent:** a unique index on (task, supplier) means a repeat or parallel call returns the existing RFQ and sends nothing.
+- The email is best effort. The RFQ is saved and visible in the supplier dashboard either way.
+- Buyer-supplied text is flattened to one line and length-capped before it is stored or emailed to an outside company.
+
+**Manual RFQs** come from the "Send RFQ" form (`POST /api/rfqs`), either as a draft or sent. Creation is limited to 20 per IP per hour, using an in-memory counter that resets on restart.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/rfqs/me` | Supplier | Incoming RFQs, newest first (drafts hidden) |
+| GET | `/api/rfqs/me/unread-count` | Supplier | Badge count |
+| GET | `/api/rfqs/me/:id` | Supplier | Full RFQ; marks it as read |
+| POST | `/api/rfqs/me/:id/quote` | Supplier | Submit a quote (line totals, lead time, validity, payment terms, notes). A resubmission replaces the earlier quote, and the RFQ status becomes `quoted` |
+| GET | `/api/rfqs/:id` | none | RFQ with supplier details and quotes, for the buyer |
+| POST | `/api/rfqs` | none | Create a manual RFQ |
 
 ### Risk agent
 
@@ -155,6 +225,12 @@ Create `.env` files from the examples. **Never commit them.**
 | `RISK_AGENT_URL` | Risk service base URL (default `http://localhost:8000`) |
 | `PROCUREMENT_REPLY_TO` | Reply-to address on RFQ emails (shared mailbox) |
 | `ALLOW_SIMULATED_SUPPLIERS` | `true` enables fake demo quotes. Keep off in production |
+| `FIRECRAWL_API_KEY` | Web sourcing search provider (preferred) |
+| `TAVILY_API_KEY` | Web sourcing fallback provider, used only if no Firecrawl key is set |
+| `WEB_EXTRACT_MODEL` | Optional. Groq model for web offer extraction (default `openai/gpt-oss-20b`) |
+| `WEB_DEBUG` | Optional. `true` logs why web offers were rejected |
+| `WEB_MAX_PAGES`, `WEB_CONCURRENCY`, `WEB_TIMEOUT_MS`, `WEB_MAX_QUOTES_PER_ITEM` | Optional web sourcing limits (defaults: 8 pages, 2 at a time, 45,000 ms, 6 quotes per item) |
+| `RFQ_REPLY_WITHIN_DAYS` | Optional. Days a supplier is given to answer an agent RFQ (default 3) |
 | `LANGFUSE_*`, SMTP and JWT settings | Tracing, outgoing mail and auth. See `.env.example` |
 
 `apps/risk-agent/.env`
@@ -168,8 +244,11 @@ Create `.env` files from the examples. **Never commit them.**
 
 ```bash
 # API database
-npm run db:migrate --workspace=apps/api
+npm run db:migrate                            # applies the Drizzle migrations
 npm run seed:admin --workspace=apps/api      # creates the first admin
+
+# After changing a Drizzle schema file, generate a new migration first:
+# npm run db:generate
 
 # Risk database (PostGIS required)
 psql "$RISK_DATABASE_URL" -f apps/risk-agent/db/schema.sql
@@ -243,7 +322,11 @@ apps/
 - **Risk checks during sourcing need a destination region.** The API's risk client does not always send one, while the risk service requires it, so the check can report "unavailable". Pass the buyer's destination region or make it optional.
 - **GDELT events are not de-duplicated**, and `event_time` is the ingestion time, not the article's publish time. Repeated stories can inflate scores.
 - **Event classification is headline-only.** The LLM sees the headline and URL, not the article body.
-- **Web-sourced quotes are not verified.** They are shown with confidence and source, but cannot be approved or ordered.
+- **Web-sourced quotes are unverified by design.** They are shown with confidence and source URL but can never be part of an approvable plan. Stock, shipping and often lead time are unknown.
+- **Several endpoints have no authentication.** Anyone who knows a task ID can read or approve a procurement task (`GET /api/procurement`, `GET /api/procurement/:id`, `POST /api/procurement/:id/approve`), and approval does not check that the task belongs to the caller. `PATCH /api/supplier-orders/:id/confirm` has no auth or ownership check even though its comment says only the supplier can confirm. `GET /api/supplier-orders` returns every order, including buyer names, emails and addresses. The RFQ endpoints are open too: `POST /api/rfqs` trusts the requester name and email from the form (limited only by an in-memory per-IP counter, and manual RFQs are not linked to a buyer account), and `GET /api/rfqs/:id` returns an RFQ and its quotes to anyone with the ID. Lock these down before production.
+- **A failed RFQ send cannot be retried through the approve endpoint.** The task ends as `failed`, and approval is only accepted from `awaiting_approval`.
+- **The first agent run is started in-process after the HTTP response.** A server restart mid-run can leave a task stuck in an early status, because nothing resumes it.
+- **The "web search isn't set up" error still mentions `TAVILY_API_KEY`**, although Firecrawl is now the preferred provider.
 - **Catalog matching is full-text search on listing titles.** It has no synonym or fuzzy matching.
 - **Risk API has open CORS and no authentication.** Tighten before production.
 - **Uploads are stored on local disk** (`apps/api/uploads`), which is lost on redeploy on most hosts. Use object storage.
