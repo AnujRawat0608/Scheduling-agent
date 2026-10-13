@@ -3,9 +3,19 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Receipt, TriangleAlert, X, FileText, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  Receipt,
+  TriangleAlert,
+  X,
+  FileText,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  CircleCheck,
+} from "lucide-react";
 import { fetchAllSupplierOrders, confirmSupplierOrder, type SupplierOrder } from "../../lib/supplierOrdersApi";
 import { formatMoney } from "../../lib/format";
+import { downloadInvoicePdf, type InvoiceInput } from "../../lib/invoicePdf";
 
 const STATUS_STYLES: Record<string, string> = {
   pending: "bg-orange-100 text-orange-700",
@@ -108,8 +118,143 @@ function itemsSummary(o: SupplierOrder): string {
   return o.items.length > 1 ? `${first} +${o.items.length - 1} more` : first;
 }
 
+/* ---------- PDF invoice ---------- */
+
+/** Only confirmed, shipped and delivered orders with a known total can be invoiced. */
+function canInvoice(o: SupplierOrder): boolean {
+  return o.status !== "pending" && o.status !== "cancelled" && lineTotal(o) !== null;
+}
+
+/** Turns an order into the plain numbers the PDF needs, using the same helpers as the screen
+ * so the invoice always matches what the buyer sees. */
+function toInvoiceInput(o: SupplierOrder): InvoiceInput {
+  const major = (minor: number | null) => (minor === null ? null : minor / 100);
+  return {
+    invoiceNumber: `INV-${String(o.id).replace(/-/g, "").slice(0, 8).toUpperCase()}`,
+    orderId: String(o.id),
+    orderDate: o.createdAt,
+    status: o.status,
+    currency: currencyOf(o),
+    requesterName: o.requesterName,
+    requesterEmail: o.requesterEmail,
+    deliveryAddress: o.deliveryAddress,
+    notes: o.notes ?? null,
+    items: o.items.map((item) => ({
+      name: item.itemName,
+      quantity: item.quantity,
+      unitPrice: major(toMinor(item.unitPrice)),
+      amount: major(itemLineTotal(item)),
+    })),
+    subtotal: major(subtotalMinor(o)),
+    tax: taxMinor(o) / 100,
+    shipping: shippingMinor(o) / 100,
+    total: major(lineTotal(o)),
+  };
+}
+
+/* ---------- "Order confirmed" dialog: offers the PDF invoice ---------- */
+function InvoiceDialog({
+  order,
+  onClose,
+  onDownload,
+  downloading,
+  error,
+}: {
+  order: SupplierOrder;
+  onClose: () => void;
+  onDownload: (o: SupplierOrder) => Promise<boolean>;
+  downloading: boolean;
+  error: string | null;
+}) {
+  const [downloaded, setDownloaded] = useState(false);
+  const total = lineTotal(order);
+  const itemCount = order.items.length;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  async function handleDownload() {
+    const ok = await onDownload(order);
+    if (ok) setDownloaded(true);
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="invoice-dialog-title"
+    >
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+        <div className="flex items-start gap-3">
+          <CircleCheck size={28} className="mt-0.5 shrink-0 text-green-600" />
+          <div className="min-w-0">
+            <h2 id="invoice-dialog-title" className="text-base font-semibold text-neutral-900">
+              Order confirmed
+            </h2>
+            <p className="mt-1 text-sm text-neutral-600">
+              {order.requesterName}&apos;s order ({itemCount} {itemCount === 1 ? "item" : "items"}
+              {total !== null ? `, ${formatMinor(total, currencyOf(order))}` : ""}) is now confirmed.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-5 rounded-lg border border-neutral-200 bg-neutral-50 p-4">
+          <p className="text-sm font-medium text-neutral-900">Generate the PDF invoice?</p>
+          <p className="mt-1 text-xs text-neutral-500">
+            You can also download it later from the Invoice button on this order.
+          </p>
+        </div>
+
+        {error && (
+          <p role="alert" className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            {error}
+          </p>
+        )}
+        {downloaded && !error && (
+          <p role="status" className="mt-3 text-xs font-medium text-green-700">
+            Invoice downloaded.
+          </p>
+        )}
+
+        <div className="mt-5 flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-neutral-200 px-4 py-2 text-sm font-medium text-neutral-700 transition hover:border-neutral-300"
+          >
+            {downloaded ? "Close" : "Not now"}
+          </button>
+          <button
+            type="button"
+            onClick={handleDownload}
+            disabled={downloading}
+            className="flex items-center gap-1.5 rounded-md bg-[#c2410c] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#9a3412] disabled:opacity-60"
+          >
+            <Download size={15} />
+            {downloading ? "Creating PDF…" : downloaded ? "Download again" : "Download invoice (PDF)"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- Order detail / invoice modal ---------- */
-function OrderDetailModal({ order, onClose }: { order: SupplierOrder; onClose: () => void }) {
+function OrderDetailModal({
+  order,
+  onClose,
+  onDownload,
+  downloading,
+}: {
+  order: SupplierOrder;
+  onClose: () => void;
+  onDownload: (o: SupplierOrder) => Promise<boolean>;
+  downloading: boolean;
+}) {
   const currency = currencyOf(order);
   const sub = subtotalMinor(order);
   const tax = taxMinor(order);
@@ -236,6 +381,18 @@ function OrderDetailModal({ order, onClose }: { order: SupplierOrder; onClose: (
               no price set at order time).
             </p>
           )}
+
+          {canInvoice(order) && (
+            <button
+              type="button"
+              onClick={() => onDownload(order)}
+              disabled={downloading}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#c2410c] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#9a3412] disabled:opacity-60"
+            >
+              <Download size={15} />
+              {downloading ? "Creating PDF…" : "Download invoice (PDF)"}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -247,6 +404,10 @@ function BillingContent() {
   const [page, setPage] = useState(1);
   const [confirmedMessage, setConfirmedMessage] = useState<string | null>(null);
   const [detailOrder, setDetailOrder] = useState<SupplierOrder | null>(null);
+  // The order that was just confirmed: shows the "Generate PDF?" dialog.
+  const [invoiceOrder, setInvoiceOrder] = useState<SupplierOrder | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
   const highlightId = searchParams.get("highlight");
@@ -264,6 +425,22 @@ function BillingContent() {
       queryClient.invalidateQueries({ queryKey: ["supplier-orders"] });
     },
   });
+
+  /** Creates and downloads the PDF. Resolves to true on success; the error text is shown in the UI. */
+  async function handleDownload(order: SupplierOrder): Promise<boolean> {
+    setDownloadError(null);
+    setDownloadingId(String(order.id));
+    try {
+      await downloadInvoicePdf(toInvoiceInput(order));
+      return true;
+    } catch (err) {
+      console.error("Invoice PDF failed", err);
+      setDownloadError(err instanceof Error ? err.message : "Couldn't create the PDF. Please try again.");
+      return false;
+    } finally {
+      setDownloadingId(null);
+    }
+  }
 
   useEffect(() => {
     if (!confirmedMessage) return;
@@ -360,6 +537,12 @@ function BillingContent() {
         </div>
       )}
 
+      {downloadError && !invoiceOrder && (
+        <div role="alert" className="mb-6 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {downloadError}
+        </div>
+      )}
+
       {isLoading && <p className="text-sm text-neutral-500">Loading orders…</p>}
 
       {error && (
@@ -450,6 +633,7 @@ function BillingContent() {
                   const cancelled = o.status === "cancelled";
                   const isNew = highlightId !== null && String(o.id) === highlightId;
                   const confirmingThis = confirmOrder.isPending && confirmOrder.variables === o.id;
+                  const downloadingThis = downloadingId === String(o.id);
 
                   return (
                     <tr
@@ -493,12 +677,30 @@ function BillingContent() {
                           </button>
                           {o.status === "pending" && (
                             <button
-                              onClick={() => confirmOrder.mutate(o.id)}
+                              onClick={() =>
+                                // After a successful confirm, offer the PDF invoice in a dialog.
+                                confirmOrder.mutate(o.id, {
+                                  onSuccess: () => {
+                                    setDownloadError(null);
+                                    setInvoiceOrder({ ...o, status: "confirmed" as const });
+                                  },
+                                })
+                              }
                               disabled={confirmOrder.isPending || total === null}
                               title={total === null ? "Add a unit price before confirming" : undefined}
                               className="rounded-md bg-[#c2410c] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-[#9a3412] disabled:opacity-50"
                             >
                               {confirmingThis ? "Confirming…" : "Confirm order"}
+                            </button>
+                          )}
+                          {canInvoice(o) && (
+                            <button
+                              onClick={() => handleDownload(o)}
+                              disabled={downloadingThis}
+                              className="flex items-center gap-1 rounded-md border border-[#c2410c] px-3 py-1.5 text-xs font-medium text-[#c2410c] transition hover:bg-orange-50 disabled:opacity-50"
+                            >
+                              <Download size={12} />
+                              {downloadingThis ? "Creating…" : "Invoice"}
                             </button>
                           )}
                         </div>
@@ -607,7 +809,27 @@ function BillingContent() {
         </>
       )}
 
-      {detailOrder && <OrderDetailModal order={detailOrder} onClose={() => setDetailOrder(null)} />}
+      {detailOrder && (
+        <OrderDetailModal
+          order={detailOrder}
+          onClose={() => setDetailOrder(null)}
+          onDownload={handleDownload}
+          downloading={downloadingId === String(detailOrder.id)}
+        />
+      )}
+
+      {invoiceOrder && (
+        <InvoiceDialog
+          order={invoiceOrder}
+          onClose={() => {
+            setInvoiceOrder(null);
+            setDownloadError(null);
+          }}
+          onDownload={handleDownload}
+          downloading={downloadingId === String(invoiceOrder.id)}
+          error={downloadError}
+        />
+      )}
     </div>
   );
 }
