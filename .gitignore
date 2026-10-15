@@ -25,3 +25,11 @@ apps/risk-agent/**/__pycache__/
 
 
 uploads/
+# added
+venv/
+__pycache__/
+*.pyc
+cookies.txt
+tree.txt
+.env.*
+!.env.example
