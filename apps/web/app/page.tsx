@@ -2,8 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { Space_Grotesk, Inter } from "next/font/google";
 
+// Edit these to change where the buttons go.
+const CONTACT_EMAIL = "iamanuj681@gmail.com"; // use a mailbox you own; an address on your own domain is better long term
+const TRY_LIVE_HREF = "/start"; // asks whether the visitor is a buyer or a supplier
+const SUPPLIER_REGISTER_HREF = "/suppliers/register";
+const SUPPLIER_LOGIN_HREF = "/suppliers/login";
+const PILOT_HREF = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent("Metis free pilot")}`;
 
 const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
@@ -16,6 +23,9 @@ const inter = Inter({
   weight: ["400", "500", "600"],
   variable: "--font-body",
 });
+
+const focusRing =
+  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7aa4ff]";
 
 function Reveal({
   children,
@@ -46,10 +56,64 @@ function Reveal({
   return (
     <div
       ref={ref}
-      className={`transition-all duration-700 ease-out ${
+      className={`transition-all duration-700 ease-out motion-reduce:transition-none motion-reduce:transform-none ${
         visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
       } ${className}`}
     >
+      {children}
+    </div>
+  );
+}
+
+/* ---------- small building blocks ---------- */
+
+function Cta({
+  href,
+  variant = "primary",
+  children,
+}: {
+  href: string;
+  variant?: "primary" | "secondary";
+  children: React.ReactNode;
+}) {
+  const base = `inline-block rounded-full px-7 py-3.5 font-medium text-[15px] transition-colors ${focusRing}`;
+  const styles =
+    variant === "primary"
+      ? "bg-[#3d6bff] text-white hover:bg-[#3d6bff]/90 shadow-[0_8px_24px_-6px_rgba(61,107,255,0.5)]"
+      : "border border-white/25 text-white hover:bg-white/10";
+  const className = `${base} ${styles}`;
+
+  return href.startsWith("mailto:") ? (
+    <a href={href} className={className}>
+      {children}
+    </a>
+  ) : (
+    <Link href={href} className={className}>
+      {children}
+    </Link>
+  );
+}
+
+type Tone = "good" | "warn" | "muted";
+
+function Pill({ tone = "muted", children }: { tone?: Tone; children: React.ReactNode }) {
+  const tones: Record<Tone, string> = {
+    good: "border-[#3d6bff]/30 bg-[#3d6bff]/15 text-[#7aa4ff]",
+    warn: "border-amber-500/30 bg-amber-500/10 text-amber-300",
+    muted: "border-white/15 bg-white/5 text-white/60",
+  };
+  return (
+    <span className={`inline-block rounded-full border px-2.5 py-1 text-[11px] ${tones[tone]}`}>
+      {children}
+    </span>
+  );
+}
+
+/** Every mock-up is labelled so nobody mistakes it for a real result. */
+function Card({ label = "Example", children }: { label?: string; children: React.ReactNode }) {
+  return (
+    <div aria-hidden="true" className="rounded-xl border border-white/10 bg-white/[0.03] p-5">
+      <div className="mb-3 text-[11px] text-white/50">{label}</div>
       {children}
     </div>
   );
@@ -69,83 +133,115 @@ export default function Home() {
       num: "01",
       label: "The ask",
       title: "Say what you need, once.",
-      body: "A part number, a spec sheet, or just a plain description — plus the quantity and the date it has to land. That's the entire request. No forms, no procurement portal.",
+      body: "Describe the part in plain language, with the quantity and the date it has to land. That's the whole request. No forms, no procurement portal.",
       mock: (
-        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-5">
-          <div className="text-[11px] text-white/40 mb-3">metis · new request</div>
-          <div className="text-sm text-white/80 mb-4">
+        <Card label="Example · new request">
+          <div className="mb-4 text-sm text-white/80">
             &ldquo;200 units, M4 stainless bolts, need by the 18th.&rdquo;
           </div>
-          <div className="inline-block text-[11px] rounded-full bg-[#3d6bff]/15 border border-[#3d6bff]/30 px-2.5 py-1 text-[#7aa4ff]">
-            Received — sourcing started
-          </div>
-        </div>
+          <Pill tone="good">Received — sourcing started</Pill>
+        </Card>
       ),
     },
     {
       num: "02",
       label: "Sourcing",
-      title: "Every supplier, worked at once.",
-      body: "Metis finds every supplier that can fill the order, sends RFQs to all of them in parallel, and builds one comparison — price, lead time, minimum order quantity. What normally takes days of email happens in minutes.",
+      title: "Suppliers found and compared for you.",
+      body: "Metis searches registered suppliers and the public web, then builds one comparison across price, lead time, minimum order quantity and your deadline. Offers found on the web are marked unverified and link to the supplier's own site.",
       mock: (
-        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-5 space-y-2">
-          {["Supplier A", "Supplier B", "Supplier C", "Supplier D"].map((s) => (
-            <div
-              key={s}
-              className="flex items-center justify-between text-sm text-white/70 border-b border-white/5 pb-2 last:border-0 last:pb-0"
-            >
-              <span>{s}</span>
-              <span className="text-[11px] text-white/40">RFQ sent</span>
-            </div>
-          ))}
-        </div>
+        <Card>
+          <div className="space-y-2">
+            {[
+              { name: "Supplier A", tag: "Verified", tone: "good" as Tone, detail: "$50.00 · 2 days" },
+              { name: "Supplier B", tag: "Verified", tone: "good" as Tone, detail: "$54.20 · 5 days" },
+              { name: "Supplier C", tag: "Web, unverified", tone: "warn" as Tone, detail: "$47.90 · lead time assumed" },
+            ].map((r) => (
+              <div
+                key={r.name}
+                className="flex items-center justify-between gap-3 border-b border-white/5 pb-2 text-sm text-white/70 last:border-0 last:pb-0"
+              >
+                <span className="flex flex-wrap items-center gap-2">
+                  {r.name}
+                  <Pill tone={r.tone}>{r.tag}</Pill>
+                </span>
+                <span className="text-[11px] text-white/50">{r.detail}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
       ),
     },
     {
       num: "03",
       label: "Compare",
-      title: "One recommendation, not nine quotes.",
-      body: "As replies land, Metis ranks every quote on true cost, lead time against your date, and reliability — then surfaces the one that fits best, with a runner-up held as backup.",
+      title: "One plan, not nine quotes.",
+      body: "Metis ranks plans on total cost, with price, tax and shipping converted to your currency, and on lead time against your date. It explains its pick and shows alternatives, including a split across suppliers when no single one covers everything.",
       mock: (
-        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-5">
-          <div className="flex items-center justify-between text-sm mb-3">
-            <span className="text-white font-medium">Supplier B</span>
-            <span className="text-[11px] rounded-full bg-[#3d6bff] text-white px-2.5 py-1 font-medium">
+        <Card>
+          <div className="mb-3 flex items-center justify-between text-sm">
+            <span className="font-medium text-white">Single supplier</span>
+            <span className="rounded-full bg-[#3d6bff] px-2.5 py-1 text-[11px] font-medium text-white">
               Recommended
             </span>
           </div>
-          <div className="text-[13px] text-white/50 space-y-1">
-            <div>Meets your date · lowest landed cost</div>
-            <div>Backup: Supplier D, held in reserve</div>
+          <div className="space-y-1 text-[13px] text-white/60">
+            <div>Cheapest · fastest · arrives 12d before deadline</div>
+            <div>2 alternative plans available</div>
           </div>
-        </div>
+        </Card>
       ),
     },
     {
       num: "04",
-      label: "Approve",
-      title: "You approve. That's the last step.",
-      body: "One click confirms the order. Metis places it, confirms with the supplier, and starts tracking you don't touch another email on this order.",
+      label: "Route risk",
+      title: "Know the route before you commit.",
+      body: "Pick the supplier's region and your destination. Metis shows disruption on the lane from public news, so a blocked strait doesn't surprise you after you've ordered. Coverage is growing and currently focuses on key sea chokepoints.",
       mock: (
-        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-5 flex items-center justify-between">
-          <div className="text-sm text-white/70">Order total: $1,240</div>
-          <div className="text-[11px] rounded-full bg-[#3d6bff] px-3 py-1.5 text-white font-medium">
-            Approve →
+        <Card>
+          <div className="mb-3 flex items-center justify-between text-sm">
+            <span className="font-medium text-white">Sea freight</span>
+            <Pill tone="warn">Elevated</Pill>
           </div>
-        </div>
+          <div className="mb-3 flex flex-wrap gap-2">
+            <Pill tone="warn">Bab-el-Mandeb Strait</Pill>
+            <Pill tone="good">Suez Canal</Pill>
+          </div>
+          <div className="text-[13px] text-white/60">
+            Air: no tracked chokepoints, so no data. Road: not viable.
+          </div>
+        </Card>
       ),
     },
     {
       num: "05",
-      label: "Tracking",
-      title: "Status, without asking.",
-      body: "Metis watches the order end to end and pings you at every real milestone confirmed, shipped, delivered so you stop refreshing inboxes for an update.",
+      label: "Approve",
+      title: "Nothing goes out until you approve.",
+      body: "Review the plan and approve it. Metis then sends RFQs to the chosen suppliers, who reply from their own portal. You can also order straight from catalog suppliers.",
       mock: (
-        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-5 space-y-2 text-[13px] text-white/60">
-          <div><span className="text-[#7aa4ff]">✓</span> Order confirmed</div>
-          <div><span className="text-[#7aa4ff]">✓</span> Shipped — carrier tracking live</div>
-          <div className="text-white/30">Delivered — pending</div>
-        </div>
+        <Card>
+          <div className="flex items-center justify-between">
+            <div className="text-sm text-white/70">Plan total: $1,240</div>
+            <span className="rounded-full bg-[#3d6bff] px-3 py-1.5 text-[11px] font-medium text-white">
+              Approve this plan
+            </span>
+          </div>
+        </Card>
+      ),
+    },
+    {
+      num: "06",
+      label: "Status",
+      title: "See where each order stands.",
+      body: "Follow every request and RFQ in one place, and get an email when a supplier ships your order.",
+      mock: (
+        <Card>
+          <div className="space-y-2 text-[13px] text-white/60">
+            <div><span className="text-[#7aa4ff]">✓</span> RFQ sent</div>
+            <div><span className="text-[#7aa4ff]">✓</span> Quote received</div>
+            <div><span className="text-[#7aa4ff]">✓</span> Order confirmed</div>
+            <div className="text-white/40">Shipped: you get an email</div>
+          </div>
+        </Card>
       ),
     },
   ];
@@ -155,14 +251,22 @@ export default function Home() {
       className={`${spaceGrotesk.variable} ${inter.variable} min-h-screen bg-black text-white`}
       style={{ fontFamily: "var(--font-body)" }}
     >
+      {/* The layout reserves space at the bottom for the floating dock. That space shows the
+          body background, which is white, so paint it black while this page is mounted.
+          Rendered with the page, so there is no flash and it disappears when you navigate away. */}
+      <style>{"html, body { background: #000; }"}</style>
+
       {/* Logo, top-left. Image file must live at apps/web/public/metis-icon.png */}
       <div className="fixed top-5 left-6 z-20">
         <Image src="/metis-icon.png" alt="Metis" width={36} height={36} priority />
       </div>
 
-      {/* No "open app" link yet — add one here once a route is ready to send
-          people to, e.g.:
-          <a href="/your-route" className="fixed top-5 right-6 z-20 text-[13px] text-white/60 hover:text-white transition-colors flex items-center gap-1.5">Open app →</a> */}
+      <Link
+        href={TRY_LIVE_HREF}
+        className={`fixed top-5 right-6 z-20 rounded text-[13px] text-white/60 transition-colors hover:text-white ${focusRing}`}
+      >
+        Try it live
+      </Link>
 
       {/* HERO */}
       <section className="max-w-[1100px] mx-auto px-6 pt-28 pb-24 text-center">
@@ -177,17 +281,26 @@ export default function Home() {
           >
             Procurement, without the chase.
           </h1>
-          <p className="text-white/50 text-lg max-w-[560px] mx-auto mb-10 leading-relaxed">
-            Describe the part, the quantity, and the date. Metis finds every
-            qualified supplier, compares quotes, and places the order you
-            approve once.
+          <p className="text-white/50 text-lg max-w-[600px] mx-auto mb-10 leading-relaxed">
+            Describe the part, the quantity and the date. Metis finds suppliers in our network and
+            on the web, compares them on price, lead time and your deadline, checks the shipping
+            route for disruption, and waits for your approval before anything goes out.
           </p>
-          <a
-            href="#demo"
-            className="inline-block bg-[#3d6bff] text-white rounded-full px-7 py-3.5 font-medium text-[15px] hover:bg-[#3d6bff]/90 transition-colors shadow-[0_8px_24px_-6px_rgba(61,107,255,0.5)]"
-          >
-            Book a demo
-          </a>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <Cta href={PILOT_HREF}>Join the free pilot</Cta>
+            <Cta href={TRY_LIVE_HREF} variant="secondary">
+              Try it live
+            </Cta>
+          </div>
+          <p className="mt-6 text-[14px] text-white/50">
+            Selling parts?{" "}
+            <Link
+              href={SUPPLIER_REGISTER_HREF}
+              className={`rounded text-[#7aa4ff] underline underline-offset-4 hover:text-white ${focusRing}`}
+            >
+              Register as a supplier
+            </Link>
+          </p>
         </Reveal>
       </section>
 
@@ -228,51 +341,117 @@ export default function Home() {
         ))}
       </section>
 
-      {/* MANIFESTO */}
+      {/* FOR SUPPLIERS */}
+      <section id="suppliers" className="border-b border-white/10">
+        <div className="max-w-[1100px] mx-auto px-6 py-24">
+          <Reveal>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
+              <div>
+                <div
+                  className="text-sm text-[#7aa4ff] mb-4 tracking-wide"
+                  style={{ fontFamily: "var(--font-display)" }}
+                >
+                  For suppliers
+                </div>
+                <h2
+                  className="font-semibold tracking-tight text-[28px] md:text-[36px] mb-4 leading-tight"
+                  style={{ fontFamily: "var(--font-display)" }}
+                >
+                  Showcase your products to buyers.
+                </h2>
+                <p className="text-white/50 text-[16px] leading-relaxed max-w-[440px]">
+                  Register your business and list your products with price, minimum order quantity
+                  and lead time. Buyers searching for your parts will find them. When a buyer sends
+                  an RFQ, you get an email and reply with your quote from your dashboard. Listing is
+                  free during the pilot.
+                </p>
+                <div className="mt-8 flex flex-wrap items-center gap-3">
+                  <Cta href={SUPPLIER_REGISTER_HREF}>Register as a supplier</Cta>
+                  <Cta href={SUPPLIER_LOGIN_HREF} variant="secondary">
+                    Supplier log in
+                  </Cta>
+                </div>
+              </div>
+              <div>
+                <Card label="Example · supplier dashboard">
+                  <div className="mb-2 text-[13px] text-white/60">Product catalog</div>
+                  <div className="space-y-2">
+                    {[
+                      { name: "M4 stainless bolt", detail: "MOQ 100 · 3 days", price: "$0.12" },
+                      { name: "M6 hex nut", detail: "MOQ 200 · 2 days", price: "$0.05" },
+                    ].map((p) => (
+                      <div
+                        key={p.name}
+                        className="flex items-center justify-between gap-3 border-b border-white/5 pb-2 text-sm text-white/70"
+                      >
+                        <span>{p.name}</span>
+                        <span className="text-[11px] text-white/50">
+                          {p.detail} · {p.price}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mb-2 mt-5 text-[13px] text-white/60">Requests for quote</div>
+                  <div className="flex items-center justify-between gap-3 text-sm text-white/70">
+                    <span>200 × M4 stainless bolt</span>
+                    <Pill tone="warn">Awaiting quote</Pill>
+                  </div>
+                </Card>
+              </div>
+            </div>
+          </Reveal>
+        </div>
+      </section>
+
+      {/* WHY */}
       <section id="manifesto" className="max-w-[760px] mx-auto px-6 py-28">
         <Reveal>
-          <div className="text-sm text-[#7aa4ff] mb-5 tracking-wide">WHY METIS EXISTS</div>
+          <div className="text-sm text-[#7aa4ff] mb-5 tracking-wide">Why Metis exists</div>
           <h2
             className="font-semibold text-[26px] md:text-[34px] leading-relaxed tracking-tight"
             style={{ fontFamily: "var(--font-display)" }}
           >
-            Procurement teams spend more time chasing quotes than deciding
-            between them.{" "}
+            Procurement teams spend more time chasing quotes than choosing between them.{" "}
             <span className="text-white/40">
-              We think sourcing should be a conversation with an agent that
-              already knows your suppliers
+              I&apos;ve worked on Oracle procurement and supply chain systems, and the real work
+              still happens in email and spreadsheets.
             </span>{" "}
-            — not a week of emails and spreadsheets before a single order gets
-            placed.
+            Metis does the legwork and leaves the decision to you.
           </h2>
         </Reveal>
       </section>
 
-      {/* CTA */}
-      <section id="demo" className="border-t border-white/10 py-28 text-center px-6">
+      {/* PILOT */}
+      <section id="pilot" className="border-t border-white/10 py-28 text-center px-6">
         <Reveal>
           <h2
-            className="font-semibold text-[30px] md:text-[44px] tracking-tight mb-5"
+            className="font-semibold text-[30px] md:text-[44px] tracking-tight mb-5 max-w-[720px] mx-auto"
             style={{ fontFamily: "var(--font-display)" }}
           >
-            See Metis source a real order.
+            Free for 4 to 6 weeks, for a small number of teams.
           </h2>
-          <p className="text-white/50 text-base mb-9">
-            15 minutes. Bring a real spec if you have one.
+          <p className="text-white/50 text-base mb-9 max-w-[520px] mx-auto leading-relaxed">
+            I&apos;ll run your first 3 real sourcing requests with you. In return, I ask for a short
+            weekly call about what worked and what didn&apos;t.
           </p>
-          <a
-            href="mailto:hello@metis.ai"
-            className="inline-block bg-[#3d6bff] text-white rounded-full px-7 py-3.5 font-medium text-[15px] hover:bg-[#3d6bff]/90 transition-colors shadow-[0_8px_24px_-6px_rgba(61,107,255,0.5)]"
-          >
-            Book a demo
-          </a>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <Cta href={PILOT_HREF}>Join the free pilot</Cta>
+            <Cta href={TRY_LIVE_HREF} variant="secondary">
+              Try it live
+            </Cta>
+          </div>
         </Reveal>
       </section>
 
       <footer className="border-t border-white/10 py-8 px-6">
-        <div className="max-w-[1100px] mx-auto flex flex-col md:flex-row justify-between items-center gap-3 text-[13px] text-white/40">
+        <div className="max-w-[1100px] mx-auto flex flex-col md:flex-row justify-between items-center gap-3 text-[13px] text-white/50">
           <div>© 2026 Metis</div>
-          <div>hello@metis.ai</div>
+          <a
+            href={`mailto:${CONTACT_EMAIL}`}
+            className={`rounded underline-offset-4 hover:text-white hover:underline ${focusRing}`}
+          >
+            {CONTACT_EMAIL}
+          </a>
         </div>
       </footer>
     </div>

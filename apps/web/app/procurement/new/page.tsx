@@ -184,7 +184,7 @@ export default function NewProcurementPage() {
   // non-recommended approval here would target the wrong plan.
   const approve = useMutation({
     mutationFn: ({ plan }: { plan?: number; source: string }) =>
-      approveProcurementTask(activeTaskId as string, plan),
+      approveProcurementTask(activeTaskId as string, plan, displayCurrency),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["procurement", activeTaskId] }),
   });
 

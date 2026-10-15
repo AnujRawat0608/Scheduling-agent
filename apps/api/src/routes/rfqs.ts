@@ -10,7 +10,8 @@ import { sendMail, buildRfqNotificationEmail } from "../agent/lib/mailer.js";
 export const rfqRouter = Router();
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
+type RfqLine = { productName?: string; quantity?: number; unitPrice?: number };
+const round2 = (n: number) => Math.round(n * 100) / 100;
 // Simple in-memory limit for creating RFQs: 20 per IP per hour.
 // (Resets when the server restarts; use Redis or similar if you need it strict, and set
 // app.set("trust proxy", 1) if the API runs behind a proxy so req.ip is the real client.)
@@ -285,6 +286,21 @@ rfqRouter.post("/me/:id/quote", requireSupplierAuth, async (req, res) => {
     if (!validUntil.valid) {
       return res.status(400).json({ error: "validUntil is not a valid date" });
     }
+      // RFQs raised by the procurement agent carry a fixed unit price and currency. The form locks the
+// field, but the server decides.
+const rfqLines = (Array.isArray(rfq.lineItems) ? rfq.lineItems : []) as RfqLine[];
+const priceLocked = rfqLines.length > 0 && rfqLines.every((li) => typeof li.unitPrice === "number");
+let lineItemQuotes = body.lineItemQuotes as { lineTotal?: number }[];
+if (priceLocked) {
+  if (lineItemQuotes.length !== rfqLines.length) {
+    return res.status(400).json({ error: "Your quote must include every line item of this RFQ" });
+  }
+  lineItemQuotes = lineItemQuotes.map((li, i) => ({
+    ...li,
+    unitPrice: rfqLines[i].unitPrice,
+    lineTotal: round2((rfqLines[i].unitPrice as number) * (rfqLines[i].quantity ?? 0)),
+  }));
+}
 
     const totalPrice = body.lineItemQuotes.reduce(
       (sum: number, li: { lineTotal?: number }) => sum + (li.lineTotal ?? 0),

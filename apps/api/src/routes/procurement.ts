@@ -222,10 +222,23 @@ procurementRouter.post("/procurement/:id/approve", async (req, res) => {
       }
       decision = { approved: true, selectedPlanIndex };
 
+      // The currency the buyer had selected. The RFQs raised on approval use it (createAgentRfq
+      // reads it back from the task). Anything that isn't a 3-letter code is ignored.
+      const rfqCurrency =
+        typeof body.currency === "string" && /^[A-Za-z]{3}$/.test(body.currency)
+          ? body.currency.toUpperCase()
+          : null;
+
       // Claim the task before the (possibly slow) purchase step so a second request is rejected.
       await db
         .update(procurementTasks)
-        .set({ status: "purchasing", updatedAt: new Date() })
+        .set({
+          status: "purchasing",
+          ...(rfqCurrency
+            ? { request: { ...((task.request ?? {}) as Record<string, unknown>), rfqCurrency } }
+            : {}),
+          updatedAt: new Date(),
+        })
         .where(eq(procurementTasks.id, task.id));
     } else {
       decision = { approved: false, note: typeof body.note === "string" ? body.note.slice(0, 2000) : "" };

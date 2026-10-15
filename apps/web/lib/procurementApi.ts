@@ -223,10 +223,11 @@ export async function fetchProcurementTask(id: string): Promise<ProcurementSnaps
 }
 
 // selectedPlanIndex: omitted/0 = accept recommendedPlan, 1+ = pick that index from alternativePlans.
-export async function approveProcurementTask(id: string, selectedPlanIndex?: number) {
+// currency: the buyer's selected display currency. RFQs sent to suppliers are raised in it.
+export async function approveProcurementTask(id: string, selectedPlanIndex?: number, currency?: string) {
   const res = await authedFetch(`/procurement/${id}/approve`, {
     method: "POST",
-    body: JSON.stringify({ approved: true, selectedPlanIndex }),
+    body: JSON.stringify({ approved: true, selectedPlanIndex, currency }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
