@@ -80,11 +80,16 @@ export const supplierOrders = pgTable("supplier_orders", {
   notes: text("notes"),
   status: text("status").notNull().default("pending"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-subtotal: numeric("subtotal", { precision: 12, scale: 2 }),
-taxAmount: numeric("tax_amount", { precision: 12, scale: 2 }),
-shippingCost: numeric("shipping_cost", { precision: 12, scale: 2 }),
-total: numeric("total", { precision: 12, scale: 2 }),
-currency: text("currency").notNull(),// subtotal + taxAmount + shippingCost
+  subtotal: numeric("subtotal", { precision: 12, scale: 2 }),
+  taxAmount: numeric("tax_amount", { precision: 12, scale: 2 }),
+  shippingCost: numeric("shipping_cost", { precision: 12, scale: 2 }),
+  total: numeric("total", { precision: 12, scale: 2 }), // subtotal + taxAmount + shippingCost
+  currency: text("currency").notNull(),
+
+  // --- Payment (set when the buyer pays) ---
+  razorpayOrderId: text("razorpay_order_id"),
+  razorpayPaymentId: text("razorpay_payment_id"),
+  paidAt: timestamp("paid_at"),
 });
 
 /**

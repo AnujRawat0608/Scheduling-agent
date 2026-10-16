@@ -597,13 +597,13 @@ export default function NewProcurementPage() {
                       <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                         {isProcessing
                           ? "Finding suppliers for your request."
-                          : "No supplier found for this item."}
+                          : "No supplier found for this item please try searching using web."}
                       </p>
                     ) : (
                       <>
                         {noneOnTime && (
                           <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                            No supplier can deliver by the required date. The earliest is{" "}
+                            No supplier can deliver by the required date. The earliest is{" "} use web to search for more suppliers.
                             {Math.min(...liq.topQuotes.map((q) => q.leadTimeDays))} days.
                           </p>
                         )}

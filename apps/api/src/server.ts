@@ -18,6 +18,7 @@ import { startFxRefreshJob } from "./procurement/lib/refreshFxRates.js";
 import { fxRatesRouter } from "./routes/fxRates.js";
 import { procurerAuthRouter } from "./routes/procurerAuth.js";
 import { catalogRouter } from "./routes/catalog.js";
+import { paymentsRouter } from "./routes/payments.js";
 
 
 startFxRefreshJob();
@@ -55,6 +56,8 @@ app.use("/api/admin/suppliers", adminSuppliersRouter);
 app.use("/api/rfqs", rfqRouter);
 app.use("/api", fxRatesRouter);
 app.use("/api/catalog", catalogRouter);
+app.use("/api/payments", paymentsRouter);
+
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
 const port = process.env.PORT ?? 3001;

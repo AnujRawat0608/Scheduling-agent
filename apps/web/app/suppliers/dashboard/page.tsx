@@ -8,20 +8,16 @@ import { RfqInbox } from "../../../components/RfqInbox";
 import { formatMoney } from "../../../lib/format";
 import {
   AlertCircle,
-  BarChart3,
   Building2,
   CheckCircle2,
   ExternalLink,
   FileText,
-  FlaskConical,
-  Globe2,
   Inbox,
   LogOut,
   Package,
   Pencil,
   Plus,
   ShieldCheck,
-  Trash2,
   UploadCloud,
   X,
   type LucideIcon,
@@ -32,7 +28,6 @@ import {
   updateMyProfile,
   type SupplierProfile,
   type SupplierProduct,
-  type MainMarket,
 } from "../../../lib/supplierProfileApi";
 
 /* -------------------------------------------------------------------------- */
@@ -57,6 +52,9 @@ const CERT_SLOTS = [
 ] as const;
 
 const MAX_CERT_BYTES = 5 * 1024 * 1024;
+
+const headerLinkClass =
+  "inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-900";
 
 /* -------------------------------------------------------------------------- */
 /*  Small building blocks                                                     */
@@ -205,15 +203,6 @@ type FormState = {
   totalAnnualRevenue: string;
   mainProducts: string;
   certifications: string;
-  rdCapacity: string;
-  languagesSpoken: string;
-  tradeDeptEmployees: string;
-  averageLeadTimeDays: string;
-  responseRate: string;
-  responseTimeHours: string;
-  transactionsCount: string;
-  totalTransactionAmount: string;
-  quotationPerformance: string;
 };
 
 function profileToForm(p: SupplierProfile): FormState {
@@ -234,15 +223,6 @@ function profileToForm(p: SupplierProfile): FormState {
     totalAnnualRevenue: p.totalAnnualRevenue ?? "",
     mainProducts: p.mainProducts ?? "",
     certifications: p.certifications ?? "",
-    rdCapacity: p.rdCapacity ?? "",
-    languagesSpoken: p.languagesSpoken ?? "",
-    tradeDeptEmployees: p.tradeDeptEmployees ?? "",
-    averageLeadTimeDays: p.averageLeadTimeDays?.toString() ?? "",
-    responseRate: p.responseRate?.toString() ?? "",
-    responseTimeHours: p.responseTimeHours ?? "",
-    transactionsCount: p.transactionsCount?.toString() ?? "",
-    totalTransactionAmount: p.totalTransactionAmount ?? "",
-    quotationPerformance: p.quotationPerformance?.toString() ?? "",
   };
 }
 
@@ -256,7 +236,6 @@ export default function SupplierDashboardPage() {
   const [supplier, setSupplier] = useState<SupplierProfile | null>(null);
   const [products, setProducts] = useState<SupplierProduct[]>([]);
   const [form, setForm] = useState<FormState | null>(null);
-  const [mainMarkets, setMainMarkets] = useState<MainMarket[]>([]);
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -283,7 +262,6 @@ export default function SupplierDashboardPage() {
 
       setSupplier(current);
       setForm(profileToForm(current));
-      setMainMarkets(current.mainMarkets ?? []);
 
       try {
         const { products: theirProducts } = await fetchSupplierProfile(current.id);
@@ -305,13 +283,8 @@ export default function SupplierDashboardPage() {
 
   const isDirty = useMemo(() => {
     if (!supplier || !form) return false;
-    const baseline = JSON.stringify({
-      form: profileToForm(supplier),
-      markets: supplier.mainMarkets ?? [],
-    });
-    const current = JSON.stringify({ form, markets: mainMarkets });
-    return baseline !== current;
-  }, [supplier, form, mainMarkets]);
+    return JSON.stringify(profileToForm(supplier)) !== JSON.stringify(form);
+  }, [supplier, form]);
 
   const completeness = useMemo(() => {
     if (!form) return 0;
@@ -330,16 +303,9 @@ export default function SupplierDashboardPage() {
       form.certifications,
     ];
     const filled =
-      checks.filter((v) => v.trim() !== "").length +
-      (mainMarkets.some((m) => m.region.trim() !== "") ? 1 : 0) +
-      (products.length > 0 ? 1 : 0);
-    return Math.round((filled / (checks.length + 2)) * 100);
-  }, [form, mainMarkets, products]);
-
-  const marketTotal = useMemo(
-    () => mainMarkets.reduce((sum, m) => sum + (Number(m.percentage) || 0), 0),
-    [mainMarkets]
-  );
+      checks.filter((v) => v.trim() !== "").length + (products.length > 0 ? 1 : 0);
+    return Math.round((filled / (checks.length + 1)) * 100);
+  }, [form, products]);
 
   /* -------------------------------- effects -------------------------------- */
 
@@ -367,28 +333,9 @@ export default function SupplierDashboardPage() {
     setForm((prev) => (prev ? { ...prev, [key]: value } : prev));
   }
 
-  function addMarketRow() {
-    setMainMarkets((prev) => [...prev, { region: "", percentage: 0 }]);
-  }
-
-  function updateMarketRow(index: number, field: keyof MainMarket, value: string) {
-    setMainMarkets((prev) =>
-      prev.map((m, i) =>
-        i === index
-          ? { ...m, [field]: field === "percentage" ? Number(value) || 0 : value }
-          : m
-      )
-    );
-  }
-
-  function removeMarketRow(index: number) {
-    setMainMarkets((prev) => prev.filter((_, i) => i !== index));
-  }
-
   function handleDiscard() {
     if (!supplier) return;
     setForm(profileToForm(supplier));
-    setMainMarkets(supplier.mainMarkets ?? []);
     setSaveError(null);
   }
 
@@ -427,22 +374,11 @@ export default function SupplierDashboardPage() {
         totalAnnualRevenue: form.totalAnnualRevenue || null,
         mainProducts: form.mainProducts || null,
         certifications: form.certifications || null,
-        rdCapacity: form.rdCapacity || null,
-        mainMarkets: mainMarkets.filter((m) => m.region.trim() !== ""),
-        languagesSpoken: form.languagesSpoken || null,
-        tradeDeptEmployees: form.tradeDeptEmployees || null,
-        averageLeadTimeDays: form.averageLeadTimeDays ? Number(form.averageLeadTimeDays) : null,
-        responseRate: form.responseRate ? Number(form.responseRate) : null,
-        responseTimeHours: form.responseTimeHours || null,
-        transactionsCount: form.transactionsCount ? Number(form.transactionsCount) : null,
-        totalTransactionAmount: form.totalTransactionAmount || null,
-        quotationPerformance: form.quotationPerformance ? Number(form.quotationPerformance) : null,
       });
 
       // Re-sync everything from the server response so "unsaved changes" clears
       setSupplier(updated.supplier);
       setForm(profileToForm(updated.supplier));
-      setMainMarkets(updated.supplier.mainMarkets ?? []);
       setSaveSuccess(true);
     } catch (err) {
       setSaveError((err as Error).message);
@@ -494,28 +430,23 @@ export default function SupplierDashboardPage() {
             </h1>
             <p className="mt-0.5 text-sm text-slate-500">{supplier.email}</p>
           </div>
-          <div className="flex items-center gap-2">
-            <Link
-              href={`/suppliers/${supplier.id}`}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
-            >
+          <div className="flex flex-wrap items-center gap-2">
+            <Link href={`/suppliers/${supplier.id}`} className={headerLinkClass}>
               <ExternalLink size={13} />
               View public profile
             </Link>
 
-                        <Link
-              href="/suppliers/orders"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
-            >
+            <Link href="/suppliers/orders" className={headerLinkClass}>
               <Inbox size={13} />
               Orders
             </Link>
-            
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
-            >
+
+            <Link href="/suppliers/rfqs" className={headerLinkClass}>
+              <FileText size={13} />
+              RFQs
+            </Link>
+
+            <button type="button" onClick={handleLogout} className={headerLinkClass}>
               <LogOut size={13} />
               Log out
             </button>
@@ -601,7 +532,7 @@ export default function SupplierDashboardPage() {
                       </td>
                       <td className="px-3 py-3.5 text-slate-600">{p.moq}</td>
                       <td className="px-3 py-3.5 text-slate-600">{p.leadTimeDays} days</td>
-                        <td className="px-3 py-3.5 text-right font-medium tabular-nums text-slate-900">
+                      <td className="px-3 py-3.5 text-right font-medium tabular-nums text-slate-900">
                         {formatMoney(Number(p.unitPrice), p.currency)}
                       </td>
                       <td className="px-6 py-3.5 text-right">
@@ -621,8 +552,10 @@ export default function SupplierDashboardPage() {
           )}
         </SectionCard>
 
-               <IncomingOrders />
-               <RfqInbox />
+        <IncomingOrders />
+
+        {/* Compact RFQ preview — full list lives at /suppliers/rfqs */}
+        <RfqInbox limit={3} viewAllHref="/suppliers/rfqs" />
 
         {/* Business details */}
         <SectionCard icon={Building2} title="Business details">
@@ -643,7 +576,7 @@ export default function SupplierDashboardPage() {
                 className={inputClass}
               />
             </Field>
-            
+
             <Field label="GST number">
               <input
                 value={form.gstNumber}
@@ -813,168 +746,6 @@ export default function SupplierDashboardPage() {
                 onClear={() => handleCertSelect(slot.id, null)}
               />
             ))}
-          </div>
-        </SectionCard>
-
-        {/* R&D capacity */}
-        <SectionCard icon={FlaskConical} title="R&D capacity">
-          <Field label="Description">
-            <textarea
-              value={form.rdCapacity}
-              onChange={(e) => updateField("rdCapacity", e.target.value)}
-              rows={4}
-              placeholder="R&D team size, lab facilities, patents, custom design capability…"
-              className={inputClass}
-            />
-          </Field>
-        </SectionCard>
-
-        {/* Trade capacity */}
-        <SectionCard icon={Globe2} title="Trade capacity">
-          <div className="space-y-2.5">
-            <div className="flex items-center justify-between">
-              <span className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                Main markets
-              </span>
-              {mainMarkets.length > 0 && (
-                <span
-                  className={`text-xs ${
-                    marketTotal > 100 ? "font-medium text-red-600" : "text-slate-400"
-                  }`}
-                >
-                  Total {marketTotal}%{marketTotal > 100 && " — should not exceed 100%"}
-                </span>
-              )}
-            </div>
-
-            {mainMarkets.length === 0 && (
-              <p className="rounded-lg border border-dashed border-slate-200 px-4 py-3 text-xs text-slate-500">
-                No markets added yet. Add the regions you export or sell to, with an approximate share
-                of your sales.
-              </p>
-            )}
-
-            {mainMarkets.map((m, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <input
-                  value={m.region}
-                  onChange={(e) => updateMarketRow(i, "region", e.target.value)}
-                  placeholder="Southern Europe"
-                  aria-label={`Market ${i + 1} region`}
-                  className={inputClass}
-                />
-                <div className="relative w-28 shrink-0">
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={m.percentage}
-                    onChange={(e) => updateMarketRow(i, "percentage", e.target.value)}
-                    placeholder="30"
-                    aria-label={`Market ${i + 1} percentage`}
-                    className={`${inputClass} pr-8`}
-                  />
-                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">
-                    %
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => removeMarketRow(i)}
-                  className="rounded-md p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600"
-                  aria-label={`Remove market ${i + 1}`}
-                >
-                  <Trash2 size={15} />
-                </button>
-              </div>
-            ))}
-
-            <button
-              type="button"
-              onClick={addMarketRow}
-              className="inline-flex items-center gap-1.5 rounded-lg px-1 py-1 text-xs font-medium text-[#3d6bff] hover:underline"
-            >
-              <Plus size={13} />
-              Add market
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Languages spoken" span2>
-              <input
-                value={form.languagesSpoken}
-                onChange={(e) => updateField("languagesSpoken", e.target.value)}
-                placeholder="English, Hindi, Chinese…"
-                className={inputClass}
-              />
-            </Field>
-            <Field label="Trade department size">
-              <input
-                value={form.tradeDeptEmployees}
-                onChange={(e) => updateField("tradeDeptEmployees", e.target.value)}
-                placeholder="6-10 People"
-                className={inputClass}
-              />
-            </Field>
-            <Field label="Average lead time (days)">
-              <input
-                type="number"
-                min="0"
-                value={form.averageLeadTimeDays}
-                onChange={(e) => updateField("averageLeadTimeDays", e.target.value)}
-                className={inputClass}
-              />
-            </Field>
-          </div>
-        </SectionCard>
-
-        {/* Business performance */}
-        <SectionCard icon={BarChart3} title="Business performance">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Response rate (%)">
-              <input
-                type="number"
-                min="0"
-                max="100"
-                value={form.responseRate}
-                onChange={(e) => updateField("responseRate", e.target.value)}
-                className={inputClass}
-              />
-            </Field>
-            <Field label="Response time">
-              <input
-                value={form.responseTimeHours}
-                onChange={(e) => updateField("responseTimeHours", e.target.value)}
-                placeholder="≤4h"
-                className={inputClass}
-              />
-            </Field>
-            <Field label="Transactions">
-              <input
-                type="number"
-                min="0"
-                value={form.transactionsCount}
-                onChange={(e) => updateField("transactionsCount", e.target.value)}
-                className={inputClass}
-              />
-            </Field>
-            <Field label="Total transaction amount">
-              <input
-                value={form.totalTransactionAmount}
-                onChange={(e) => updateField("totalTransactionAmount", e.target.value)}
-                placeholder="60,000+"
-                className={inputClass}
-              />
-            </Field>
-            <Field label="Quotations given">
-              <input
-                type="number"
-                min="0"
-                value={form.quotationPerformance}
-                onChange={(e) => updateField("quotationPerformance", e.target.value)}
-                className={inputClass}
-              />
-            </Field>
           </div>
         </SectionCard>
       </form>
