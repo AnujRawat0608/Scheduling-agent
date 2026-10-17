@@ -31,7 +31,7 @@ const PAYMENT_TERMS_OPTIONS = [
 
 // Shared styles
 const inputCls =
-  "w-full rounded-md border border-neutral-200 bg-[#FCFAF6] px-3 py-2.5 text-xs text-neutral-900 placeholder:text-neutral-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#B65F26]";
+  "w-full rounded-md border border-neutral-200 bg-white px-3 py-2.5 text-xs text-neutral-900 placeholder:text-neutral-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#ea580c]";
 const labelCls = "mb-1.5 block text-[11px] text-neutral-600";
 const ghostBtn =
   "rounded-md border border-neutral-200 bg-white px-3.5 py-2 text-xs font-medium text-neutral-800 transition hover:border-neutral-300 disabled:opacity-50";
@@ -64,7 +64,7 @@ function Section({
     <section className="rounded-lg border border-neutral-200 bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
       <div className="mb-4 flex items-start justify-between gap-4">
         <div className="flex gap-2">
-          <span className="mt-0.5 font-mono text-[10px] font-semibold text-[#B65F26]">{n}</span>
+          <span className="mt-0.5 font-mono text-[10px] font-semibold text-[#ea580c]">{n}</span>
           <div>
             <h2 className="text-sm font-semibold text-neutral-900">{title}</h2>
             <p className="mt-0.5 text-[11px] text-neutral-500">{desc}</p>
@@ -216,8 +216,7 @@ export default function NewQuotePage() {
       <button
         onClick={() => submit("sent")}
         disabled={!canSubmit || saveMutation.isPending}
-        className="flex items-center gap-1.5 rounded-md bg-[#B65F26] px-3.5 py-2 text-xs font-medium text-white transition hover:bg-[#B65F26]/90 disabled:opacity-50"
-      >
+className="flex items-center gap-1.5 rounded-md bg-[#ea580c] px-3.5 py-2 text-xs font-medium text-white transition hover:bg-[#c2410c] disabled:opacity-50"      >
         <Send size={13} />
         {saveMutation.isPending && saveMutation.variables?.status === "sent" ? "Sending…" : "Send RFQ"}
       </button>
@@ -225,18 +224,18 @@ export default function NewQuotePage() {
   );
 
   return (
-    <div className="min-h-screen bg-[#FBF7F0]">
+    <div className="min-h-screen bg-white">
       <div className="mx-auto max-w-4xl px-6 py-8">
         {/* Header */}
         <div className="mb-5 flex items-start justify-between gap-4">
           <div className="flex items-start gap-3">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#B65F26]/15 text-[#B65F26]">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#ea580c]/15 text-[#ea580c]">
               <FileText size={18} />
             </span>
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-base font-semibold text-neutral-900">Send RFQ</h1>
-                <span className="rounded-full bg-[#B65F26]/15 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-[#B65F26]">
+                <span className="rounded-full bg-[#ea580c]/15 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-[#ea580c]">
                   Draft
                 </span>
               </div>
@@ -599,7 +598,7 @@ export default function NewQuotePage() {
                   type="checkbox"
                   checked={insuranceRequired}
                   onChange={(e) => setInsuranceRequired(e.target.checked)}
-                  className="h-3.5 w-3.5 rounded border-neutral-300 text-[#B65F26] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#B65F26]"
+                  className="h-3.5 w-3.5 rounded border-neutral-300 text-[#ea580c] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#ea580c]"
                 />
                 <label htmlFor="insuranceRequired" className="text-xs text-neutral-700">
                   Supplier must carry insurance coverage for this order
@@ -621,15 +620,15 @@ export default function NewQuotePage() {
                   }}
                   className={`flex flex-col items-center justify-center gap-1.5 rounded-md border px-4 py-8 text-center transition ${
                     dragActive
-                      ? "border-[#B65F26] bg-[#B65F26]/15"
-                      : "border-neutral-200 bg-[#B65F26]/10"
+                      ? "border-[#ea580c] bg-[#ea580c]/15"
+                      : "border-neutral-200 bg-[#ea580c]/10"
                   }`}
                 >
-                  <UploadCloud size={18} className="text-[#B65F26]" />
+                  <UploadCloud size={18} className="text-[#ea580c]" />
                   <p className="text-xs text-neutral-600">
                     Drag & drop CAD files, blueprints, or spec sheets here
                   </p>
-                  <label className="cursor-pointer text-[11px] font-medium text-[#B65F26] hover:underline">
+                  <label className="cursor-pointer text-[11px] font-medium text-[#ea580c] hover:underline">
                     or browse files
                     <input type="file" multiple className="hidden" onChange={(e) => addFiles(e.target.files)} />
                   </label>

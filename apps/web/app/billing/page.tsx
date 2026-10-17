@@ -399,6 +399,9 @@ function OrderDetailModal({
   );
 }
 
+const ACTION_BTN =
+  "inline-flex h-8 items-center justify-center gap-1 whitespace-nowrap rounded-md px-3 text-xs font-medium transition";
+
 function BillingContent() {
   const [filter, setFilter] = useState<Filter>("all");
   const [page, setPage] = useState(1);
@@ -505,7 +508,7 @@ function BillingContent() {
   }, [highlightId, isLoading, safePage]);
 
   return (
-    <div className="mx-auto max-w-5xl px-8 py-10">
+    <div className="mx-auto max-w-6xl px-8 py-10">
       <div className="mb-8 flex items-center gap-2">
         <Receipt size={22} className="text-[#c2410c]" />
         <h1 className="text-2xl font-semibold text-neutral-900">Billing</h1>
@@ -623,10 +626,10 @@ function BillingContent() {
                         </span>
                       </td>
                       <td className="px-5 py-3">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 whitespace-nowrap">
                           <button
                             onClick={() => setDetailOrder(o)}
-                            className="rounded-md border border-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-700 transition hover:border-neutral-300"
+                            className={`${ACTION_BTN} border border-neutraL-200 text-neutral-700 hover:border-neutral-300`}
                           >
                             View details
                           </button>
@@ -643,7 +646,7 @@ function BillingContent() {
                               }
                               disabled={confirmOrder.isPending || total === null}
                               title={total === null ? "Add a unit price before confirming" : undefined}
-                              className="rounded-md bg-[#c2410c] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-[#9a3412] disabled:opacity-50"
+                              className={`${ACTION_BTN} bg-[#ea580c] text-white hover:bg-[#9a3412] disabled:opacity-50`}
                             >
                               {confirmingThis ? "Confirming…" : "Confirm order"}
                             </button>
@@ -652,7 +655,7 @@ function BillingContent() {
                             <button
                               onClick={() => handleDownload(o)}
                               disabled={downloadingThis}
-                              className="flex items-center gap-1 rounded-md border border-[#c2410c] px-3 py-1.5 text-xs font-medium text-[#c2410c] transition hover:bg-orange-50 disabled:opacity-50"
+                              className={`${ACTION_BTN} border border-[#ea580c] text-[#ea580c] hover:bg-orange-50`}
                             >
                               <Download size={12} />
                               {downloadingThis ? "Creating…" : "Invoice"}
@@ -722,7 +725,7 @@ function BillingContent() {
                         aria-current={entry === safePage ? "page" : undefined}
                         className={`min-w-[28px] rounded-md px-2 py-1.5 text-xs font-medium transition ${
                           entry === safePage
-                            ? "bg-[#c2410c] text-white"
+                            ? "bg-[#ea580c] text-white"
                             : "text-neutral-600 hover:bg-neutral-100"
                         }`}
                       >
