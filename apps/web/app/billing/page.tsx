@@ -457,21 +457,7 @@ function BillingContent() {
   );
 
   const billable = useMemo(() => orders.filter((o) => o.status !== "cancelled"), [orders]);
-  const cancelledCount = orders.length - billable.length;
   const missingPrice = useMemo(() => billable.filter((o) => lineTotal(o) === null), [billable]);
-
-  // Totals are kept per currency: dollars, euros and rupees are never added together.
-  const totals = useMemo(() => {
-    const open = billable.filter((o) => o.status !== "delivered");
-    const delivered = billable.filter((o) => o.status === "delivered");
-    return {
-      total: sumByCurrency(billable),
-      outstanding: sumByCurrency(open),
-      delivered: sumByCurrency(delivered),
-    };
-  }, [billable]);
-
-  const hasMultipleCurrencies = totals.total.size > 1;
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: orders.length };
@@ -562,37 +548,6 @@ function BillingContent() {
               </span>
             </div>
           )}
-
-          {/* Summary */}
-          <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div className="rounded-xl border border-neutral-200 bg-white p-5">
-              <div className="mb-1 text-xs text-neutral-500">Total order value</div>
-              <div className="text-xl font-semibold tabular-nums text-neutral-900">
-                <MoneyTotals totals={totals.total} />
-              </div>
-              {cancelledCount > 0 && (
-                <div className="mt-1 text-xs text-neutral-400">
-                  Excludes {cancelledCount} cancelled {cancelledCount === 1 ? "order" : "orders"}
-                </div>
-              )}
-              {hasMultipleCurrencies && (
-                <div className="mt-1 text-xs text-neutral-400">Shown per currency, not converted</div>
-              )}
-            </div>
-            <div className="rounded-xl border border-neutral-200 bg-white p-5">
-              <div className="mb-1 text-xs text-neutral-500">Outstanding</div>
-              <div className="text-xl font-semibold tabular-nums text-neutral-900">
-                <MoneyTotals totals={totals.outstanding} />
-              </div>
-              <div className="mt-1 text-xs text-neutral-400">Pending, confirmed and shipped</div>
-            </div>
-            <div className="rounded-xl border border-neutral-200 bg-white p-5">
-              <div className="mb-1 text-xs text-neutral-500">Delivered</div>
-              <div className="text-xl font-semibold tabular-nums text-neutral-900">
-                <MoneyTotals totals={totals.delivered} />
-              </div>
-            </div>
-          </div>
 
           {/* Filter tabs */}
           <div className="mb-4 flex w-fit max-w-full flex-wrap items-center gap-1 rounded-lg border border-neutral-200 bg-neutral-50 p-1">
@@ -719,23 +674,6 @@ function BillingContent() {
                   </tr>
                 )}
               </tbody>
-
-              {filtered.length > 0 && filter !== "cancelled" && (
-                <tfoot>
-                  <tr className="border-t border-neutral-200 bg-neutral-50">
-                    <td colSpan={3} className="px-5 py-3 text-sm text-neutral-500">
-                      {filter === "all" ? "Total" : `Total for ${filter} orders`}
-                      {filteredSubtotal.size > 1 && (
-                        <span className="ml-1 text-xs text-neutral-400">(per currency)</span>
-                      )}
-                    </td>
-                    <td className="px-5 py-3 text-right font-semibold tabular-nums text-neutral-900">
-                      <MoneyTotals totals={filteredSubtotal} />
-                    </td>
-                    <td colSpan={3} />
-                  </tr>
-                </tfoot>
-              )}
             </table>
           </div>
 
