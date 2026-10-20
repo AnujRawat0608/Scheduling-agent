@@ -19,6 +19,8 @@ import { fxRatesRouter } from "./routes/fxRates.js";
 import { procurerAuthRouter } from "./routes/procurerAuth.js";
 import { catalogRouter } from "./routes/catalog.js";
 import { paymentsRouter } from "./routes/payments.js";
+import { offerImagesRouter } from "./routes/offerImages.js";
+
 
 
 startFxRefreshJob();
@@ -57,6 +59,7 @@ app.use("/api/rfqs", rfqRouter);
 app.use("/api", fxRatesRouter);
 app.use("/api/catalog", catalogRouter);
 app.use("/api/payments", paymentsRouter);
+app.use("/api/offers", offerImagesRouter);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 

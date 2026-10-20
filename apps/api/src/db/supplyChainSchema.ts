@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, timestamp, jsonb, numeric, boolean } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, integer, serial, timestamp, jsonb, numeric, boolean, index } from "drizzle-orm/pg-core";
 
 export const supplierOffers = pgTable("supplier_offers", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -34,6 +34,25 @@ moq: integer("moq").notNull().default(1),
   imageUrl: text("image_url"),
 
 });
+
+/** One row per product photo. A product can have many. */
+export const offerImages = pgTable(
+  "offer_images",
+  {
+    id: serial("id").primaryKey(),
+    offerId: uuid("offer_id")
+      .notNull()
+      .references(() => supplierOffers.id, { onDelete: "cascade" }),
+    url: text("url").notNull(),
+    /** Cloudinary public_id, needed to delete the file later. Null for backfilled rows. */
+    publicId: text("public_id"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+    (t) => ({
+    offerIdx: index("offer_images_offer_idx").on(t.offerId),
+  })
+);
 
 export const fxRates = pgTable("fx_rates", {
   currency: text("currency").primaryKey(),
