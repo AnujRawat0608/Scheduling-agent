@@ -6,6 +6,8 @@ export interface CatalogProduct {
   /** Unique id of this supplier's offer (the same product from two suppliers has two ids). */
   offerId: string;
   item: string;
+  /** Path or URL of the uploaded product photo, null when none was uploaded. */
+  imageUrl?: string | null;
   supplierName: string;
   supplierId: string | null;
   supplierRegion: string | null;

@@ -48,6 +48,7 @@ catalogRouter.get("/", requireProcurerAuth, async (req, res) => {
       products: rows.map(({ offer, supplierRegion }) => ({
         offerId: String(offer.id),
         item: offer.item,
+        imageUrl: offer.imageUrl ?? null,
         supplierName: offer.supplierName,
         supplierId: offer.supplierId,
         supplierRegion: supplierRegion ?? null,

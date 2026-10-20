@@ -3,12 +3,15 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { Check, Minus, Package, Plus, Search, ShoppingCart } from "lucide-react";
+import { Check, Minus, Plus, Search, ShoppingCart } from "lucide-react";
 import { formatMoney } from "../../lib/format";
 import { hasProcurerToken } from "../../lib/procurerAuthApi";
 import { fetchCatalog, type CatalogProduct } from "../../lib/catalogApi";
 import { useCart } from "../../lib/cart";
 import { CartDrawer } from "../../components/CartDrawer";
+// NEW: the component that actually renders the uploaded image.
+// Adjust the path if ProductImage.tsx lives somewhere else.
+import ProductImage from "../../components/ProductImage";
 
 export default function CatalogPage() {
   const router = useRouter();
@@ -153,9 +156,9 @@ function ProductCard({ product }: { product: CatalogProduct }) {
 
   return (
     <article className="flex flex-col rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-      <div className="mb-3 flex h-20 items-center justify-center rounded-lg bg-neutral-50 text-neutral-300">
-        <Package size={32} />
-      </div>
+      {/* CHANGED: was a hardcoded placeholder <div> with a <Package /> icon.
+          ProductImage shows the uploaded image, or the icon if there is none / it fails to load. */}
+      <ProductImage src={product.imageUrl} alt={product.item} className="mb-3 h-32" />
 
       <h3 className="line-clamp-2 min-h-10 text-sm font-semibold text-neutral-900">{product.item}</h3>
       <p className="mt-1 text-xs text-neutral-500">
