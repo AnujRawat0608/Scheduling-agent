@@ -1,3 +1,4 @@
+import { requireSupplierAuth } from "../agent/lib/supplierAuth.js";
 import { Router, type Request, type Response, type NextFunction } from "express";
 import multer from "multer";
 import { randomUUID } from "node:crypto";
@@ -29,9 +30,9 @@ const EXT_BY_MIME: Record<string, string> = {
  * (the same uuid stored in supplier_offers.supplier_id), or null if not logged in.
  * Also add your real auth middleware to the routes below.
  */
-function getSupplierId(req: Request): string | null {
-  return (req as any).supplier?.id ?? null;
-}
+   function getSupplierId(req: Request): string | null {
+     return (req as any).supplier?.supplierId ?? null;
+   }
 
 const upload = multer({
   storage: multer.memoryStorage(),

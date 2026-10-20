@@ -14,7 +14,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
   { auth: { persistSession: false } }
 );
-const BUCKET = process.env.SUPABASE_BUCKET ?? "product-images";
+const BUCKET = process.env.SUPABASE_BUCKET ?? "product_images";
 
 // Folder that "/uploads/..." paths are relative to (apps/api by default).
 const LOCAL_ROOT = path.resolve(process.cwd());
