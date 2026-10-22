@@ -5,7 +5,7 @@ import { buildProcurementGraph, extractProcurementRequest } from "../procurement
 import { webSourcingAvailable } from "../procurement/lib/webSourcing/index.js";
 import { db } from "../db/client.js";
 import { procurementTasks } from "../db/procurementSchema.js";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
 import type { ProcurementRequest } from "../procurement/state.js";
 import { requireProcurerAuth } from "../agent/lib/procurerAuth.js";
 
@@ -173,7 +173,9 @@ procurementRouter.get("/procurement/:id", async (req, res) => {
       state: {
         ...values,
         request: values.request ?? task.request,
-        status: values.status ?? task.status,
+        // While the purchase runs in the background the graph snapshot can still say
+        // "awaiting_approval", so the saved task status wins in that window.
+        status: task.status === "purchasing" ? "purchasing" : (values.status ?? task.status),
       },
       next: snapshot.next,
     });
@@ -183,6 +185,32 @@ procurementRouter.get("/procurement/:id", async (req, res) => {
     res.status(404).json({ error: "not found" });
   }
 });
+
+type Decision =
+  | { approved: true; selectedPlanIndex?: number }
+  | { approved: false; note: string };
+
+/** Resumes the graph after the response has been sent. Never throws. */
+async function resumeInBackground(task: typeof procurementTasks.$inferSelect, decision: Decision) {
+  try {
+    const graph = await graphPromise;
+    const result = await graph.invoke(new Command({ resume: decision }), {
+      configurable: { thread_id: task.threadId },
+    });
+    await db
+      .update(procurementTasks)
+      .set({ status: result.status, updatedAt: new Date() })
+      .where(eq(procurementTasks.id, task.id));
+  } catch (err) {
+    console.error("Purchase step failed", err);
+    // Put the task back so it can be retried instead of being stuck in "purchasing".
+    await db
+      .update(procurementTasks)
+      .set({ status: "awaiting_approval", updatedAt: new Date() })
+      .where(eq(procurementTasks.id, task.id))
+      .catch((dbErr) => console.error("Could not restore task status", dbErr));
+  }
+}
 
 procurementRouter.post("/procurement/:id/approve", async (req, res) => {
   try {
@@ -195,7 +223,6 @@ procurementRouter.post("/procurement/:id/approve", async (req, res) => {
     if (!task) return res.status(404).json({ error: "not found" });
 
     // Only a task that is waiting for approval can be approved or rejected.
-    // This also stops a double click or second tab from resuming the graph twice.
     if (task.status !== "awaiting_approval") {
       return res.status(409).json({ error: `Task is ${task.status}, not awaiting approval` });
     }
@@ -207,65 +234,65 @@ procurementRouter.post("/procurement/:id/approve", async (req, res) => {
 
     const graph = await graphPromise;
 
-    let decision: { approved: true; selectedPlanIndex?: number } | { approved: false; note: string };
-
-    if (body.approved) {
-      let selectedPlanIndex: number | undefined;
-      if (body.selectedPlanIndex !== undefined) {
-        const snapshot = await graph.getState({ configurable: { thread_id: task.threadId } });
-        const planCount = 1 + (snapshot.values?.alternativePlans?.length ?? 0);
-        const idx = body.selectedPlanIndex;
-        if (!Number.isInteger(idx) || idx < 0 || idx >= planCount) {
-          return res.status(400).json({ error: "selectedPlanIndex is out of range" });
-        }
-        selectedPlanIndex = idx;
-      }
-      decision = { approved: true, selectedPlanIndex };
-
-      // The currency the buyer had selected. The RFQs raised on approval use it (createAgentRfq
-      // reads it back from the task). Anything that isn't a 3-letter code is ignored.
-      const rfqCurrency =
-        typeof body.currency === "string" && /^[A-Za-z]{3}$/.test(body.currency)
-          ? body.currency.toUpperCase()
-          : null;
-
-      // Claim the task before the (possibly slow) purchase step so a second request is rejected.
-      await db
-        .update(procurementTasks)
-        .set({
-          status: "purchasing",
-          ...(rfqCurrency
-            ? { request: { ...((task.request ?? {}) as Record<string, unknown>), rfqCurrency } }
-            : {}),
-          updatedAt: new Date(),
-        })
-        .where(eq(procurementTasks.id, task.id));
-    } else {
-      decision = { approved: false, note: typeof body.note === "string" ? body.note.slice(0, 2000) : "" };
-    }
-
-    try {
+    if (!body.approved) {
+      // Rejections are quick, so keep them synchronous as before.
+      const decision: Decision = {
+        approved: false,
+        note: typeof body.note === "string" ? body.note.slice(0, 2000) : "",
+      };
       const result = await graph.invoke(new Command({ resume: decision }), {
         configurable: { thread_id: task.threadId },
       });
-
       await db
         .update(procurementTasks)
         .set({ status: result.status, updatedAt: new Date() })
         .where(eq(procurementTasks.id, task.id));
-
-      res.json(result);
-    } catch (err) {
-      // Put the task back so it can be retried instead of being stuck in "purchasing".
-      await db
-        .update(procurementTasks)
-        .set({ status: "awaiting_approval", updatedAt: new Date() })
-        .where(eq(procurementTasks.id, task.id))
-        .catch((dbErr) => console.error("Could not restore task status", dbErr));
-      throw err;
+      return res.json(result);
     }
+
+    let selectedPlanIndex: number | undefined;
+    if (body.selectedPlanIndex !== undefined) {
+      const snapshot = await graph.getState({ configurable: { thread_id: task.threadId } });
+      const planCount = 1 + (snapshot.values?.alternativePlans?.length ?? 0);
+      const idx = body.selectedPlanIndex;
+      if (!Number.isInteger(idx) || idx < 0 || idx >= planCount) {
+        return res.status(400).json({ error: "selectedPlanIndex is out of range" });
+      }
+      selectedPlanIndex = idx;
+    }
+
+    // The currency the buyer had selected (used when RFQs are raised on approval).
+    const rfqCurrency =
+      typeof body.currency === "string" && /^[A-Za-z]{3}$/.test(body.currency)
+        ? body.currency.toUpperCase()
+        : null;
+
+    // Claim the task atomically: only one request can move it out of "awaiting_approval".
+    const claimed = await db
+      .update(procurementTasks)
+      .set({
+        status: "purchasing",
+        ...(rfqCurrency
+          ? { request: { ...((task.request ?? {}) as Record<string, unknown>), rfqCurrency } }
+          : {}),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(procurementTasks.id, task.id), eq(procurementTasks.status, "awaiting_approval")))
+      .returning({ id: procurementTasks.id });
+
+    if (claimed.length === 0) {
+      return res.status(409).json({ error: "Task was already approved" });
+    }
+
+    // Respond now; the UI polls and shows "Placing order…" while this runs.
+    res.status(202).json({ ok: true, status: "purchasing" });
+
+    // Fire and forget (resumeInBackground handles its own errors).
+    void resumeInBackground(task, { approved: true, selectedPlanIndex });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Something went wrong processing this decision." });
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Something went wrong processing this decision." });
+    }
   }
 });

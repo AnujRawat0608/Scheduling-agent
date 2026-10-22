@@ -1,19 +1,84 @@
 import nodemailer from "nodemailer";
 
 /**
- * Uses your own SMTP mail server. Requires these env vars to be set on
- * the backend (not the frontend — these are server secrets):
+ * Email sending. The provider is picked from the backend environment variables:
  *
- *   SMTP_HOST      e.g. "mail.yourdomain.com"
- *   SMTP_PORT      e.g. "587" (STARTTLS) or "465" (implicit TLS)
- *   SMTP_SECURE    "true" if using port 465, "false" for 587/25
- *   SMTP_USER      login username for your mail server
- *   SMTP_PASS      login password / app password
- *   SMTP_FROM      the "From" address, e.g. "RFQs <rfq@yourdomain.com>"
+ *  1. Resend (HTTPS API, works on hosts that block SMTP such as Render's free tier):
+ *       RESEND_API_KEY
+ *       MAIL_FROM          e.g. "RFQs <rfq@yourdomain.com>"  (domain must be verified in Resend)
  *
- * npm install nodemailer
- * npm install -D @types/nodemailer
+ *  2. Brevo (HTTPS API, free plan; the sender address can be verified with a confirmation email):
+ *       BREVO_API_KEY
+ *       MAIL_FROM          e.g. "RFQs <you@gmail.com>"       (must be a verified sender in Brevo)
+ *
+ *  3. SMTP (only if neither key above is set; blocked on Render's free tier):
+ *       SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASS, SMTP_FROM
  */
+
+type MailOptions = { to: string; subject: string; html: string; text?: string };
+
+/* ---------------------------- HTTPS providers ---------------------------- */
+
+const API_TIMEOUT_MS = 8_000; // kept below the 10 s bound in mailSafe.ts
+
+/** Splits 'Name <a@b.com>' into { name, email }. A bare address gives no name. */
+function parseFrom(from: string): { name?: string; email: string } {
+  const m = /^\s*(.*?)\s*<([^>]+)>\s*$/.exec(from);
+  if (m) return { name: m[1].replace(/^"|"$/g, "") || undefined, email: m[2].trim() };
+  return { email: from.trim() };
+}
+
+function requireFrom(): string {
+  const from = process.env.MAIL_FROM ?? process.env.SMTP_FROM;
+  if (!from) throw new Error("MAIL_FROM is not set (the 'From' address for outgoing email).");
+  return from;
+}
+
+async function sendViaResend(opts: MailOptions) {
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: requireFrom(),
+      to: [opts.to],
+      subject: opts.subject,
+      html: opts.html,
+      text: opts.text,
+    }),
+    signal: AbortSignal.timeout(API_TIMEOUT_MS),
+  });
+  if (!res.ok) {
+    throw new Error(`Resend error ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  }
+}
+
+async function sendViaBrevo(opts: MailOptions) {
+  const sender = parseFrom(requireFrom());
+  const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: {
+      "api-key": process.env.BREVO_API_KEY as string,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({
+      sender,
+      to: [{ email: opts.to }],
+      subject: opts.subject,
+      htmlContent: opts.html,
+      textContent: opts.text,
+    }),
+    signal: AbortSignal.timeout(API_TIMEOUT_MS),
+  });
+  if (!res.ok) {
+    throw new Error(`Brevo error ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  }
+}
+
+/* --------------------------------- SMTP ---------------------------------- */
 
 let transporter: ReturnType<typeof nodemailer.createTransport> | null = null;
 
@@ -27,7 +92,7 @@ function getTransporter() {
 
   if (!host || !user || !pass) {
     throw new Error(
-      "SMTP is not configured — set SMTP_HOST, SMTP_USER, and SMTP_PASS in the backend environment."
+      "No email provider configured. Set RESEND_API_KEY or BREVO_API_KEY (plus MAIL_FROM), or SMTP_HOST, SMTP_USER and SMTP_PASS."
     );
   }
 
@@ -36,12 +101,21 @@ function getTransporter() {
     port,
     secure: process.env.SMTP_SECURE === "true",
     auth: { user, pass },
+    // Without these, nodemailer waits about 2 minutes for a connection that never opens.
+    connectionTimeout: 5_000,
+    greetingTimeout: 5_000,
+    socketTimeout: 15_000,
   });
 
   return transporter;
 }
 
-export async function sendMail(opts: { to: string; subject: string; html: string; text?: string }) {
+/* ------------------------------ Public API ------------------------------- */
+
+export async function sendMail(opts: MailOptions) {
+  if (process.env.RESEND_API_KEY) return sendViaResend(opts);
+  if (process.env.BREVO_API_KEY) return sendViaBrevo(opts);
+
   const from = process.env.SMTP_FROM ?? process.env.SMTP_USER;
   await getTransporter().sendMail({
     from,

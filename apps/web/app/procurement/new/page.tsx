@@ -603,8 +603,9 @@ export default function NewProcurementPage() {
                       <>
                         {noneOnTime && (
                           <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                            No supplier can deliver by the required date. The earliest is{" "} use web to search for more suppliers.
-                            {Math.min(...liq.topQuotes.map((q) => q.leadTimeDays))} days.
+                            No supplier can deliver by the required date. The earliest is{" "}
+                            {Math.min(...liq.topQuotes.map((q) => q.leadTimeDays))} days. Use web search to find
+                            more suppliers.
                           </p>
                         )}
                         <div className="overflow-x-auto rounded-lg border border-neutral-200">
@@ -902,12 +903,30 @@ export default function NewProcurementPage() {
                 replies. No order is final until a supplier confirms.
               </p>
               {state.rfqResults.map((r) => (
-                <p key={r.supplierId} className="text-xs">
-                  {r.supplierName}
-                  {r.referenceNumber ? ` · ${r.referenceNumber}` : ""}
-                  {r.emailed === false
-                    ? " · email not delivered; the supplier will see it in their dashboard"
-                    : ""}
+                <p key={r.supplierId} className="flex flex-wrap items-center gap-1.5 text-xs">
+                  <span>
+                    {r.supplierName}
+                    {r.referenceNumber ? ` · ${r.referenceNumber}` : ""}
+                  </span>
+
+                  {r.emailed === true && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 font-medium text-green-700">
+                      <Check size={11} strokeWidth={3} />
+                      Email sent
+                    </span>
+                  )}
+
+                  {r.emailed === false && (
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-800">
+                      Email not delivered. The supplier will see it in their dashboard.
+                    </span>
+                  )}
+
+                  {r.emailed === undefined && (
+                    <span className="rounded-full bg-neutral-100 px-2 py-0.5 font-medium text-neutral-600">
+                      Email status unknown. The supplier will see it in their dashboard.
+                    </span>
+                  )}
                 </p>
               ))}
             </div>

@@ -53,31 +53,34 @@ export async function sendRfqs(state: ProcurementStateType) {
       ? request.requesterName
       : "";
 
-  // One at a time: easy to read partial failures, and gentle on the mail server.
-  const rfqResults: RfqResult[] = [];
-  for (const [legIndex, leg] of recommendedPlan.legs.entries()) {
-    const base = { supplierName: leg.supplierName, supplierId: leg.supplierId as string };
-    try {
-      const rfq = await createAgentRfq({
-        taskId: String(taskId),
-        procurerId: request.procurerId,
-        leg,
-        legIndex,
-        requester: { name: requesterName, email: replyTo },
-        requiredBy: request.requiredBy,
-      });
-      rfqResults.push({
-        ...base,
-        status: "sent",
-        rfqId: rfq.rfqId,
-        referenceNumber: rfq.referenceNumber,
-        emailed: rfq.emailed,
-      });
-    } catch (err) {
-      console.error(`Could not create RFQ for ${leg.supplierName}`, err);
-      rfqResults.push({ ...base, status: "failed", error: (err as Error).message || "Unexpected error" });
-    }
-  }
+  // In parallel: each leg handles its own errors, and results keep the plan's order.
+  // (Each email is bounded to a few seconds inside createAgentRfq, so a slow mail service
+  // can no longer hold up the purchase.)
+  const rfqResults: RfqResult[] = await Promise.all(
+    recommendedPlan.legs.map(async (leg, legIndex): Promise<RfqResult> => {
+      const base = { supplierName: leg.supplierName, supplierId: leg.supplierId as string };
+      try {
+        const rfq = await createAgentRfq({
+          taskId: String(taskId),
+          procurerId: request.procurerId,
+          leg,
+          legIndex,
+          requester: { name: requesterName, email: replyTo },
+          requiredBy: request.requiredBy,
+        });
+        return {
+          ...base,
+          status: "sent",
+          rfqId: rfq.rfqId,
+          referenceNumber: rfq.referenceNumber,
+          emailed: rfq.emailed,
+        };
+      } catch (err) {
+        console.error(`Could not create RFQ for ${leg.supplierName}`, err);
+        return { ...base, status: "failed", error: (err as Error).message || "Unexpected error" };
+      }
+    })
+  );
 
   const failed = rfqResults.filter((r) => r.status === "failed");
   if (failed.length === 0) {

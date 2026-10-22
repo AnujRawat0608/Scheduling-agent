@@ -5,7 +5,8 @@ import { rfqs } from "../db/rfqsSchema.js";
 import { rfqQuotes } from "../db/rfqQuotesSchema.js";
 import { suppliers } from "../db/suppliersSchema.js";
 import { requireSupplierAuth } from "../agent/lib/supplierAuth.js";
-import { sendMail, buildRfqNotificationEmail } from "../agent/lib/mailer.js";
+import { buildRfqNotificationEmail } from "../agent/lib/mailer.js";
+import { sendMailBounded } from "../agent/lib/mailSafe.js";
 
 export const rfqRouter = Router();
 
@@ -146,7 +147,7 @@ rfqRouter.post("/", async (req, res) => {
           currency: rfq.currency,
           lineItems: (rfq.lineItems as { productName: string; specification?: string | null; unit?: string | null; quantity: number }[]) ?? [],
         });
-        await sendMail({ to: supplier.email, subject, html, text });
+        await sendMailBounded({ to: supplier.email, subject, html, text })
       } catch (mailErr) {
         // The RFQ is already saved and will still show up in-app even if
         // the email fails to send — don't fail the whole request over it.

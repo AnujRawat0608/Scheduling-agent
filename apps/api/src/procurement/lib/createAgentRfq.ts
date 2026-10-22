@@ -3,7 +3,8 @@ import { db } from "../../db/client.js";
 import { rfqs } from "../../db/rfqsSchema.js";
 import { suppliers } from "../../db/suppliersSchema.js";
 import { procurementTasks } from "../../db/procurementSchema.js";
-import { sendMail, buildRfqNotificationEmail } from "../../agent/lib/mailer.js";
+import { buildRfqNotificationEmail } from "../../agent/lib/mailer.js";
+import { sendMailBounded } from "../../agent/lib/mailSafe.js";
 import { getRates } from "./fx.js";
 import { convert, type RateTable } from "./fxMath.js";
 import type { FulfillmentLeg } from "../state.js";
@@ -14,7 +15,10 @@ const REPLY_WITHIN_DAYS = Number(process.env.RFQ_REPLY_WITHIN_DAYS ?? 3);
 export interface AgentRfqResult {
   rfqId: string;
   referenceNumber: string;
-  /** true/false = an email was attempted now; undefined = the RFQ already existed, nothing was sent. */
+  /**
+   * true = the email was sent, false = it failed. undefined = the RFQ already existed (nothing was
+   * sent now), or the email was still pending when we stopped waiting for it.
+   */
   emailed?: boolean;
 }
 
@@ -219,8 +223,9 @@ export async function createAgentRfq(input: {
     return { rfqId: again.id, referenceNumber: again.referenceNumber };
   }
 
-  // The RFQ is saved and visible in the supplier's dashboard either way. Email is best effort.
-  let emailed = false;
+  // The RFQ is saved and visible in the supplier's dashboard either way. Email is best effort
+  // and never holds up the purchase for more than a few seconds.
+  let emailed: boolean | undefined;
   if (supplier.email) {
     try {
       const { subject, html, text } = buildRfqNotificationEmail({
@@ -231,10 +236,11 @@ export async function createAgentRfq(input: {
         currency: rfq.currency,
         lineItems,
       });
-      await sendMail({ to: supplier.email, subject, html, text });
-      emailed = true;
+      const outcome = await sendMailBounded({ to: supplier.email, subject, html, text });
+      emailed = outcome === "sent" ? true : outcome === "failed" ? false : undefined;
     } catch (mailErr) {
-      console.error(`RFQ email for ${rfq.id} failed`, mailErr);
+      console.error(`RFQ email for ${rfq.id} could not be prepared`, mailErr);
+      emailed = false;
     }
   }
 
