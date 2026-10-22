@@ -248,7 +248,7 @@ function QuoteModal({ rfq, onClose }: { rfq: TaskRfq; onClose: () => void }) {
             onClick={onClose}
             className="rounded-md bg-[#EA580C] px-4 py-2 text-xs font-medium text-white transition hover:bg-[#EA580C]/90"
           >
-            Close
+        Close
           </button>
         </div>
       </div>
