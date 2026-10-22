@@ -20,6 +20,7 @@ import { procurerAuthRouter } from "./routes/procurerAuth.js";
 import { catalogRouter } from "./routes/catalog.js";
 import { paymentsRouter } from "./routes/payments.js";
 import { offerImagesRouter } from "./routes/offerImages.js";
+import { rfqTaskQuotesRouter } from "./routes/rfqTaskQuotes.js";
 
 
 
@@ -55,11 +56,12 @@ app.use("/api", supplierOrdersRouter);
 app.use("/api/admin-auth", adminAuthRouter);
 app.use("/api/procurer-auth", procurerAuthRouter);
 app.use("/api/admin/suppliers", adminSuppliersRouter);
-app.use("/api/rfqs", rfqRouter);
 app.use("/api", fxRatesRouter);
 app.use("/api/catalog", catalogRouter);
 app.use("/api/payments", paymentsRouter);
 app.use("/api/offers", offerImagesRouter);
+app.use("/api/rfqs/by-task", rfqTaskQuotesRouter);
+app.use("/api/rfqs", rfqRouter);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
