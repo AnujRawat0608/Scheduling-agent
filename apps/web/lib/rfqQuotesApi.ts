@@ -23,24 +23,29 @@ export interface RfqQuote {
   createdAt: string;
 }
 
+/** The order created when the buyer accepted a quote. */
+export interface TaskRfqOrder {
+  id: string;
+  /** "pending" (awaiting payment) -> "confirmed" -> "shipped" */
+  status: string;
+  total: number | null;
+  currency: string;
+}
+
 export interface TaskRfq {
   id: string;
   referenceNumber: string;
-  /** "sent" until the supplier replies, then "quoted". */
+  /** "sent" until the supplier replies, then "quoted", then "accepted". */
   status: string;
   currency: string | null;
   dueDate: string | null;
   lineItems: { productName?: string; quantity?: number; unit?: string | null }[];
   supplier: { id: string; businessName: string };
   quote: RfqQuote | null;
+  order: TaskRfqOrder | null;
 }
 
-/** The signed-in buyer's RFQs for one procurement task, with each supplier's quote if any. */
-export async function fetchTaskRfqs(taskId: string): Promise<{ rfqs: TaskRfq[] }> {
-  const res = await fetch(`${API_BASE}/rfqs/by-task/${taskId}`, {
-    headers: { "Content-Type": "application/json", ...authHeaders() },
-  });
-
+async function handle<T>(res: Response, fallback: string): Promise<T> {
   // Same behaviour as the rest of the buyer app: a stale login goes back to sign in.
   if (res.status === 401 && typeof window !== "undefined") {
     await logoutProcurer();
@@ -49,7 +54,28 @@ export async function fetchTaskRfqs(taskId: string): Promise<{ rfqs: TaskRfq[] }
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? "Failed to load supplier quotes");
+    throw new Error(body.error ?? fallback);
   }
   return res.json();
+}
+
+/** The signed-in buyer's RFQs for one procurement task, with each supplier's quote if any. */
+export async function fetchTaskRfqs(taskId: string): Promise<{ rfqs: TaskRfq[] }> {
+  const res = await fetch(`${API_BASE}/rfqs/by-task/${taskId}`, {
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+  });
+  return handle(res, "Failed to load supplier quotes");
+}
+
+/** Accept the supplier's quote: creates the order. `quoteId` is the quote the buyer is looking at. */
+export async function acceptQuote(
+  rfqId: string,
+  input: { quoteId: string; deliveryAddress: string; notes?: string }
+): Promise<{ order: TaskRfqOrder }> {
+  const res = await fetch(`${API_BASE}/rfq-orders/${rfqId}/accept`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(input),
+  });
+  return handle(res, "Could not accept the quote");
 }

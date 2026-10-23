@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { AlertCircle, Check, Clock, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Check, Clock, X } from "lucide-react";
 import { formatMoney } from "../lib/format";
-import { fetchTaskRfqs, type TaskRfq } from "../lib/rfqQuotesApi";
+import { acceptQuote, fetchTaskRfqs, type TaskRfq } from "../lib/rfqQuotesApi";
 
 /** The part of an RFQ result this component needs (the page's own RfqResult type fits it). */
 type RfqResultLike = {
@@ -15,6 +15,15 @@ type RfqResultLike = {
   emailed?: boolean;
 };
 
+const ORDER_STATUS_LABEL: Record<string, string> = {
+  pending: "Awaiting payment",
+  confirmed: "Confirmed",
+  shipped: "Shipped",
+};
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+const shortId = (id: string) => id.slice(0, 8).toUpperCase();
+
 function fmtDate(value: string | null | undefined): string {
   if (!value) return "—";
   const d = new Date(value);
@@ -22,41 +31,36 @@ function fmtDate(value: string | null | undefined): string {
 }
 
 /**
- * One line per supplier RFQ: email status + whether the supplier has replied with a quote.
- * "View quote" opens a modal with the quote details. Checks for replies every 15 seconds
- * until every supplier has quoted. A failed check never stops the polling.
+ * One line per supplier RFQ: email status + the supplier's quote status.
+ * "View quote" opens a modal with the quote and, while it is still open, an "Accept quote" button
+ * that places the order. Checks for replies every 15 seconds (and when the tab regains focus)
+ * until every supplier has quoted.
+ *
+ * Quote states shown: Checking… / Waiting for quote / Quote received / Quote accepted /
+ * Couldn't check / Quote status unavailable.
  */
 export function RfqQuoteStatus({ taskId, results }: { taskId: string; results: RfqResultLike[] }) {
   const [openRfqId, setOpenRfqId] = useState<string | null>(null);
-  const closeModal = useCallback(() => setOpenRfqId(null), []);
 
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ["task-rfqs", taskId],
     queryFn: () => fetchTaskRfqs(taskId),
-    // Keep polling after an error too: one slow or failed response (Render waking up, a
-    // network blip) must not freeze the status for good.
     refetchInterval: (query) => {
+      if (query.state.status === "error") return false;
       const list = query.state.data?.rfqs ?? [];
       return list.length > 0 && list.every((r) => r.quote) ? false : 15_000;
     },
   });
 
-  const rfqs = data?.rfqs ?? [];
-  const openRfq = openRfqId ? (rfqs.find((r) => r.id === openRfqId) ?? null) : null;
-
-  /** Match a result to its RFQ: by id, then reference number, then supplier. */
-  function findRfq(r: RfqResultLike): TaskRfq | undefined {
-    return (
-      (r.rfqId ? rfqs.find((x) => x.id === r.rfqId) : undefined) ??
-      (r.referenceNumber ? rfqs.find((x) => x.referenceNumber === r.referenceNumber) : undefined) ??
-      rfqs.find((x) => x.supplier.id === r.supplierId)
-    );
-  }
+  const rfqById = new Map<string, TaskRfq>((data?.rfqs ?? []).map((r) => [r.id, r]));
+  const rfqBySupplier = new Map<string, TaskRfq>((data?.rfqs ?? []).map((r) => [r.supplier.id, r]));
+  const openRfq = openRfqId ? rfqById.get(openRfqId) ?? null : null;
 
   return (
     <>
       {results.map((r) => {
-        const rfq = findRfq(r);
+        // Match by RFQ id, falling back to the supplier (there is one RFQ per task + supplier).
+        const rfq = (r.rfqId ? rfqById.get(r.rfqId) : undefined) ?? rfqBySupplier.get(r.supplierId);
         return (
           <p key={r.supplierId} className="flex flex-wrap items-center gap-1.5 text-xs">
             <span>
@@ -83,7 +87,31 @@ export function RfqQuoteStatus({ taskId, results }: { taskId: string; results: R
             )}
 
             {/* Quote status */}
-            {rfq?.quote ? (
+            {isLoading ? (
+              <span className="rounded-full bg-neutral-100 px-2 py-0.5 font-medium text-neutral-500">
+                Checking for quote…
+              </span>
+            ) : isError ? (
+              <span
+                title={(error as Error)?.message}
+                className="rounded-full bg-red-100 px-2 py-0.5 font-medium text-red-700"
+              >
+                Couldn&apos;t check for a quote{(error as Error)?.message ? `: ${(error as Error).message}` : ""}
+              </span>
+            ) : rfq?.order ? (
+              <>
+                <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 font-medium text-green-700">
+                  <Check size={11} strokeWidth={3} />
+                  Quote accepted · Order #{shortId(rfq.order.id)}
+                </span>
+                <button
+                  onClick={() => setOpenRfqId(rfq.id)}
+                  className="rounded-md border border-neutral-300 px-2 py-0.5 text-[11px] font-medium text-neutral-700 transition hover:bg-neutral-100"
+                >
+                  View order
+                </button>
+              </>
+            ) : rfq?.quote ? (
               <>
                 <span className="inline-flex items-center gap-1 rounded-full bg-[#EA580C]/10 px-2 py-0.5 font-medium text-[#EA580C]">
                   <Check size={11} strokeWidth={3} />
@@ -101,22 +129,11 @@ export function RfqQuoteStatus({ taskId, results }: { taskId: string; results: R
                 <Clock size={11} />
                 Waiting for quote
               </span>
-            ) : isLoading ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-neutral-100 px-2 py-0.5 font-medium text-neutral-500">
-                <Clock size={11} />
-                Checking for quote…
-              </span>
-            ) : isError && !data ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 font-medium text-red-700">
-                <AlertCircle size={11} />
-                Couldn't check for a quote. Retrying…
-              </span>
             ) : (
               <span
-                title="The server returned no RFQ record linked to this request and this supplier."
-                className="inline-flex items-center gap-1 rounded-full bg-neutral-100 px-2 py-0.5 font-medium text-neutral-500"
+                title="The server didn't return this RFQ for the signed-in buyer."
+                className="rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-800"
               >
-                <AlertCircle size={11} />
                 Quote status unavailable
               </span>
             )}
@@ -124,14 +141,28 @@ export function RfqQuoteStatus({ taskId, results }: { taskId: string; results: R
         );
       })}
 
-      {openRfq?.quote && <QuoteModal rfq={openRfq} onClose={closeModal} />}
+      {openRfq?.quote && <QuoteModal rfq={openRfq} taskId={taskId} onClose={() => setOpenRfqId(null)} />}
     </>
   );
 }
 
-function QuoteModal({ rfq, onClose }: { rfq: TaskRfq; onClose: () => void }) {
+function QuoteModal({ rfq, taskId, onClose }: { rfq: TaskRfq; taskId: string; onClose: () => void }) {
+  const qc = useQueryClient();
   const quote = rfq.quote!;
   const currency = quote.currency ?? rfq.currency ?? "USD";
+
+  const [confirming, setConfirming] = useState(false);
+  const [address, setAddress] = useState("");
+  const [notes, setNotes] = useState("");
+
+  const accept = useMutation({
+    mutationFn: () =>
+      acceptQuote(rfq.id, { quoteId: quote.id, deliveryAddress: address.trim(), notes: notes.trim() || undefined }),
+    // Refresh either way: after an error the supplier's quote may have changed.
+    onSettled: () => qc.invalidateQueries({ queryKey: ["task-rfqs", taskId] }),
+  });
+
+  const order = accept.data?.order ?? rfq.order;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -140,13 +171,25 @@ function QuoteModal({ rfq, onClose }: { rfq: TaskRfq; onClose: () => void }) {
   }, [onClose]);
 
   // Quote lines are in the same order as the RFQ's line items.
-  const lines = quote.lineItemQuotes.map((li, i) => ({
-    name: li.productName ?? rfq.lineItems[i]?.productName ?? `Item ${i + 1}`,
-    quantity: li.quantity ?? rfq.lineItems[i]?.quantity,
-    unitPrice: li.unitPrice,
-    lineTotal: li.lineTotal,
-    unit: li.unit ?? rfq.lineItems[i]?.unit ?? "",
-  }));
+  const lines = quote.lineItemQuotes.map((li, i) => {
+    const quantity = li.quantity ?? rfq.lineItems[i]?.quantity;
+    const amount =
+      li.unitPrice != null && quantity != null ? round2(li.unitPrice * quantity) : li.lineTotal;
+    return {
+      name: li.productName ?? rfq.lineItems[i]?.productName ?? `Item ${i + 1}`,
+      quantity,
+      unitPrice: li.unitPrice,
+      amount,
+    };
+  });
+
+  // The order is built from unit price x quantity, so show the same figure here.
+  const orderTotal =
+    lines.length > 0 && lines.every((l) => l.amount != null)
+      ? round2(lines.reduce((sum, l) => sum + (l.amount as number), 0))
+      : quote.totalPrice;
+
+  const canAccept = rfq.status === "quoted" && !order;
 
   return (
     <div
@@ -194,14 +237,12 @@ function QuoteModal({ rfq, onClose }: { rfq: TaskRfq; onClose: () => void }) {
               {lines.map((l, i) => (
                 <tr key={i}>
                   <td className="px-3 py-2 font-medium">{l.name}</td>
-                  <td className="px-3 py-2 text-right">
-                    {l.quantity == null ? "—" : `${l.quantity} ${l.unit}`.trim()}
-                  </td>
+                  <td className="px-3 py-2 text-right">{l.quantity ?? "—"}</td>
                   <td className="px-3 py-2 text-right font-mono">
                     {l.unitPrice == null ? "—" : formatMoney(l.unitPrice, currency)}
                   </td>
                   <td className="px-3 py-2 text-right font-mono">
-                    {l.lineTotal == null ? "—" : formatMoney(l.lineTotal, currency)}
+                    {l.amount == null ? "—" : formatMoney(l.amount, currency)}
                   </td>
                 </tr>
               ))}
@@ -212,7 +253,7 @@ function QuoteModal({ rfq, onClose }: { rfq: TaskRfq; onClose: () => void }) {
         <div className="mt-3 flex items-center justify-between rounded-lg bg-neutral-50 px-3 py-2.5">
           <span className="text-xs font-medium text-neutral-600">Quote total</span>
           <span className="text-sm font-semibold">
-            {quote.totalPrice == null ? "—" : formatMoney(quote.totalPrice, currency)}
+            {orderTotal == null ? "—" : formatMoney(orderTotal, currency)}
           </span>
         </div>
 
@@ -243,13 +284,89 @@ function QuoteModal({ rfq, onClose }: { rfq: TaskRfq; onClose: () => void }) {
           )}
         </dl>
 
-        <div className="mt-5 flex justify-end">
+        {/* Accepted: show the order */}
+        {order && (
+          <div className="mt-5 rounded-lg border border-green-200 bg-green-50 p-3 text-xs text-green-800">
+            <p className="flex items-center gap-1.5 font-semibold">
+              <Check size={13} strokeWidth={3} />
+              Quote accepted
+            </p>
+            <p className="mt-1">
+              Order #{shortId(order.id)} · {ORDER_STATUS_LABEL[order.status] ?? order.status}
+              {order.total != null ? ` · ${formatMoney(order.total, order.currency)}` : ""}
+            </p>
+            <p className="mt-1 text-green-700">The supplier is being notified about this order.</p>
+          </div>
+        )}
+
+        {/* Still open: accept form */}
+        {canAccept && confirming && (
+          <div className="mt-5 rounded-lg border border-[#EA580C]/30 bg-[#EA580C]/5 p-3">
+            <p className="text-xs font-semibold">Accept this quote and place the order</p>
+            <p className="mt-1 text-[11px] text-neutral-600">
+              Order total {orderTotal == null ? "—" : formatMoney(orderTotal, currency)}, based on the
+              supplier&apos;s quote. Tax and shipping aren&apos;t part of the quote, so they aren&apos;t added.
+            </p>
+
+            <label className="mt-3 block text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+              Delivery address
+              <textarea
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                rows={3}
+                maxLength={500}
+                placeholder="Where should the supplier deliver?"
+                className="mt-1 w-full rounded-md border border-neutral-200 bg-white px-2.5 py-2 text-xs font-normal normal-case tracking-normal text-neutral-900 outline-none focus:border-[#EA580C] focus:ring-2 focus:ring-[#EA580C]/20"
+              />
+            </label>
+
+            <label className="mt-3 block text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+              Notes for the supplier (optional)
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={2}
+                maxLength={1000}
+                className="mt-1 w-full rounded-md border border-neutral-200 bg-white px-2.5 py-2 text-xs font-normal normal-case tracking-normal text-neutral-900 outline-none focus:border-[#EA580C] focus:ring-2 focus:ring-[#EA580C]/20"
+              />
+            </label>
+
+            {accept.isError && <p className="mt-2 text-xs text-red-600">{(accept.error as Error).message}</p>}
+
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                onClick={() => setConfirming(false)}
+                disabled={accept.isPending}
+                className="rounded-md border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:border-neutral-300 disabled:opacity-40"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => accept.mutate()}
+                disabled={accept.isPending || address.trim().length < 5}
+                className="rounded-md bg-[#EA580C] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-[#EA580C]/90 disabled:opacity-40"
+              >
+                {accept.isPending ? "Placing order…" : "Confirm & place order"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-5 flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="rounded-md bg-[#EA580C] px-4 py-2 text-xs font-medium text-white transition hover:bg-[#EA580C]/90"
+            className="rounded-md border border-neutral-200 bg-white px-4 py-2 text-xs font-medium text-neutral-700 transition hover:border-neutral-300"
           >
-        Close
+            Close
           </button>
+          {canAccept && !confirming && (
+            <button
+              onClick={() => setConfirming(true)}
+              className="rounded-md bg-[#EA580C] px-4 py-2 text-xs font-medium text-white transition hover:bg-[#EA580C]/90"
+            >
+              Accept quote
+            </button>
+          )}
         </div>
       </div>
     </div>

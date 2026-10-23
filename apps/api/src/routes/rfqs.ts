@@ -354,6 +354,12 @@ rfqRouter.get("/:id", async (req, res) => {
       return res.status(404).json({ error: "RFQ not found" });
     }
 
+        if (rfq.status === "accepted") {
+      return res.status(409).json({
+        error: "The buyer has already accepted this quote, so it can no longer be changed.",
+      });
+    }
+    
     const [supplier] = await db
       .select({ id: suppliers.id, businessName: suppliers.businessName, contactName: suppliers.contactName })
       .from(suppliers)

@@ -3,7 +3,7 @@ import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { rfqs } from "../db/rfqsSchema.js";
 import { rfqQuotes } from "../db/rfqQuotesSchema.js";
-import { suppliers } from "../db/suppliersSchema.js";
+import { suppliers, supplierOrders } from "../db/suppliersSchema.js";
 import { requireProcurerAuth } from "../agent/lib/procurerAuth.js";
 
 export const rfqTaskQuotesRouter = Router();
@@ -13,8 +13,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 /**
  * GET /api/rfqs/by-task/:taskId
  * The signed-in buyer's RFQs for one procurement task, each with the supplier's latest quote
- * (null while the supplier hasn't replied). Only RFQs owned by this buyer are returned, so a
- * task id from someone else's request returns an empty list.
+ * (null while the supplier hasn't replied) and the order created when the buyer accepted it
+ * (null until then). Only RFQs owned by this buyer are returned.
  */
 rfqTaskQuotesRouter.get("/:taskId", requireProcurerAuth, async (req, res) => {
   try {
@@ -28,15 +28,29 @@ rfqTaskQuotesRouter.get("/:taskId", requireProcurerAuth, async (req, res) => {
       .orderBy(asc(rfqs.createdAt));
 
     if (rows.length === 0) return res.json({ rfqs: [] });
+    const rfqIds = rows.map((r) => r.id);
 
     // Latest quote per RFQ (a supplier's resubmission replaces the earlier one, but be safe).
     const quoteRows = await db
       .select()
       .from(rfqQuotes)
-      .where(inArray(rfqQuotes.rfqId, rows.map((r) => r.id)))
+      .where(inArray(rfqQuotes.rfqId, rfqIds))
       .orderBy(desc(rfqQuotes.createdAt));
     const latestQuote = new Map<string, (typeof quoteRows)[number]>();
     for (const q of quoteRows) if (!latestQuote.has(q.rfqId)) latestQuote.set(q.rfqId, q);
+
+    // The order created from each accepted quote.
+    const orderRows = await db
+      .select({
+        id: supplierOrders.id,
+        rfqId: supplierOrders.rfqId,
+        status: supplierOrders.status,
+        total: supplierOrders.total,
+        currency: supplierOrders.currency,
+      })
+      .from(supplierOrders)
+      .where(inArray(supplierOrders.rfqId, rfqIds));
+    const orderByRfq = new Map(orderRows.map((o) => [o.rfqId as string, o]));
 
     const supplierRows = await db
       .select({ id: suppliers.id, businessName: suppliers.businessName })
@@ -47,6 +61,7 @@ rfqTaskQuotesRouter.get("/:taskId", requireProcurerAuth, async (req, res) => {
     res.json({
       rfqs: rows.map((r) => {
         const q = latestQuote.get(r.id);
+        const o = orderByRfq.get(r.id);
         return {
           id: r.id,
           referenceNumber: r.referenceNumber,
@@ -67,6 +82,9 @@ rfqTaskQuotesRouter.get("/:taskId", requireProcurerAuth, async (req, res) => {
                 lineItemQuotes: q.lineItemQuotes ?? [],
                 createdAt: q.createdAt,
               }
+            : null,
+          order: o
+            ? { id: o.id, status: o.status, total: o.total == null ? null : Number(o.total), currency: o.currency }
             : null,
         };
       }),

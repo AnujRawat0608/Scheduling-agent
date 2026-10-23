@@ -12,6 +12,7 @@ import { SupplierBadge } from "../../../components/SupplierBadge";
 import { findApprovalTarget, buildRfqMailHref } from "../../../lib/procurementSourcing";
 import { Paperclip, ArrowUp, X, ExternalLink, Check, ChevronDown } from "lucide-react";
 import { AgentActivity } from "../../../components/AgentActivity";
+import { RfqQuoteStatus } from "../../../components/RfqQuoteStatus";
 
 import {
   createProcurementTask,
@@ -902,33 +903,7 @@ export default function NewProcurementPage() {
                 RFQ sent to {state.rfqResults.map((r) => r.supplierName).join(", ")}. Waiting for supplier
                 replies. No order is final until a supplier confirms.
               </p>
-              {state.rfqResults.map((r) => (
-                <p key={r.supplierId} className="flex flex-wrap items-center gap-1.5 text-xs">
-                  <span>
-                    {r.supplierName}
-                    {r.referenceNumber ? ` · ${r.referenceNumber}` : ""}
-                  </span>
-
-                  {r.emailed === true && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 font-medium text-green-700">
-                      <Check size={11} strokeWidth={3} />
-                      Email sent
-                    </span>
-                  )}
-
-                  {r.emailed === false && (
-                    <span className="rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-800">
-                      Email not delivered. The supplier will see it in their dashboard.
-                    </span>
-                  )}
-
-                  {r.emailed === undefined && (
-                    <span className="rounded-full bg-neutral-100 px-2 py-0.5 font-medium text-neutral-600">
-                      Email status unknown. The supplier will see it in their dashboard.
-                    </span>
-                  )}
-                </p>
-              ))}
+              <RfqQuoteStatus taskId={activeTaskId} results={state.rfqResults} />
             </div>
           )}
 

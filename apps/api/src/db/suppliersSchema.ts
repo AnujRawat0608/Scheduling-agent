@@ -85,6 +85,7 @@ export const supplierOrders = pgTable("supplier_orders", {
   shippingCost: numeric("shipping_cost", { precision: 12, scale: 2 }),
   total: numeric("total", { precision: 12, scale: 2 }), // subtotal + taxAmount + shippingCost
   currency: text("currency").notNull(),
+  rfqId: uuid("rfq_id"), // optional link to the RFQ that generated this order
 
   // --- Payment (set when the buyer pays) ---
   razorpayOrderId: text("razorpay_order_id"),
