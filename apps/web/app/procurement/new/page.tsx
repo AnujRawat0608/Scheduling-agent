@@ -312,7 +312,7 @@ export default function NewProcurementPage() {
     !!state && ["extracting", "sourcing", "comparing"].includes(state.status);
 
   return (
-    <main className="min-h-screen w-full bg-slate-100 px-6 py-16">
+    <main className="min-h-screen w-full bg-slate-100 px-6 pb-16 pt-8">
       <GlobalRiskOverview />
 
       <div className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm">
