@@ -72,12 +72,7 @@ export default function SupplierLoginPage() {
       {/* Top bar */}
       <header className="border-b border-neutral-100">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#3d6bff]/10 text-[#3d6bff]">
-              <Building2 size={16} />
-            </span>
-            <p className="text-sm font-semibold text-neutral-900">Supplier portal</p>
-          </div>
+          <p className="text-lg font-bold tracking-[0.2em] text-neutral-900">METIS</p>
           <p className="text-sm text-neutral-500">
             New here?{" "}
             <Link href="/suppliers/register" className="font-medium text-[#3d6bff] hover:underline">

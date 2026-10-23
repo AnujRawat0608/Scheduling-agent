@@ -146,7 +146,7 @@ export function RfqQuoteStatus({ taskId, results }: { taskId: string; results: R
   );
 }
 
-function QuoteModal({ rfq, taskId, onClose }: { rfq: TaskRfq; taskId: string; onClose: () => void }) {
+export function QuoteModal({ rfq, taskId, onClose }: { rfq: TaskRfq; taskId: string; onClose: () => void }) {
   const qc = useQueryClient();
   const quote = rfq.quote!;
   const currency = quote.currency ?? rfq.currency ?? "USD";

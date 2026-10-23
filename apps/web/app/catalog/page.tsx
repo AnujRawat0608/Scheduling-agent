@@ -43,7 +43,7 @@ export default function CatalogPage() {
   const total = data?.pages[0]?.total ?? 0;
 
   return (
-    <main className="min-h-screen w-full bg-slate-100 px-6 pb-32 pt-16">
+    <main className="min-h-screen w-full bg-slate-100 px-6 pb-32 pt-8">
       <div className="mx-auto max-w-6xl">
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
           <div>
