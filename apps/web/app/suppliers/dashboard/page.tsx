@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { IncomingOrders } from "../../../components/IncomingOrders";
 import { RfqInbox } from "../../../components/RfqInbox";
@@ -27,7 +28,8 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { fetchCurrentSupplier, logoutSupplier } from "../../../lib/supplierAuthApi";
+import { fetchMySupplierOrders } from "../../../lib/supplierOrdersApi";
+import { authHeaders, fetchCurrentSupplier, logoutSupplier } from "../../../lib/supplierAuthApi";
 import {
   fetchSupplierProfile,
   updateMyProfile,
@@ -38,6 +40,8 @@ import {
 /* -------------------------------------------------------------------------- */
 /*  Constants & design tokens                                                 */
 /* -------------------------------------------------------------------------- */
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
 
 const BRAND = "#3d6bff";
 
@@ -89,9 +93,34 @@ type DashboardStats = {
   openRfqs: number | null;
   awaitingQuote: number | null;
   activeOrders: number | null;
-  /** Requests received per month, oldest first. Omit to show the empty state. */
+  /** Requests received per month, oldest first. `undefined` = still loading, `[]` = none. */
   quoteActivity?: { month: string; count: number }[];
 };
+
+type RfqLite = { status: string; dueDate: string | null; createdAt: string };
+
+/**
+ * Open RFQs        → every RFQ the buyer hasn't accepted yet (status "sent" or "quoted")
+ * Awaiting quote   → status "sent": the buyer is waiting for you to quote
+ * Quote activity   → RFQs received per calendar month, last 7 months
+ */
+function buildRfqStats(rfqs: RfqLite[]): Pick<DashboardStats, "openRfqs" | "awaitingQuote" | "quoteActivity"> {
+  const now = new Date();
+  const months = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - 6 + i, 1);
+    return { key: `${d.getFullYear()}-${d.getMonth()}`, month: d.toLocaleDateString(undefined, { month: "short" }), count: 0 };
+  });
+  rfqs.forEach((r) => {
+    const d = new Date(r.createdAt);
+    const m = months.find((x) => x.key === `${d.getFullYear()}-${d.getMonth()}`);
+    if (m) m.count += 1;
+  });
+  return {
+    openRfqs: rfqs.filter((r) => r.status !== "accepted").length,
+    awaitingQuote: rfqs.filter((r) => r.status === "sent").length,
+    quoteActivity: months.some((m) => m.count > 0) ? months.map(({ month, count }) => ({ month, count })) : [],
+  };
+}
 
 /* -------------------------------------------------------------------------- */
 /*  Small building blocks                                                     */
@@ -310,7 +339,9 @@ function QuoteActivity({ data }: { data?: { month: string; count: number }[] }) 
   const max = Math.max(1, ...(data?.map((d) => d.count) ?? [1]));
   return (
     <Card icon={FileText} title="Quote activity" description="Requests received, last 7 months">
-      {data && data.length > 0 ? (
+      {data === undefined ? (
+        <div className="h-48 animate-pulse rounded-xl bg-slate-100" role="status" aria-label="Loading quote activity" />
+      ) : data.length > 0 ? (
         <>
           <p className="text-3xl font-semibold tabular-nums tracking-tight text-slate-900">
             {total}
@@ -415,12 +446,27 @@ export default function SupplierDashboardPage() {
   const [form, setForm] = useState<FormState | null>(null);
   const [view, setView] = useState<View>("overview");
 
-  // TODO: load these from your RFQ / orders APIs.
-  const [stats] = useState<DashboardStats>({
+  const [rfqStats, setRfqStats] = useState<Omit<DashboardStats, "activeOrders">>({
     openRfqs: null,
     awaitingQuote: null,
-    activeOrders: null,
+    quoteActivity: undefined,
   });
+
+  // Same query key as <IncomingOrders />, so React Query shares one request/cache.
+  const { data: ordersData } = useQuery({
+    queryKey: ["supplier-orders-mine"],
+    queryFn: fetchMySupplierOrders,
+    refetchInterval: 30_000,
+    enabled: !!supplier,
+  });
+
+  // Active = confirmed by the buyer and not yet delivered (pending/cancelled/delivered don't count).
+  const stats: DashboardStats = {
+    ...rfqStats,
+    activeOrders: ordersData
+      ? ordersData.orders.filter((o) => o.status === "confirmed" || o.status === "shipped").length
+      : null,
+  };
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -469,6 +515,26 @@ export default function SupplierDashboardPage() {
     const h = window.location.hash.slice(1) as View;
     if (VIEWS.includes(h)) setView(h);
   }, []);
+
+  // RFQ numbers for the stat cards + quote activity chart
+  useEffect(() => {
+    if (!supplier) return;
+    let cancelled = false;
+    fetch(`${API_BASE}/rfqs/me`, { headers: { "Content-Type": "application/json", ...authHeaders() } })
+      .then((r) => {
+        if (!r.ok) throw new Error("Request failed");
+        return r.json() as Promise<{ rfqs: RfqLite[] }>;
+      })
+      .then((d) => {
+        if (!cancelled) setRfqStats((prev) => ({ ...prev, ...buildRfqStats(d.rfqs) }));
+      })
+      .catch(() => {
+        if (!cancelled) setRfqStats((prev) => ({ ...prev, quoteActivity: [] }));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [supplier]);
 
   /* ----------------------------- derived values ---------------------------- */
 
@@ -650,7 +716,8 @@ export default function SupplierDashboardPage() {
   const displayName = supplier.contactName?.trim() || supplier.businessName;
   const firstName = displayName.split(/\s+/)[0];
   const fmt = (n: number | null) => (n == null ? "—" : String(n));
-  const hasActivity = (stats.quoteActivity?.length ?? 0) > 0;
+  // undefined = still loading → reserve the chart slot so the layout doesn't jump
+  const hasActivity = stats.quoteActivity === undefined || stats.quoteActivity.length > 0;
   const strengthLabel = completeness >= 90 ? "Excellent" : completeness >= 60 ? "Good" : "Needs work";
 
   const navItems = (
