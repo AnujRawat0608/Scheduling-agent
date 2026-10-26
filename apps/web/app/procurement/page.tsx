@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueries } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { ChevronDown, ExternalLink, Check } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import {
   listProcurementTasks,
   fetchProcurementTask,
@@ -27,8 +27,20 @@ const STATUS_STYLES: Record<string, string> = {
   failed: "bg-red-100 text-red-700",
 };
 
-// A request counts as an "order" once the buyer has approved it.
-const ORDER_STATUSES = ["purchasing", "rfq_sent", "done"];
+// A request counts as an "order" once the buyer has approved it. Listing what is NOT an order
+// (instead of a short list of what is) means a new status set after approving or accepting a quote
+// can never make an order disappear from this page.
+const NOT_ORDER_STATUSES = [
+  "extracting",
+  "sourcing",
+  "comparing",
+  "needs_info",
+  "awaiting_approval",
+  "failed",
+  "rejected",
+  "cancelled",
+  "canceled",
+];
 
 function statusLabel(status: string): string {
   const s = status.replace(/_/g, " ");
@@ -52,7 +64,7 @@ export default function ProcurementListPage() {
     refetchInterval: 5000,
   });
 
-  const orders = (data ?? []).filter((t) => ORDER_STATUSES.includes(t.status));
+  const orders = (data ?? []).filter((t) => !NOT_ORDER_STATUSES.includes(t.status));
 
   return (
     <main className="min-h-screen w-full bg-slate-100 px-6 pb-32 pt-8">
@@ -259,14 +271,6 @@ function OrderCard({ task }: { task: ProcurementTaskSummary }) {
                   Couldn&apos;t send a request to {failed.map((r) => r.supplierName).join(", ")}.
                 </p>
               )}
-
-              <Link
-                href={`/procurement/${task.id}`}
-                className="inline-flex items-center gap-1 text-[11px] font-medium text-neutral-500 hover:text-neutral-800"
-              >
-                Open full request
-                <ExternalLink size={12} />
-              </Link>
             </>
           )}
         </div>
@@ -275,7 +279,35 @@ function OrderCard({ task }: { task: ProcurementTaskSummary }) {
   );
 }
 
-type QuoteEntry = { task: ProcurementTaskSummary; rfq: TaskRfq };
+/** Badge for one quote: not accepted yet, awaiting payment, or paid. */
+function quoteBadge(rfq: TaskRfq): { label: string; cls: string } {
+  const status = rfq.order?.status;
+  if (!rfq.order) return { label: "Awaiting your decision", cls: "bg-[#EA580C]/10 text-[#EA580C]" };
+  if (status === "pending") return { label: "Awaiting payment", cls: "bg-amber-100 text-amber-800" };
+  if (status === "confirmed") return { label: "Paid · confirmed", cls: "bg-green-100 text-green-700" };
+  if (status === "shipped") return { label: "Shipped", cls: "bg-green-100 text-green-700" };
+  if (status === "delivered") return { label: "Delivered", cls: "bg-green-100 text-green-700" };
+  return { label: statusLabel(status ?? "unknown"), cls: "bg-neutral-100 text-neutral-600" };
+}
+
+type QuoteStage = "decide" | "pay" | "paid";
+
+/** Where a quote is in its life: waiting for the buyer, accepted but unpaid, or paid. */
+function stageOf(rfq: TaskRfq): QuoteStage {
+  if (!rfq.order) return "decide";
+  return rfq.order.status === "pending" ? "pay" : "paid";
+}
+
+type QuoteFilter = "all" | QuoteStage;
+
+const QUOTE_FILTERS: { id: QuoteFilter; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "decide", label: "Needs your decision" },
+  { id: "pay", label: "Awaiting payment" },
+  { id: "paid", label: "Paid" },
+];
+
+type QuoteEntry = { task: ProcurementTaskSummary; rfq: TaskRfq; pay?: boolean };
 
 /**
  * "Quotes received" tab: every quote a supplier has sent back, across all approved orders.
@@ -283,6 +315,7 @@ type QuoteEntry = { task: ProcurementTaskSummary; rfq: TaskRfq };
  */
 function QuotesReceived({ orders }: { orders: ProcurementTaskSummary[] }) {
   const [openEntry, setOpenEntry] = useState<QuoteEntry | null>(null);
+  const [filter, setFilter] = useState<QuoteFilter>("all");
 
   const results = useQueries({
     queries: orders.map((task) => ({
@@ -308,10 +341,13 @@ function QuotesReceived({ orders }: { orders: ProcurementTaskSummary[] }) {
       new Date(b.rfq.quote?.createdAt ?? 0).getTime() - new Date(a.rfq.quote?.createdAt ?? 0).getTime()
   );
 
+  const counts: Record<QuoteFilter, number> = { all: entries.length, decide: 0, pay: 0, paid: 0 };
+  for (const e of entries) counts[stageOf(e.rfq)]++;
+  const visibleEntries = filter === "all" ? entries : entries.filter((e) => stageOf(e.rfq) === filter);
+
   // Keep the modal pointed at fresh data after an accept.
-  const liveEntry = openEntry
-    ? entries.find((e) => e.rfq.id === openEntry.rfq.id) ?? openEntry
-    : null;
+  const fresh = openEntry ? entries.find((e) => e.rfq.id === openEntry.rfq.id) : undefined;
+  const liveEntry: QuoteEntry | null = openEntry ? { ...(fresh ?? openEntry), pay: openEntry.pay } : null;
 
   if (orders.length === 0) {
     return (
@@ -338,7 +374,23 @@ function QuotesReceived({ orders }: { orders: ProcurementTaskSummary[] }) {
         </div>
       )}
 
-      {entries.map(({ task, rfq }) => {
+      {entries.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {QUOTE_FILTERS.map((f) => (
+            <TabButton key={f.id} active={filter === f.id} onClick={() => setFilter(f.id)}>
+              {f.label} ({counts[f.id]})
+            </TabButton>
+          ))}
+        </div>
+      )}
+
+      {entries.length > 0 && visibleEntries.length === 0 && (
+        <div className="rounded-xl border border-neutral-200 bg-white p-10 text-center text-sm text-neutral-500">
+          Nothing here right now.
+        </div>
+      )}
+
+      {visibleEntries.map(({ task, rfq }) => {
         const quote = rfq.quote!;
         const currency = quote.currency ?? rfq.currency ?? "USD";
         return (
@@ -364,17 +416,29 @@ function QuotesReceived({ orders }: { orders: ProcurementTaskSummary[] }) {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              {rfq.order ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
-                  <Check size={11} strokeWidth={3} />
-                  Accepted
-                </span>
-              ) : (
-                <span className="rounded-full bg-[#EA580C]/10 px-2 py-0.5 text-xs font-medium text-[#EA580C]">
-                  Awaiting your decision
-                </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${quoteBadge(rfq).cls}`}>
+                {quoteBadge(rfq).label}
+              </span>
+
+              {rfq.order?.status === "pending" && (
+                <button
+                  onClick={() => setOpenEntry({ task, rfq, pay: true })}
+                  className="rounded-md bg-[#EA580C] px-3 py-1.5 text-[11px] font-medium text-white transition hover:bg-[#EA580C]/90"
+                >
+                  Pay now
+                </button>
               )}
+
+              {rfq.order && rfq.order.status !== "pending" && (
+                <Link
+                  href={`/billing?highlight=${rfq.order.id}`}
+                  className="rounded-md bg-[#EA580C] px-3 py-1.5 text-[11px] font-medium text-white transition hover:bg-[#EA580C]/90"
+                >
+                  Billing
+                </Link>
+              )}
+
               <button
                 onClick={() => setOpenEntry({ task, rfq })}
                 className="rounded-md border border-[#EA580C] px-3 py-1.5 text-[11px] font-medium text-[#EA580C] transition hover:bg-[#EA580C]/10"
@@ -387,7 +451,12 @@ function QuotesReceived({ orders }: { orders: ProcurementTaskSummary[] }) {
       })}
 
       {liveEntry && liveEntry.rfq.quote && (
-        <QuoteModal rfq={liveEntry.rfq} taskId={liveEntry.task.id} onClose={() => setOpenEntry(null)} />
+        <QuoteModal
+          rfq={liveEntry.rfq}
+          taskId={liveEntry.task.id}
+          startAtPayment={liveEntry.pay}
+          onClose={() => setOpenEntry(null)}
+        />
       )}
     </div>
   );

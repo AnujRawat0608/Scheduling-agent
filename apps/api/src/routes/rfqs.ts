@@ -147,7 +147,7 @@ rfqRouter.post("/", async (req, res) => {
           currency: rfq.currency,
           lineItems: (rfq.lineItems as { productName: string; specification?: string | null; unit?: string | null; quantity: number }[]) ?? [],
         });
-        await sendMailBounded({ to: supplier.email, subject, html, text })
+        await sendMailBounded({ to: supplier.email, subject, html, text });
       } catch (mailErr) {
         // The RFQ is already saved and will still show up in-app even if
         // the email fails to send — don't fail the whole request over it.
@@ -264,6 +264,13 @@ rfqRouter.post("/me/:id/quote", requireSupplierAuth, async (req, res) => {
       return res.status(404).json({ error: "RFQ not found" });
     }
 
+    // Once the buyer has accepted, an order exists and the quote is final.
+    if (rfq.status === "accepted") {
+      return res.status(409).json({
+        error: "The buyer has already accepted this quote, so it can no longer be changed.",
+      });
+    }
+
     const body = req.body ?? {};
     if (!Array.isArray(body.lineItemQuotes) || body.lineItemQuotes.length === 0) {
       return res.status(400).json({ error: "lineItemQuotes is required and must be non-empty" });
@@ -287,25 +294,36 @@ rfqRouter.post("/me/:id/quote", requireSupplierAuth, async (req, res) => {
     if (!validUntil.valid) {
       return res.status(400).json({ error: "validUntil is not a valid date" });
     }
-      // RFQs raised by the procurement agent carry a fixed unit price and currency. The form locks the
-// field, but the server decides.
-const rfqLines = (Array.isArray(rfq.lineItems) ? rfq.lineItems : []) as RfqLine[];
-const priceLocked = rfqLines.length > 0 && rfqLines.every((li) => typeof li.unitPrice === "number");
-let lineItemQuotes = body.lineItemQuotes as { lineTotal?: number }[];
-if (priceLocked) {
-  if (lineItemQuotes.length !== rfqLines.length) {
-    return res.status(400).json({ error: "Your quote must include every line item of this RFQ" });
-  }
-  lineItemQuotes = lineItemQuotes.map((li, i) => ({
-    ...li,
-    unitPrice: rfqLines[i].unitPrice,
-    lineTotal: round2((rfqLines[i].unitPrice as number) * (rfqLines[i].quantity ?? 0)),
-  }));
-}
 
-    const totalPrice = body.lineItemQuotes.reduce(
-      (sum: number, li: { lineTotal?: number }) => sum + (li.lineTotal ?? 0),
-      0
+    // RFQs raised by the procurement agent carry a fixed unit price. The form locks the field,
+    // but the server decides: whatever the supplier sends for price, quantity, product or
+    // currency is replaced with the RFQ's own values.
+    const rfqLines = (Array.isArray(rfq.lineItems) ? rfq.lineItems : []) as RfqLine[];
+    const priceLocked = rfqLines.length > 0 && rfqLines.every((li) => typeof li.unitPrice === "number");
+
+    let lineItemQuotes = body.lineItemQuotes as (RfqLine & { lineTotal?: number })[];
+    if (priceLocked) {
+      if (lineItemQuotes.length !== rfqLines.length) {
+        return res.status(400).json({ error: "Your quote must include every line item of this RFQ" });
+      }
+      lineItemQuotes = lineItemQuotes.map((li, i) => {
+        const unitPrice = rfqLines[i].unitPrice as number;
+        const quantity = rfqLines[i].quantity ?? 0;
+        return {
+          ...li,
+          productName: rfqLines[i].productName ?? li.productName,
+          quantity,
+          unitPrice,
+          lineTotal: round2(unitPrice * quantity),
+        };
+      });
+    }
+
+    // The fixed price is in the RFQ's currency, so a locked quote can never use another one.
+    const currency = priceLocked ? (rfq.currency ?? null) : (body.currency ?? rfq.currency ?? null);
+
+    const totalPrice = round2(
+      lineItemQuotes.reduce((sum: number, li: { lineTotal?: number }) => sum + (li.lineTotal ?? 0), 0)
     );
 
     // Insert the new quote FIRST, then remove older ones. If anything fails in between,
@@ -315,13 +333,13 @@ if (priceLocked) {
       .values({
         rfqId: rfq.id,
         supplierId: req.supplier!.supplierId,
-        currency: body.currency ?? rfq.currency ?? null,
+        currency,
         totalPrice: totalPrice || null,
         leadTimeDays: body.leadTimeDays ?? null,
         validUntil: validUntil.value,
         paymentTerms: body.paymentTerms ?? null,
         notes: body.notes ?? null,
-        lineItemQuotes: body.lineItemQuotes,
+        lineItemQuotes,
       })
       .returning();
 
@@ -354,12 +372,6 @@ rfqRouter.get("/:id", async (req, res) => {
       return res.status(404).json({ error: "RFQ not found" });
     }
 
-        if (rfq.status === "accepted") {
-      return res.status(409).json({
-        error: "The buyer has already accepted this quote, so it can no longer be changed.",
-      });
-    }
-    
     const [supplier] = await db
       .select({ id: suppliers.id, businessName: suppliers.businessName, contactName: suppliers.contactName })
       .from(suppliers)

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, ChevronDown, ChevronUp, FileText, Search } from "lucide-react";
+import { ArrowRight, CheckCircle2, ChevronDown, ChevronUp, FileText, Lock, Search } from "lucide-react";
 import { formatMoney } from "../lib/format";
 import { authHeaders } from "../lib/supplierAuthApi";
 
@@ -13,6 +13,9 @@ interface RfqLineItem {
   specification?: string | null;
   unit?: string | null;
   quantity: number;
+  /** Set on RFQs raised by the procurement agent: the supplier's advertised price, fixed for the quote. */
+  unitPrice?: number | null;
+  leadTimeDays?: number | null;
 }
 
 interface Rfq {
@@ -20,7 +23,7 @@ interface Rfq {
   referenceNumber: string;
   requesterName: string;
   requesterEmail: string;
-  status: string; // "sent" | "quoted"
+  status: string; // "sent" | "quoted" | "accepted"
   currency: string | null;
   dueDate: string | null;
   requiredDeliveryDate: string | null;
@@ -36,6 +39,10 @@ type TabKey = "awaiting" | "quoted" | "overdue" | "all";
 
 const inputClass =
   "w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-[#3d6bff] focus:bg-white focus:ring-2 focus:ring-[#3d6bff]/15";
+
+/** Look of a field the supplier can read but not change. */
+const lockedClass =
+  "cursor-not-allowed bg-slate-100 text-slate-600 hover:border-slate-200 focus:border-slate-200 focus:bg-slate-100 focus:ring-0";
 
 /** The supplier is identified by their bearer token, same as the rest of the dashboard. */
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -64,9 +71,9 @@ function formatDate(value: string | null | undefined): string {
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-/** quoted → "quoted"; not quoted and reply-by date before today → "overdue"; otherwise "awaiting". */
+/** quoted or accepted → "quoted"; not quoted and reply-by date before today → "overdue"; otherwise "awaiting". */
 function getState(rfq: Rfq): RfqState {
-  if (rfq.status === "quoted") return "quoted";
+  if (rfq.status === "quoted" || rfq.status === "accepted") return "quoted";
   if (rfq.dueDate) {
     const due = new Date(rfq.dueDate);
     const today = new Date();
@@ -97,19 +104,57 @@ const STATE_BADGE: Record<RfqState, { label: string; className: string }> = {
   quoted: { label: "Quoted", className: "bg-emerald-50 text-emerald-700" },
 };
 
+/** The lead time the supplier advertised, so the form can start from it (they only confirm it). */
+function advertisedLeadTime(rfq: Rfq): number | null {
+  const fromLines = rfq.lineItems
+    .map((li) => li.leadTimeDays)
+    .filter((d): d is number => typeof d === "number" && d >= 0);
+  if (fromLines.length > 0) return Math.max(...fromLines);
+  // RFQs raised by the agent mention it in the notes: "Your listed lead time is 2 days."
+  const m = /lead time is (\d+) days?/i.exec(rfq.notes ?? "");
+  return m ? Number(m[1]) : null;
+}
+
 /* -------------------------------------------------------------------------- */
 /*  Quote form                                                                */
 /* -------------------------------------------------------------------------- */
 
 function QuoteForm({ rfq, onSent }: { rfq: Rfq; onSent: () => void }) {
+  // Agent-raised RFQs carry the supplier's advertised price on every line. Those prices are fixed:
+  // the form shows them read-only, and the server ignores any other value.
+  const priceLocked = rfq.lineItems.length > 0 && rfq.lineItems.every((li) => typeof li.unitPrice === "number");
+  // The advertised lead time is fixed too, when the RFQ tells us what it was.
+  const leadLocked = priceLocked && advertisedLeadTime(rfq) !== null;
+
   const [currency, setCurrency] = useState(rfq.currency ?? "INR");
-  const [prices, setPrices] = useState<string[]>(() => rfq.lineItems.map(() => ""));
-  const [leadTime, setLeadTime] = useState("");
+  const [prices, setPrices] = useState<string[]>(() =>
+    rfq.lineItems.map((li) => (priceLocked && typeof li.unitPrice === "number" ? String(li.unitPrice) : ""))
+  );
+  const [leadTime, setLeadTime] = useState(() => {
+    const d = advertisedLeadTime(rfq);
+    return d === null ? "" : String(d);
+  });
   const [validUntil, setValidUntil] = useState("");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
+
+  // The buyer has accepted: an order exists and the quote can no longer change.
+  if (rfq.status === "accepted") {
+    return (
+      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+        <p className="flex items-center gap-1.5 font-semibold">
+          <CheckCircle2 size={15} />
+          Quote accepted
+        </p>
+        <p className="mt-1 text-emerald-700">
+          The buyer accepted your quote and placed an order, so it can no longer be changed. You can manage the
+          order from your dashboard.
+        </p>
+      </div>
+    );
+  }
 
   const lineTotals = rfq.lineItems.map((li, i) => {
     const p = Number(prices[i]);
@@ -175,17 +220,36 @@ function QuoteForm({ rfq, onSent }: { rfq: Rfq; onSent: () => void }) {
                 {li.quantity} {li.unit ?? "units"}
               </p>
             </div>
-            <input
-              type="number"
-              min="0"
-              step="any"
-              inputMode="decimal"
-              value={prices[i]}
-              onChange={(e) => setPrices((prev) => prev.map((p, j) => (j === i ? e.target.value : p)))}
-              placeholder="Unit price"
-              aria-label={`Unit price for ${li.productName}`}
-              className={inputClass}
-            />
+
+            {priceLocked ? (
+              <div className="relative">
+                <Lock
+                  size={12}
+                  aria-hidden
+                  className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+                <input
+                  readOnly
+                  value={prices[i]}
+                  title="Fixed at the price you listed"
+                  aria-label={`Unit price for ${li.productName} (fixed)`}
+                  className={`${inputClass} ${lockedClass} pl-7 tabular-nums`}
+                />
+              </div>
+            ) : (
+              <input
+                type="number"
+                min="0"
+                step="any"
+                inputMode="decimal"
+                value={prices[i]}
+                onChange={(e) => setPrices((prev) => prev.map((p, j) => (j === i ? e.target.value : p)))}
+                placeholder="Unit price"
+                aria-label={`Unit price for ${li.productName}`}
+                className={inputClass}
+              />
+            )}
+
             <p className="text-right text-sm tabular-nums text-slate-700">
               {lineTotals[i] > 0 ? formatMoney(lineTotals[i], currency) : "—"}
             </p>
@@ -193,14 +257,26 @@ function QuoteForm({ rfq, onSent }: { rfq: Rfq; onSent: () => void }) {
         ))}
       </div>
 
+      {priceLocked && (
+        <p className="flex items-start gap-1.5 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+          <Lock size={12} className="mt-0.5 shrink-0 text-slate-400" />
+          <span>
+            Unit price and lead time are fixed at the values on your product listing, as agreed when the buyer
+            placed the request. If you can&apos;t supply on these terms, explain it in the notes instead of
+            changing them.
+          </span>
+        </p>
+      )}
+
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <label className="block space-y-1">
           <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Currency</span>
           <input
             value={currency}
             maxLength={3}
+            readOnly={priceLocked}
             onChange={(e) => setCurrency(e.target.value.toUpperCase())}
-            className={inputClass}
+            className={`${inputClass} ${priceLocked ? lockedClass : ""}`}
           />
         </label>
         <label className="block space-y-1">
@@ -211,8 +287,10 @@ function QuoteForm({ rfq, onSent }: { rfq: Rfq; onSent: () => void }) {
             type="number"
             min="0"
             value={leadTime}
+            readOnly={leadLocked}
             onChange={(e) => setLeadTime(e.target.value)}
-            className={inputClass}
+            title={leadLocked ? "Fixed at your listed lead time" : undefined}
+            className={`${inputClass} ${leadLocked ? lockedClass : ""}`}
           />
         </label>
         <label className="block space-y-1">
