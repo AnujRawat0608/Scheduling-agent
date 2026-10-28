@@ -10,7 +10,7 @@ export interface RegisterSupplierInput {
   email: string;
   password: string;
   businessName: string;
-  region: string;
+  country: string;
   contactName?: string;
   phone?: string;
   gstNumber?: string;

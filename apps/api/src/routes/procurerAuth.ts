@@ -3,6 +3,7 @@ import rateLimit from "express-rate-limit";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { procurers } from "../db/procurersSchema.js";
+import { isValidCountry } from "../lib/countries.js";
 import {
   hashPassword,
   verifyPassword,
@@ -15,7 +16,21 @@ export const procurerAuthRouter = Router();
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const isUniqueViolation = (e: any) => e?.code === "23505" || e?.cause?.code === "23505";
-const publicProcurer = (p: typeof procurers.$inferSelect) => ({ id: p.id, email: p.email });
+
+// Never includes passwordHash.
+const publicProcurer = (p: typeof procurers.$inferSelect) => ({
+  id: p.id,
+  email: p.email,
+  companyName: p.companyName,
+  country: p.country,
+  contactName: p.contactName,
+  phone: p.phone,
+  gstNumber: p.gstNumber,
+  address: p.address,
+  city: p.city,
+  state: p.state,
+  pincode: p.pincode,
+});
 
 // 20 attempts per IP per 15 minutes on register and login.
 const authLimiter = rateLimit({
@@ -32,6 +47,19 @@ function readCredentials(body: any) {
   return { email, password };
 }
 
+/** Trimmed text capped at `max` characters, or null when empty / not a string. */
+function optionalText(value: unknown, max = 200): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, max) : null;
+}
+
+/**
+ * POST /api/procurer-auth/register
+ * `country` is required and must be one of the names in lib/countries.ts. It is the buyer's
+ * DELIVERY DESTINATION for the route risk check. Company details are saved too (the earlier
+ * version of this route only stored email and password).
+ */
 procurerAuthRouter.post("/register", authLimiter, async (req, res) => {
   try {
     const { email, password } = readCredentials(req.body);
@@ -42,9 +70,31 @@ procurerAuthRouter.post("/register", authLimiter, async (req, res) => {
       return res.status(400).json({ error: "Password must be 8 to 72 characters" });
     }
 
+    const companyName = optionalText(req.body?.companyName);
+    if (!companyName) {
+      return res.status(400).json({ error: "Company name is required" });
+    }
+
+    const country = req.body?.country;
+    if (!isValidCountry(country)) {
+      return res.status(400).json({ error: "Please select a valid country." });
+    }
+
     const [procurer] = await db
       .insert(procurers)
-      .values({ email, passwordHash: await hashPassword(password) })
+      .values({
+        email,
+        passwordHash: await hashPassword(password),
+        companyName,
+        country,
+        contactName: optionalText(req.body?.contactName),
+        phone: optionalText(req.body?.phone, 40),
+        gstNumber: optionalText(req.body?.gstNumber, 40),
+        address: optionalText(req.body?.address, 300),
+        city: optionalText(req.body?.city, 100),
+        state: optionalText(req.body?.state, 100),
+        pincode: optionalText(req.body?.pincode, 20),
+      })
       .returning();
 
     res.status(201).json({
@@ -95,4 +145,30 @@ procurerAuthRouter.get("/me", requireProcurerAuth, async (req, res) => {
     .limit(1);
   if (!procurer) return res.status(401).json({ error: "Session no longer valid" });
   res.json({ procurer: publicProcurer(procurer) });
+});
+
+/**
+ * PATCH /api/procurer-auth/me
+ * Lets an existing buyer (registered before country was collected) set or change their
+ * country. Only `country` can be changed here.
+ */
+procurerAuthRouter.patch("/me", requireProcurerAuth, async (req, res) => {
+  try {
+    const country = req.body?.country;
+    if (!isValidCountry(country)) {
+      return res.status(400).json({ error: "Please select a valid country." });
+    }
+
+    const [procurer] = await db
+      .update(procurers)
+      .set({ country })
+      .where(eq(procurers.id, req.procurer!.procurerId))
+      .returning();
+
+    if (!procurer) return res.status(401).json({ error: "Session no longer valid" });
+    res.json({ procurer: publicProcurer(procurer) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong. Please try again." });
+  }
 });

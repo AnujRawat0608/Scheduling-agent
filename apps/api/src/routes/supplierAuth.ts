@@ -2,6 +2,7 @@ import { Router } from "express";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { suppliers } from "../db/suppliersSchema.js";
+import { isValidCountry } from "../lib/countries.js";
 
 import {
   hashPassword,
@@ -24,6 +25,9 @@ function publicSupplier(row: typeof suppliers.$inferSelect) {
  * in immediately by returning a bearer token. Product listings are added
  * separately from the supply chain catalog page after registration — not
  * part of this flow.
+ *
+ * `country` is required and must be one of the names in lib/countries.ts.
+ * It is the supplier's ORIGIN country for the route risk check.
  */
 supplierAuthRouter.post("/register", async (req, res) => {
   try {
@@ -31,7 +35,7 @@ supplierAuthRouter.post("/register", async (req, res) => {
       email,
       password,
       businessName,
-      region,
+      country,
       contactName,
       phone,
       gstNumber,
@@ -46,6 +50,9 @@ supplierAuthRouter.post("/register", async (req, res) => {
     }
     if (typeof password !== "string" || password.length < 8) {
       return res.status(400).json({ error: "Password must be at least 8 characters" });
+    }
+    if (!isValidCountry(country)) {
+      return res.status(400).json({ error: "Please select a valid country." });
     }
 
     const [existing] = await db
@@ -66,6 +73,7 @@ supplierAuthRouter.post("/register", async (req, res) => {
         email,
         passwordHash,
         businessName,
+        country,
         contactName: contactName ?? null,
         phone: phone ?? null,
         gstNumber: gstNumber ?? null,
@@ -73,7 +81,6 @@ supplierAuthRouter.post("/register", async (req, res) => {
         city: city ?? null,
         state: state ?? null,
         pincode: pincode ?? null,
-        region: region ?? null,
       })
       .returning();
 

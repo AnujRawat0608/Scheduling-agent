@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   ArrowRight,
 } from "lucide-react";
+import { COUNTRIES } from "../../../lib/countries";
 import { registerProcurer } from "../../../lib/procurerAuthApi";
 
 const inputClass =
@@ -107,7 +108,8 @@ export default function ProcurerRegisterPage() {
   // Company details
   const [companyName, setCompanyName] = useState("");
   const [contactName, setContactName] = useState("");
-  const [region, setRegion] = useState("");
+  // The buyer's country is the delivery destination for route risk checks.
+  const [country, setCountry] = useState("");
   const [phone, setPhone] = useState("");
   const [gstNumber, setGstNumber] = useState("");
   const [address, setAddress] = useState("");
@@ -131,6 +133,10 @@ export default function ProcurerRegisterPage() {
       setFormError("Passwords don't match.");
       return;
     }
+    if (!country) {
+      setFormError("Please select your country.");
+      return;
+    }
 
     setIsSubmitting(true);
     try {
@@ -138,7 +144,7 @@ export default function ProcurerRegisterPage() {
         email,
         password,
         companyName,
-        region,
+        country,
         contactName: contactName || undefined,
         phone: phone || undefined,
         gstNumber: gstNumber || undefined,
@@ -286,14 +292,21 @@ export default function ProcurerRegisterPage() {
                       className={inputClass}
                     />
                   </Field>
-                  <Field label="Region">
-                    <input
+                  <Field label="Country (where you receive goods)">
+                    <select
                       required
-                      value={region}
-                      onChange={(e) => setRegion(e.target.value)}
-                      placeholder="Asia-Pacific"
-                      className={inputClass}
-                    />
+                      autoComplete="off"
+                      value={country}
+                      onChange={(e) => setCountry(e.target.value)}
+                      className={`${inputClass} cursor-pointer ${country ? "" : "text-neutral-400"}`}
+                    >
+                      <option value="">Select country</option>
+                      {COUNTRIES.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
                   </Field>
                   <Field label="Contact person" optional>
                     <input

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { formatMoney } from "../../../lib/format";
 import { useFxRates, useDisplayCurrency, convertAmount, DISPLAY_CURRENCIES } from "../../../lib/fxApi";
-import { hasProcurerToken } from "../../../lib/procurerAuthApi";
+import { hasProcurerToken, fetchCurrentProcurer, updateProcurerCountry } from "../../../lib/procurerAuthApi";
 import { parseBomFile, bomToPromptText } from "../../../lib/bomParser";
 import { GlobalRiskOverview } from "../../../components/GlobalRiskOverview";
 import { RiskAssessmentBadge } from "../../../components/RiskAssessmentBadge";
@@ -152,27 +152,23 @@ export default function NewProcurementPage() {
   const [useRiskAnalysis, setUseRiskAnalysis] = useState(false);
   const [priority, setPriority] = useState<Priority>("balanced");
   const [scope, setScope] = useState<SearchScope>("registered");
-
-  // Where the goods are delivered. Used with each supplier's country for the route risk check.
-  const [destinationCountry, setDestinationCountry] = useState("India");
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem("procurement.destinationCountry");
-      if (saved) setDestinationCountry(saved);
-    } catch {
-      /* storage unavailable: keep the default */
-    }
-  }, []);
-  function chooseDestination(value: string) {
-    setDestinationCountry(value);
-    try {
-      localStorage.setItem("procurement.destinationCountry", value);
-    } catch {
-      /* ignore */
-    }
-  }
-
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // The buyer's own account. Their country is the delivery destination for route risk
+  // analysis, so there is no per-request country picker and no default country.
+  const { data: buyer, isLoading: isLoadingBuyer } = useQuery({
+    queryKey: ["procurer-me"],
+    queryFn: fetchCurrentProcurer,
+    enabled: useRiskAnalysis,
+  });
+
+  // Only shown when the buyer registered before country was collected.
+  const saveCountry = useMutation({
+    mutationFn: updateProcurerCountry,
+    onSuccess: (procurer) => qc.setQueryData(["procurer-me"], procurer),
+  });
+
+  const buyerCountry = buyer?.country?.trim() || "";
 
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
 
@@ -286,8 +282,13 @@ export default function NewProcurementPage() {
     reader.readAsText(file);
   }
 
+  // Risk analysis needs the buyer's country, so sending is blocked until it is on their account.
+  const needsCountry = useRiskAnalysis && !isLoadingBuyer && !buyerCountry;
+
   const canSubmit =
-    (mode === "bom" ? Boolean(attachedFile) : Boolean(text.trim())) && !text.includes("[Date]");
+    (mode === "bom" ? Boolean(attachedFile) : Boolean(text.trim())) &&
+    !text.includes("[Date]") &&
+    !(useRiskAnalysis && (isLoadingBuyer || !buyerCountry));
 
   function handleSubmit() {
     if (!canSubmit || create.isPending) return;
@@ -298,11 +299,10 @@ export default function NewProcurementPage() {
 
     if (!requestText) return;
 
-    // No requester email here: the server reads it from the buyer's login token.
+    // No requester email or country here: the server reads both from the buyer's account.
     create.mutate({
       text: requestText,
       useRiskAnalysis,
-      destinationCountry: useRiskAnalysis ? destinationCountry : undefined,
       priority,
       sourceMode: scope,
     });
@@ -416,17 +416,49 @@ export default function NewProcurementPage() {
 
           {useRiskAnalysis && (
             <>
-              <SelectField label="Deliver to" value={destinationCountry} onChange={chooseDestination}>
-                {COUNTRIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </SelectField>
+              {isLoadingBuyer && <span className="text-[11px] text-neutral-400">Loading your profile…</span>}
+
+              {/* Destination = the country on the buyer's own account. */}
+              {buyerCountry && (
+                <span className="text-xs text-neutral-600">
+                  Delivering to <span className="font-medium text-neutral-900">{buyerCountry}</span>{" "}
+                  <span className="text-neutral-400">(from your profile)</span>
+                </span>
+              )}
+
+              {/* Only for buyers who registered before country was collected. */}
+              {needsCountry && (
+                <SelectField
+                  label="Your country"
+                  value=""
+                  onChange={(v) => {
+                    if (v) saveCountry.mutate(v);
+                  }}
+                >
+                  <option value="">Select country</option>
+                  {COUNTRIES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </SelectField>
+              )}
+
               <span className="w-full text-[11px] text-neutral-400">
                 Based on public news from the last ~72 hours. May be incomplete. Shipments within the same country
                 are not analysed.
               </span>
+
+              {needsCountry && (
+                <span className="w-full text-[11px] text-amber-700">
+                  {saveCountry.isPending
+                    ? "Saving your country…"
+                    : "Add your country to use route risk analysis. It is saved to your profile and used as the delivery destination."}
+                </span>
+              )}
+              {saveCountry.isError && (
+                <span className="w-full text-[11px] text-red-600">{(saveCountry.error as Error).message}</span>
+              )}
             </>
           )}
 
@@ -601,7 +633,7 @@ export default function NewProcurementPage() {
             <RiskAssessmentBadge
               riskCheckStatus={state.riskCheckStatus}
               riskAssessment={state.riskAssessment as Record<string, RiskAssessment> | null}
-              destinationCountry={state.request?.destinationCountry ?? destinationCountry}
+              destinationCountry={state.request?.destinationCountry ?? buyerCountry}
             />
           )}
 

@@ -5,6 +5,7 @@ import { buildProcurementGraph, extractProcurementRequest } from "../procurement
 import { webSourcingAvailable } from "../procurement/lib/webSourcing/index.js";
 import { db } from "../db/client.js";
 import { procurementTasks } from "../db/procurementSchema.js";
+import { procurers } from "../db/procurersSchema.js";
 import { eq, desc, and } from "drizzle-orm";
 import type { ProcurementRequest } from "../procurement/state.js";
 import { requireProcurerAuth } from "../agent/lib/procurerAuth.js";
@@ -48,6 +49,8 @@ procurementRouter.get("/procurement", async (_req, res) => {
 
 procurementRouter.post("/procurement", requireProcurerAuth, async (req, res) => {
   try {
+    // NOTE: a destinationCountry in the body is deliberately ignored. The destination is
+    // always the logged-in buyer's own country, read from their account below.
     const { text, useRiskAnalysis, priority, sourceMode } = req.body as {
       text: string;
       useRiskAnalysis?: boolean;
@@ -87,6 +90,19 @@ procurementRouter.post("/procurement", requireProcurerAuth, async (req, res) => 
 
     const safePriority = PRIORITIES.find((p) => p === priority) ?? "balanced";
 
+    // Destination for the route risk check = the buyer's country from their account.
+    // Only looked up when risk analysis was requested. A buyer with no country on file
+    // still gets their request; the risk step then reports "country is missing".
+    let destinationCountry: string | undefined;
+    if (useRiskAnalysis === true) {
+      const [buyer] = await db
+        .select({ country: procurers.country })
+        .from(procurers)
+        .where(eq(procurers.id, req.procurer!.procurerId))
+        .limit(1);
+      destinationCountry = buyer?.country?.trim() || undefined;
+    }
+
     const request: ProcurementRequest = {
       requesterName,
       requesterEmail,
@@ -98,6 +114,7 @@ procurementRouter.post("/procurement", requireProcurerAuth, async (req, res) => 
       requiredBy: extracted.requiredBy ?? undefined,
       priority: safePriority,
       sourceMode: safeSourceMode,
+      destinationCountry,
     };
 
     const threadId = randomUUID();

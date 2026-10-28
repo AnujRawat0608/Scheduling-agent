@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { COUNTRIES } from "../../../lib/countries";
 import Link from "next/link";
 import {
   Building2,
@@ -116,7 +117,7 @@ export default function SupplierRegisterPage() {
   // Business details
   const [businessName, setBusinessName] = useState("");
   const [contactName, setContactName] = useState("");
-  const [region, setRegion] = useState("");
+  const [country, setCountry] = useState("");
   const [phone, setPhone] = useState("");
   const [gstNumber, setGstNumber] = useState("");
   const [address, setAddress] = useState("");
@@ -140,6 +141,10 @@ export default function SupplierRegisterPage() {
       setFormError("Passwords don't match.");
       return;
     }
+    if (!country) {
+      setFormError("Please select your country.");
+      return;
+    }
 
     setIsSubmitting(true);
     try {
@@ -147,7 +152,7 @@ export default function SupplierRegisterPage() {
         email,
         password,
         businessName,
-        region,
+        country,
         contactName: contactName || undefined,
         phone: phone || undefined,
         gstNumber: gstNumber || undefined,
@@ -289,14 +294,20 @@ export default function SupplierRegisterPage() {
                       className={inputClass}
                     />
                   </Field>
-                  <Field label="Region">
-                    <input
+                  <Field label="Country">
+                    <select
                       required
-                      value={region}
-                      onChange={(e) => setRegion(e.target.value)}
-                      placeholder="Asia-Pacific"
-                      className={inputClass}
-                    />
+                      value={country}
+                      onChange={(e) => setCountry(e.target.value)}
+                      className={`${inputClass} cursor-pointer ${country ? "" : "text-neutral-400"}`}
+                    >
+                      <option value="">Select country</option>
+                      {COUNTRIES.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
                   </Field>
                   <Field label="Contact person" optional>
                     <input

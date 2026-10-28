@@ -4,22 +4,23 @@ const TOKEN_KEY = "procurer_token";
 export interface Procurer {
   id: string;
   email: string;
-  companyName: string;
-  region: string;
-  contactName?: string;
-  phone?: string;
-  gstNumber?: string;
-  address?: string;
-  city?: string;
-  state?: string;
-  pincode?: string;
+  companyName?: string | null;
+  /** Full country name. Used as the delivery destination for route risk analysis. */
+  country?: string | null;
+  contactName?: string | null;
+  phone?: string | null;
+  gstNumber?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  pincode?: string | null;
 }
 
 export interface RegisterProcurerInput {
   email: string;
   password: string;
   companyName: string;
-  region: string;
+  country: string;
   contactName?: string;
   phone?: string;
   gstNumber?: string;
@@ -101,6 +102,17 @@ export async function fetchCurrentProcurer(): Promise<Procurer | null> {
   }
   if (!res.ok) throw new Error("Failed to check session");
   const data = await res.json();
+  return data.procurer;
+}
+
+/** Lets an existing buyer set or change their country (the delivery destination). */
+export async function updateProcurerCountry(country: string): Promise<Procurer> {
+  const res = await fetch(`${API_BASE}/procurer-auth/me`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ country }),
+  });
+  const data = await parseErrorOr<{ procurer: Procurer }>(res, "Couldn't update your country");
   return data.procurer;
 }
 

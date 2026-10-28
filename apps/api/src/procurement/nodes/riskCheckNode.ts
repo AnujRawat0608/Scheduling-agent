@@ -40,9 +40,8 @@ export async function riskCheckNode(state: ProcurementStateType) {
 
   // TEST_DESTINATION_COUNTRY is a temporary testing fallback; remove it once the
   // route sets request.destinationCountry.
-  const destinationCountry =
-    state.request?.destinationCountry?.trim() || process.env.TEST_DESTINATION_COUNTRY?.trim();
-
+     // The buyer's own country, set by POST /procurement from their account.
+   const destinationCountry = state.request?.destinationCountry?.trim();
   if (!destinationCountry) {
     console.warn("[riskCheckNode] no destination country on the request, skipping risk check");
     return { riskCheckStatus: "no_country" as const, riskAssessment: null };
