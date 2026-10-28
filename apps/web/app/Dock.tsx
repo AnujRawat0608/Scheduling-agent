@@ -5,8 +5,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Calendar,
-  ShoppingBag,
   Truck,
+  ShoppingBag,
   Mail,
   Route,
   Boxes,
@@ -31,19 +31,19 @@ const apps: DockApp[] = [
     isActive: (p) => p === "/",
   },
   {
-    id: "catalog",
-    label: "Catalog",
-    icon: <ShoppingBag size={20} strokeWidth={2} />,
-    href: "/catalog",
-    isActive: (p) => !!p?.startsWith("/catalog"),
-  },
-  {
     id: "procurement",
     label: "Procurement",
     icon: <Truck size={20} strokeWidth={2} />,
     href: "/procurement/new",
     isActive: (p) => !!p?.startsWith("/procurement"),
   },
+  {
+    id: "catalog",
+    label: "Catalog",
+    icon: <ShoppingBag size={20} strokeWidth={2} />,
+    href: "/catalog",
+    isActive: (p) => !!p?.startsWith("/catalog"),
+  },  
   {
     id: "supply-chain",
     label: "Supply Chain",

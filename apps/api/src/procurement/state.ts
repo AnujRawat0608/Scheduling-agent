@@ -6,6 +6,7 @@ export interface LineItem {
   specifications?: string;
 }
 
+
 /** Where a quote came from. Undefined is treated as "registered" so existing data keeps working. */
 export type QuoteSource = "registered" | "web" | "catalog";
 
@@ -16,6 +17,7 @@ export interface SupplierQuote {
   supplierName: string;
   supplierId: string | null;
   supplierRegion: string | null;
+  supplierCountry?: string | null; // NEW: full country name, e.g. "China". Used by the route risk check.
   unitPrice: number;          // in the supplier's currency
   currency: string;
   quantityAvailable: number;
@@ -97,12 +99,14 @@ export interface PurchaseConfirmation {
 export interface ProcurementRequest {
   requesterName: string;
   requesterEmail: string;
-  procurerId?: string;      // new
+  procurerId?: string;
   lineItems: LineItem[];
   requiredBy?: string;
   priority?: "balanced" | "cheapest" | "fastest";
   sourceMode?: SourceMode;  // undefined = "registered"
+  destinationCountry?: string; // NEW: buyer's delivery country, set from the form or buyer profile (not parsed from the prompt)
 }
+
 /** Result of creating/sending the RFQ to one supplier after the plan was approved. */
 export interface RfqResult {
   supplierName: string;
@@ -125,6 +129,8 @@ export type ProcurementStatus =
   | "rfq_sent"
   | "done"
   | "failed";
+
+export type RiskCheckStatus = "skipped" | "ok" | "unavailable" | "no_country" | "domestic";
 
 export const ProcurementState = Annotation.Root({
   request: Annotation<ProcurementRequest>(),
@@ -189,7 +195,7 @@ export const ProcurementState = Annotation.Root({
     default: () => null,
   }),
 
-  riskCheckStatus: Annotation<"skipped" | "ok" | "unavailable">({
+  riskCheckStatus: Annotation<RiskCheckStatus>({
     reducer: (_e, u) => u,
     default: () => "skipped",
   }),

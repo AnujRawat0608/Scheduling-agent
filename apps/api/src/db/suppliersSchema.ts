@@ -13,6 +13,7 @@ export const suppliers = pgTable("suppliers", {
   city: text("city"),
   state: text("state"),
   region: text("region"),
+  country: text("country"),
   pincode: text("pincode"),
 
     // --- Verification (KYC) ---

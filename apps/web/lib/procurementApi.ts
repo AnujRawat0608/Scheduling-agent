@@ -49,6 +49,8 @@ export interface SupplierQuote {
   supplierName: string;
   supplierId: string | null;
   supplierRegion: string | null;
+  /** Full country name of the supplier (e.g. "India"). Used to match route risk by lane. */
+  supplierCountry?: string | null;
   /** The product title the supplier actually listed, so the buyer can verify the match. */
   offerItem?: string;
   unitPrice: number;
@@ -145,6 +147,8 @@ export interface ProcurementRequest {
   priority?: Priority;
   /** Which suppliers were searched. Undefined means "registered". */
   sourceMode?: SourceMode;
+  /** Country the goods are delivered to. Only set when route risk analysis was requested. */
+  destinationCountry?: string;
 }
 
 export interface ProcurementTaskSummary {
@@ -156,15 +160,29 @@ export interface ProcurementTaskSummary {
   createdAt: string;
 }
 
+/**
+ * Route risk for one lane. The backend returns one of these per supplier origin country,
+ * so `supplier_region` holds the ORIGIN COUNTRY (e.g. "China") and `destination_region`
+ * the destination country.
+ */
 export interface RiskAssessment {
   supplier_region: string;
   destination_region?: string | null;
-  known_route: boolean;
   overall_status: "green" | "yellow" | "red" | "unknown";
-  chokepoints: Array<{ name: string; status: string | null; score: number | null }>;
-  driving_events: Array<{ headline: string; summary: string | null; severity: number; chokepoint_name: string }>;
   recommendation: string;
+  known_route?: boolean;
+  chokepoints: { name: string; status?: string | null; computed_at?: string | null }[];
+  driving_events?: { headline: string; chokepoint_name?: string; severity?: number }[];
 }
+
+/**
+ * skipped      = checkbox off (or nothing to check)
+ * ok           = at least one lane was assessed
+ * unavailable  = the risk service failed or timed out
+ * no_country   = a supplier or the delivery country is missing
+ * domestic     = every supplier is in the delivery country (no route risk analysis)
+ */
+export type RiskCheckStatus = "skipped" | "ok" | "unavailable" | "no_country" | "domestic";
 
 export interface ProcurementSnapshot {
   task: {
@@ -184,7 +202,8 @@ export interface ProcurementSnapshot {
     purchaseConfirmations: PurchaseConfirmation[];
     status: string;
     failureReason: string | null;
-    riskCheckStatus?: "skipped" | "ok" | "unavailable";
+    riskCheckStatus?: RiskCheckStatus;
+    /** Keyed by supplier origin country, e.g. { China: {...}, Taiwan: {...} }. */
     riskAssessment?: Record<string, RiskAssessment> | null;
   };
   next: string[];
@@ -201,6 +220,8 @@ export async function listProcurementTasks(): Promise<ProcurementTaskSummary[]> 
 export async function createProcurementTask(input: {
   text: string;
   useRiskAnalysis?: boolean;
+  /** Where the goods are delivered. Only used by the route risk check. */
+  destinationCountry?: string;
   priority?: Priority;
   /** Omit or "registered" = current behaviour. "both" / "web" also search the web. */
   sourceMode?: SourceMode;

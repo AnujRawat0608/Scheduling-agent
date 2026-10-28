@@ -1,19 +1,34 @@
 import { checkRouteRisk, RiskAgentUnavailableError } from "../riskAgent/client.js";
 import { persistRiskAssessment } from "../../db/persistRiskAssessment.js";
+import type { RouteRiskResponse } from "../riskAgent/types.js";
 import type { ProcurementStateType } from "../state.js";
 
+
+const norm = (s: string) => s.trim().toLowerCase();
+
 /**
- * Runs after compareQuotes (recommendedPlan is set) and before
- * humanApproval. Never fails the run — a skipped or unavailable check
- * just means no risk badge shows up for this task.
+ * Runs after compareQuotes (recommendedPlan is set) and before humanApproval.
+ * Never fails the run: a skipped or unavailable check just means no risk badge.
  *
- * A plan can have multiple legs (multiple suppliers, potentially
- * different regions), so this checks each leg's region independently
- * and stores the full set of assessments. This is not a scored or
- * weighted risk factor in the recommendation — per the locked
- * requirements, deeper risk-check integration is deferred.
+ * Origin = each supplier's own country (from the quote). Destination = the buyer's
+ * delivery country. Neither is guessed. Domestic lanes (origin == destination) are
+ * not sent to the risk agent, because chokepoint risk doesn't apply within a country.
+ * Assessments are keyed by origin country. Advisory only: no effect on plan ranking.
  */
+
+
 export async function riskCheckNode(state: ProcurementStateType) {
+  console.log("[riskCheckNode] debug", {
+    rawQuote: state.lineItemQuotes?.[0]?.quotes?.[0]?.supplierCountry,
+    scoredQuote: state.lineItemQuotes?.[0]?.scoredQuotes?.[0]?.supplierCountry,
+    planQuote: state.recommendedPlan?.legs?.[0]?.quotes?.[0]?.supplierCountry,
+  });
+
+  if (!state.useRiskAnalysis) {
+    return { riskCheckStatus: "skipped" as const, riskAssessment: null };
+  }
+  // ...rest unchanged
+  
   if (!state.useRiskAnalysis) {
     return { riskCheckStatus: "skipped" as const, riskAssessment: null };
   }
@@ -23,25 +38,79 @@ export async function riskCheckNode(state: ProcurementStateType) {
     return { riskCheckStatus: "skipped" as const, riskAssessment: null };
   }
 
-  // Distinct regions across all legs — no point checking the same region twice.
-  const regions = [...new Set(plan.legs.map((leg) => leg.quotes[0]?.supplierRegion).filter((r): r is string => !!r))];
+  // TEST_DESTINATION_COUNTRY is a temporary testing fallback; remove it once the
+  // route sets request.destinationCountry.
+  const destinationCountry =
+    state.request?.destinationCountry?.trim() || process.env.TEST_DESTINATION_COUNTRY?.trim();
 
-  if (regions.length === 0) {
-    return { riskCheckStatus: "skipped" as const, riskAssessment: null };
+  if (!destinationCountry) {
+    console.warn("[riskCheckNode] no destination country on the request, skipping risk check");
+    return { riskCheckStatus: "no_country" as const, riskAssessment: null };
+  }
+
+  // Distinct supplier countries across all legs: no point checking the same lane twice.
+  const countries = [
+    ...new Set(
+      plan.legs
+        .flatMap((leg) => leg.quotes.map((q) => q.supplierCountry?.trim()))
+        .filter((c): c is string => !!c)
+    ),
+  ];
+
+  if (countries.length === 0) {
+    console.warn("[riskCheckNode] no supplier country on any leg, skipping risk check");
+    return { riskCheckStatus: "no_country" as const, riskAssessment: null };
+  }
+
+  // Domestic lanes need no chokepoint analysis.
+  const internationalCountries = countries.filter((c) => norm(c) !== norm(destinationCountry));
+
+  if (internationalCountries.length === 0) {
+    return { riskCheckStatus: "domestic" as const, riskAssessment: null };
   }
 
   try {
-    const assessments = await Promise.all(
-      regions.map((region) => checkRouteRisk({ supplierRegion: region }))
+    // One failed lane shouldn't throw away the others.
+    const settled = await Promise.allSettled(
+      internationalCountries.map((originCountry) =>
+        checkRouteRisk({
+          originCountry,
+          destinationCountry,
+          orderId: state.taskId ?? undefined,
+        })
+      )
     );
 
-    if (state.taskId) {
-      await Promise.all(assessments.map((a) => persistRiskAssessment(state.taskId!, a, true)));
+    const assessments: Record<string, RouteRiskResponse> = {};
+    settled.forEach((result, i) => {
+      if (result.status === "fulfilled") {
+        assessments[internationalCountries[i]] = result.value;
+      } else {
+        console.warn(
+          `[riskCheckNode] lane ${internationalCountries[i]} -> ${destinationCountry} failed`,
+          result.reason
+        );
+      }
+    });
+
+    if (Object.keys(assessments).length === 0) {
+      const firstFailure = settled.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
+      throw firstFailure?.reason ?? new RiskAgentUnavailableError();
     }
 
-    const riskAssessment = Object.fromEntries(regions.map((region, i) => [region, assessments[i]]));
+    // Persisting is best-effort; a DB hiccup must not fail the procurement run.
+    if (state.taskId) {
+      const results = await Promise.allSettled(
+        Object.values(assessments).map((a) => persistRiskAssessment(state.taskId!, a, true))
+      );
+      for (const r of results) {
+        if (r.status === "rejected") {
+          console.warn("[riskCheckNode] failed to persist risk assessment", r.reason);
+        }
+      }
+    }
 
-    return { riskAssessment, riskCheckStatus: "ok" as const };
+    return { riskAssessment: assessments, riskCheckStatus: "ok" as const };
   } catch (err) {
     if (err instanceof RiskAgentUnavailableError) {
       console.warn("[riskCheckNode] risk agent unavailable, continuing run", err);

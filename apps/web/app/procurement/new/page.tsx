@@ -6,11 +6,13 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { formatMoney } from "../../../lib/format";
 import { useFxRates, useDisplayCurrency, convertAmount, DISPLAY_CURRENCIES } from "../../../lib/fxApi";
 import { hasProcurerToken } from "../../../lib/procurerAuthApi";
+import { parseBomFile, bomToPromptText } from "../../../lib/bomParser";
 import { GlobalRiskOverview } from "../../../components/GlobalRiskOverview";
 import { RiskAssessmentBadge } from "../../../components/RiskAssessmentBadge";
 import { SupplierBadge } from "../../../components/SupplierBadge";
+import { COUNTRIES } from "../../../lib/countries";
 import { findApprovalTarget, buildRfqMailHref } from "../../../lib/procurementSourcing";
-import { Paperclip, ArrowUp, X, ExternalLink, Check, ChevronDown } from "lucide-react";
+import { Paperclip, ArrowUp, X, ExternalLink, Check, ChevronDown, AlertTriangle } from "lucide-react";
 import { AgentActivity } from "../../../components/AgentActivity";
 import { RfqQuoteStatus } from "../../../components/RfqQuoteStatus";
 
@@ -20,6 +22,7 @@ import {
   approveProcurementTask,
   type QuoteScore,
   type FulfillmentPlan,
+  type RiskAssessment,
 } from "../../../lib/procurementApi";
 
 type SourceMode = "plm" | "bom" | "type";
@@ -27,7 +30,7 @@ type Priority = "balanced" | "cheapest" | "fastest";
 // Which suppliers to search. Sent to the backend as `sourceMode`.
 type SearchScope = "registered" | "both" | "web";
 
-const MAX_FILE_BYTES = 200 * 1024; // 200 KB is plenty for a BOM
+const MAX_FILE_BYTES = 200 * 1024; // 200 KB is plenty for a CSV/TXT BOM (Excel files have their own 5 MB limit)
 
 // Builds the example with a real date (14 days out) so "[Date]" never reaches the agent.
 function buildExamplePrompt() {
@@ -80,6 +83,23 @@ function formatDate(value: string): string {
   return Number.isNaN(d.getTime()) ? value : d.toLocaleDateString();
 }
 
+const RISK_STALE_AFTER_HOURS = 24;
+
+/** True when the newest chokepoint reading is older than a day. Stale data is never shown as a warning. */
+function isRiskStale(r?: RiskAssessment | null): boolean {
+  const times = (r?.chokepoints ?? [])
+    .map((c) => (c.computed_at ? new Date(c.computed_at).getTime() : NaN))
+    .filter((t) => !Number.isNaN(t));
+  if (times.length === 0) return false;
+  return (Date.now() - Math.max(...times)) / 36e5 > RISK_STALE_AFTER_HOURS;
+}
+
+/** A route that needs the buyer's attention (elevated or critical, and fresh). Green, unknown and stale are not flagged. */
+function isFlagged(r?: RiskAssessment | null): boolean {
+  if (!r || isRiskStale(r)) return false;
+  return r.overall_status === "red" || r.overall_status === "yellow";
+}
+
 // NOTE: not exported on purpose. A Next.js page file may only export the page itself
 // (plus a few special names), otherwise `next build` fails.
 /** Labelled dropdown with a custom arrow, a consistent height and an orange focus ring. */
@@ -126,11 +146,32 @@ export default function NewProcurementPage() {
 
   const [mode, setMode] = useState<SourceMode>("type");
   const [text, setText] = useState("");
-  const [attachedFile, setAttachedFile] = useState<{ name: string; content: string } | null>(null);
+  // `items` is only set for Excel BOMs (shown in the file chip).
+  const [attachedFile, setAttachedFile] = useState<{ name: string; content: string; items?: number } | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [useRiskAnalysis, setUseRiskAnalysis] = useState(false);
   const [priority, setPriority] = useState<Priority>("balanced");
   const [scope, setScope] = useState<SearchScope>("registered");
+
+  // Where the goods are delivered. Used with each supplier's country for the route risk check.
+  const [destinationCountry, setDestinationCountry] = useState("India");
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("procurement.destinationCountry");
+      if (saved) setDestinationCountry(saved);
+    } catch {
+      /* storage unavailable: keep the default */
+    }
+  }, []);
+  function chooseDestination(value: string) {
+    setDestinationCountry(value);
+    try {
+      localStorage.setItem("procurement.destinationCountry", value);
+    } catch {
+      /* ignore */
+    }
+  }
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
@@ -207,12 +248,26 @@ export default function NewProcurementPage() {
     approve.mutate({ plan, source }, { onError: () => setApprovedPlan(previous) });
   }
 
-  function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
     const input = e.target;
     const file = input.files?.[0];
     if (!file) return;
     setFileError(null);
 
+    // Excel: read the sheet in the browser and turn it into prompt text.
+    if (file.name.toLowerCase().endsWith(".xlsx")) {
+      try {
+        const bom = await parseBomFile(file); // checks type and size (5 MB)
+        setAttachedFile({ name: file.name, content: bomToPromptText(bom), items: bom.totalRows });
+      } catch (err) {
+        setFileError((err as Error).message);
+      } finally {
+        input.value = "";
+      }
+      return;
+    }
+
+    // CSV / TXT
     if (file.size > MAX_FILE_BYTES) {
       setFileError(`File is too large (max ${MAX_FILE_BYTES / 1024} KB).`);
       input.value = "";
@@ -247,6 +302,7 @@ export default function NewProcurementPage() {
     create.mutate({
       text: requestText,
       useRiskAnalysis,
+      destinationCountry: useRiskAnalysis ? destinationCountry : undefined,
       priority,
       sourceMode: scope,
     });
@@ -306,14 +362,31 @@ export default function NewProcurementPage() {
 
   const state = data?.state;
   const task = data?.task;
+
+  /* ---------- route-risk helpers ---------- */
+
+  // Risk is matched by the supplier's country, using the data already fetched for this task.
+  const riskFor = (country?: string | null): RiskAssessment | null => {
+    if (!country) return null;
+    const byCountry = state?.riskAssessment as Record<string, RiskAssessment> | null | undefined;
+    return byCountry?.[country] ?? null;
+  };
+
+  // How many of this request's suppliers ship via an elevated or critical route (shown in the banner).
+  const affectedSuppliers = new Set(
+    (state?.lineItemQuotes ?? [])
+      .flatMap((l) => l.topQuotes)
+      .filter((q) => isFlagged(riskFor(q.supplierCountry)))
+      .map((q) => q.supplierId ?? q.supplierName)
+  ).size;
+
   // Once approved, the task leaves "awaiting_approval" and per-row actions are no longer valid.
   const isLocked = !!state && ["purchasing", "rfq_sent", "done"].includes(state.status);
-  const isProcessing =
-    !!state && ["extracting", "sourcing", "comparing"].includes(state.status);
+  const isProcessing = !!state && ["extracting", "sourcing", "comparing"].includes(state.status);
 
   return (
     <main className="min-h-screen w-full bg-slate-100 px-6 pb-16 pt-8">
-      <GlobalRiskOverview />
+      <GlobalRiskOverview affectedSuppliers={activeTaskId ? affectedSuppliers : undefined} />
 
       <div className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm">
         <div className="mb-5 flex items-start justify-between">
@@ -338,8 +411,24 @@ export default function NewProcurementPage() {
               onChange={(e) => setUseRiskAnalysis(e.target.checked)}
               className="h-4 w-4 cursor-pointer rounded border-neutral-300 accent-[#EA580C] focus:ring-[#EA580C]"
             />
-            Use supply chain risk analysis
+            Use supply chain risk analysis (beta)
           </label>
+
+          {useRiskAnalysis && (
+            <>
+              <SelectField label="Deliver to" value={destinationCountry} onChange={chooseDestination}>
+                {COUNTRIES.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </SelectField>
+              <span className="w-full text-[11px] text-neutral-400">
+                Based on public news from the last ~72 hours. May be incomplete. Shipments within the same country
+                are not analysed.
+              </span>
+            </>
+          )}
 
           <span className="hidden h-5 w-px bg-neutral-200 sm:block" aria-hidden />
 
@@ -384,6 +473,11 @@ export default function NewProcurementPage() {
                 <span className="flex items-center gap-2 text-sm text-neutral-700">
                   <Paperclip size={14} />
                   {attachedFile.name}
+                  {attachedFile.items ? (
+                    <span className="text-xs text-neutral-400">
+                      · {attachedFile.items} {attachedFile.items === 1 ? "item" : "items"}
+                    </span>
+                  ) : null}
                 </span>
                 <button
                   onClick={() => setAttachedFile(null)}
@@ -399,14 +493,14 @@ export default function NewProcurementPage() {
                 className="flex w-full flex-col items-center gap-1 py-3 text-sm text-neutral-500 hover:text-neutral-700"
               >
                 <Paperclip size={18} />
-                Attach a BOM file (.csv or .txt)
+                Attach a BOM file (.xlsx, .csv or .txt)
               </button>
             )}
             {fileError && <p className="mt-2 text-xs text-red-600">{fileError}</p>}
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv,.txt"
+              accept=".xlsx,.csv,.txt"
               onChange={handleFileSelected}
               className="hidden"
             />
@@ -503,19 +597,12 @@ export default function NewProcurementPage() {
             </div>
           )}
 
-          {state?.riskCheckStatus && state.riskAssessment && (
-            <div className="flex flex-wrap gap-2">
-              {Object.entries(state.riskAssessment).map(([region, assessment]) => (
-                <RiskAssessmentBadge
-                  key={region}
-                  riskCheckStatus={state.riskCheckStatus}
-                  riskAssessment={assessment}
-                />
-              ))}
-            </div>
-          )}
-          {state?.riskCheckStatus && !state.riskAssessment && (
-            <RiskAssessmentBadge riskCheckStatus={state.riskCheckStatus} riskAssessment={null} />
+          {state?.riskCheckStatus && (
+            <RiskAssessmentBadge
+              riskCheckStatus={state.riskCheckStatus}
+              riskAssessment={state.riskAssessment as Record<string, RiskAssessment> | null}
+              destinationCountry={state.request?.destinationCountry ?? destinationCountry}
+            />
           )}
 
           {!isResultError && <AgentActivity status={state?.status} state={state} />}
@@ -634,10 +721,8 @@ export default function NewProcurementPage() {
                                 const isViewed = !!q.supplierId && viewed.has(q.supplierId);
 
                                 // Reuses the real risk data already fetched for this task —
-                                // matched by region, not a separate per-row risk system.
-                                const rowRisk = q.supplierRegion
-                                  ? state.riskAssessment?.[q.supplierRegion]
-                                  : null;
+                                // matched by the supplier's country, not a separate per-row risk system.
+                                const rowRisk = riskFor(q.supplierCountry);
 
                                 const approvalTarget = findApprovalTarget(
                                   liq.lineItem.item,
@@ -712,23 +797,37 @@ export default function NewProcurementPage() {
                                         ) : (
                                           <SupplierBadge quote={q} />
                                         )}
-                                        {rowRisk && (
+                                        {/* Only elevated/critical routes are flagged, so problems stand out */}
+                                        {isFlagged(rowRisk) && rowRisk && (
                                           <span
                                             title={rowRisk.recommendation}
                                             className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
                                               rowRisk.overall_status === "red"
                                                 ? "bg-red-100 text-red-700"
-                                                : rowRisk.overall_status === "yellow"
-                                                  ? "bg-yellow-100 text-yellow-700"
-                                                  : rowRisk.overall_status === "green"
-                                                    ? "bg-green-100 text-green-700"
-                                                    : "bg-neutral-100 text-neutral-500"
+                                                : "bg-yellow-100 text-yellow-700"
                                             }`}
                                           >
-                                            {rowRisk.overall_status} route
+                                            <AlertTriangle size={10} />
+                                            {rowRisk.overall_status === "red"
+                                              ? "Critical route risk"
+                                              : "Elevated route risk"}
                                           </span>
                                         )}
                                       </div>
+                                      {isFlagged(rowRisk) && rowRisk && (
+                                        <p
+                                          className={`mt-1 max-w-[220px] text-[10px] font-normal leading-snug ${
+                                            rowRisk.overall_status === "red" ? "text-red-600" : "text-yellow-700"
+                                          }`}
+                                        >
+                                          {rowRisk.recommendation}
+                                          {rowRisk.chokepoints.length > 0 && (
+                                            <span className="block text-neutral-400">
+                                              Via {rowRisk.chokepoints.map((c) => c.name).join(" · ")}
+                                            </span>
+                                          )}
+                                        </p>
+                                      )}
                                     </td>
 
                                     {/* Unit price: always the supplier's own price, plus an approximation */}

@@ -38,6 +38,7 @@ async function sourceOneItem(item: string, quantity: number): Promise<SupplierQu
     .select({
       offer: supplierOffers,
       supplierRegion: suppliers.region,
+      supplierCountry: suppliers.country,
     })
     .from(supplierOffers)
     .leftJoin(suppliers, eq(supplierOffers.supplierId, suppliers.id))
@@ -50,10 +51,11 @@ async function sourceOneItem(item: string, quantity: number): Promise<SupplierQu
   const matches = rows.filter(({ offer }) => !isAccessoryOfOtherProduct(offer.item, item));
 
   if (matches.length > 0) {
-    return matches.map(({ offer, supplierRegion }) => ({
+    return matches.map(({ offer, supplierRegion, supplierCountry }) => ({
       supplierName: offer.supplierName,
       supplierId: offer.supplierId,
       supplierRegion: supplierRegion ?? null,
+      supplierCountry: supplierCountry ?? null,
       offerItem: offer.item, // what the supplier actually listed, so the buyer can verify the match
       unitPrice: Number(offer.unitPrice),
       currency: offer.currency,
@@ -76,6 +78,7 @@ async function sourceOneItem(item: string, quantity: number): Promise<SupplierQu
     ...q,
     supplierId: null,
     supplierRegion: null,
+    supplierCountry: null,
     simulated: true,
   }));
 }
