@@ -19,7 +19,7 @@ const STATUS_LABELS: Record<Status | "stale", string> = {
   stale: "Stale data",
 };
 
-const STALE_AFTER_HOURS = 24;
+const STALE_AFTER_HOURS = 72;
 
 interface RiskAssessmentBadgeProps {
   riskCheckStatus?: "skipped" | "ok" | "unavailable" | "no_country" | "domestic";

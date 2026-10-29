@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useRef, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
+import Link from "next/link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { formatMoney } from "../../../lib/format";
 import { useFxRates, useDisplayCurrency, convertAmount, DISPLAY_CURRENCIES } from "../../../lib/fxApi";
@@ -29,6 +30,15 @@ type SourceMode = "plm" | "bom" | "type";
 type Priority = "balanced" | "cheapest" | "fastest";
 // Which suppliers to search. Sent to the backend as `sourceMode`.
 type SearchScope = "registered" | "both" | "web";
+
+/** What the buyer submitted, kept so it can be shown above the results. */
+type SubmittedRequest = {
+  text: string;
+  priority: Priority;
+  scope: SearchScope;
+  useRisk: boolean;
+  fileName?: string;
+};
 
 const MAX_FILE_BYTES = 200 * 1024; // 200 KB is plenty for a CSV/TXT BOM (Excel files have their own 5 MB limit)
 
@@ -83,7 +93,7 @@ function formatDate(value: string): string {
   return Number.isNaN(d.getTime()) ? value : d.toLocaleDateString();
 }
 
-const RISK_STALE_AFTER_HOURS = 24;
+const RISK_STALE_AFTER_HOURS = 72;
 
 /** True when the newest chokepoint reading is older than a day. Stale data is never shown as a warning. */
 function isRiskStale(r?: RiskAssessment | null): boolean {
@@ -135,9 +145,20 @@ function SelectField({
   );
 }
 
+// useSearchParams() must sit under a Suspense boundary or `next build` fails.
 export default function NewProcurementPage() {
+  return (
+    <Suspense fallback={null}>
+      <NewProcurementInner />
+    </Suspense>
+  );
+}
+
+function NewProcurementInner() {
   const qc = useQueryClient();
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
   // Buyers must be signed in: the server takes their identity from the login token.
   useEffect(() => {
@@ -170,7 +191,27 @@ export default function NewProcurementPage() {
 
   const buyerCountry = buyer?.country?.trim() || "";
 
-  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  // The active request lives in the URL (?task=<id>), so it survives refresh, back and navigation.
+  const activeTaskId = searchParams.get("task");
+
+  // The prompt the buyer sent, shown above the results.
+  const [submitted, setSubmitted] = useState<SubmittedRequest | null>(null);
+
+  // Clear the summary when there is no task; restore it after a refresh or when coming back.
+  useEffect(() => {
+    if (!activeTaskId) {
+      setSubmitted(null);
+      return;
+    }
+    if (submitted) return;
+    try {
+      const raw = sessionStorage.getItem(`procurement-req:${activeTaskId}`);
+      if (raw) setSubmitted(JSON.parse(raw));
+    } catch {
+      /* storage unavailable: the summary just won't be restored */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTaskId]);
 
   // Suppliers whose page the buyer has opened (keyed by supplierId, so reordering is safe)
   const [viewed, setViewed] = useState<Set<string>>(new Set());
@@ -185,8 +226,7 @@ export default function NewProcurementPage() {
 
   const create = useMutation({
     mutationFn: createProcurementTask,
-    onSuccess: (data) => {
-      setActiveTaskId(data.taskId);
+    onSuccess: () => {
       setApprovedPlan(null);
       setViewed(new Set());
       setText("");
@@ -299,13 +339,49 @@ export default function NewProcurementPage() {
 
     if (!requestText) return;
 
-    // No requester email or country here: the server reads both from the buyer's account.
-    create.mutate({
-      text: requestText,
-      useRiskAnalysis,
+    // Snapshot of what is being sent, shown above the results once they arrive.
+    const summary: SubmittedRequest = {
+      text: text.trim(),
       priority,
-      sourceMode: scope,
-    });
+      scope,
+      useRisk: useRiskAnalysis,
+      fileName: attachedFile?.name,
+    };
+
+    // No requester email or country here: the server reads both from the buyer's account.
+    create.mutate(
+      { text: requestText, useRiskAnalysis, priority, sourceMode: scope },
+      {
+        onSuccess: (res) => {
+          setSubmitted(summary);
+          try {
+            sessionStorage.setItem(`procurement-req:${res.taskId}`, JSON.stringify(summary));
+          } catch {
+            /* storage unavailable: the summary just won't survive a refresh */
+          }
+          router.replace(`${pathname}?task=${res.taskId}`, { scroll: false });
+        },
+      }
+    );
+  }
+
+  /** Put the submitted prompt and settings back into the form so the buyer can tweak and re-send. */
+  function handleEdit() {
+    if (!submitted) return;
+    setText(submitted.text);
+    setPriority(submitted.priority);
+    setScope(submitted.scope);
+    setUseRiskAnalysis(submitted.useRisk);
+  }
+
+  /** Clear the form and the results panel. This is the only way (besides sending a new prompt) the results go away. */
+  function handleNewRequest() {
+    setText("");
+    setAttachedFile(null);
+    setSubmitted(null);
+    setApprovedPlan(null);
+    setViewed(new Set());
+    router.replace(pathname, { scroll: false });
   }
 
   /* ---------- display-currency helpers ---------- */
@@ -573,6 +649,37 @@ export default function NewProcurementPage() {
       {/* Results panel — appears once a request has been sent, updates in place */}
       {activeTaskId && (
         <div className="mt-6 space-y-5 rounded-xl border border-neutral-200 bg-white p-5 shadow-sm">
+          {/* The prompt the buyer sent. Stays until they click New request or send a new prompt. */}
+          {submitted && (
+            <div className="flex items-start justify-between gap-4 rounded-lg bg-neutral-50 px-4 py-3">
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">Your request</p>
+                {submitted.text && (
+                  <p className="mt-1 break-words text-sm text-neutral-900">{submitted.text}</p>
+                )}
+                <p className="mt-1 text-[11px] text-neutral-500">
+                  Prioritise: {submitted.priority} · Search: {submitted.scope}
+                  {submitted.useRisk && " · Risk analysis on"}
+                  {submitted.fileName && ` · ${submitted.fileName}`}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-3">
+                <button
+                  onClick={handleEdit}
+                  className="text-[11px] font-medium text-neutral-600 hover:text-neutral-900"
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={handleNewRequest}
+                  className="rounded-md border border-[#EA580C] px-3 py-1 text-[11px] font-medium text-[#EA580C] transition hover:bg-[#EA580C]/10"
+                >
+                  New request
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="flex items-start justify-between">
             <div>
               <h2 className="text-sm font-semibold text-neutral-900">
@@ -923,9 +1030,8 @@ export default function NewProcurementPage() {
                                         {isWeb ? (
                                           <a
                                             href={webRfqHref(liq.lineItem, q)}
-                                            {...(q.contactEmail
-                                              ? {}
-                                              : { target: "_blank", rel: "noopener noreferrer" })}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
                                             className="inline-block whitespace-nowrap rounded-md border border-[#EA580C] px-3 py-1.5 text-[11px] font-medium text-[#EA580C] transition hover:bg-[#EA580C]/10"
                                           >
                                             {q.contactEmail ? "Request quote" : "Open supplier site"}
@@ -957,6 +1063,8 @@ export default function NewProcurementPage() {
                                                 </span>
                                                 <a
                                                   href={buildRfqMailHref(liq.lineItem, q)}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
                                                   className="inline-block whitespace-nowrap rounded-md border border-[#EA580C] px-3 py-1.5 text-[11px] font-medium text-[#EA580C] transition hover:bg-[#EA580C]/10"
                                                 >
                                                   Trigger Auto-RFQ
@@ -987,6 +1095,8 @@ export default function NewProcurementPage() {
                                         ) : (
                                           <a
                                             href={buildRfqMailHref(liq.lineItem, q)}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
                                             className="inline-block whitespace-nowrap rounded-md border border-[#EA580C] px-3 py-1.5 text-[11px] font-medium text-[#EA580C] transition hover:bg-[#EA580C]/10"
                                           >
                                             Trigger Auto-RFQ
@@ -1049,13 +1159,13 @@ export default function NewProcurementPage() {
       <footer className="mt-6 flex items-center justify-center gap-1 text-xs text-neutral-400">
         <span>Sourced against your supply chain catalog</span>
         <span>·</span>
-        <a href="/procurement" className="text-neutral-500 hover:text-neutral-700 hover:underline">
+        <Link href="/procurement" className="text-neutral-500 hover:text-neutral-700 hover:underline">
           View past requests
-        </a>
+        </Link>
         <span>·</span>
-        <a href="/supply-chain" className="text-neutral-500 hover:text-neutral-700 hover:underline">
+        <Link href="/supply-chain" className="text-neutral-500 hover:text-neutral-700 hover:underline">
           Manage suppliers
-        </a>
+        </Link>
       </footer>
     </main>
   );
