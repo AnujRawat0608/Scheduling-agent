@@ -33,11 +33,31 @@ function isPastDate(value: string): boolean {
   return d.getTime() < today.getTime();
 }
 
-procurementRouter.get("/procurement", async (_req, res) => {
+/**
+ * Loads a task only if it belongs to the logged-in buyer. A task that exists but belongs to
+ * someone else is reported exactly like a missing one (null), so ids can't be probed.
+ * A malformed id (not a valid UUID) makes the query throw; callers treat that as "not found".
+ */
+async function loadOwnedTask(
+  taskId: string,
+  buyerEmail: string
+): Promise<typeof procurementTasks.$inferSelect | null> {
+  const [task] = await db
+    .select()
+    .from(procurementTasks)
+    .where(and(eq(procurementTasks.id, taskId), eq(procurementTasks.requesterEmail, buyerEmail)))
+    .limit(1);
+  return task ?? null;
+}
+
+// Every endpoint below requires a logged-in buyer, and only ever returns that buyer's own tasks.
+
+procurementRouter.get("/procurement", requireProcurerAuth, async (req, res) => {
   try {
     const tasks = await db
       .select()
       .from(procurementTasks)
+      .where(eq(procurementTasks.requesterEmail, req.procurer!.email))
       .orderBy(desc(procurementTasks.createdAt))
       .limit(50);
     res.json({ tasks });
@@ -169,14 +189,9 @@ procurementRouter.post("/procurement", requireProcurerAuth, async (req, res) => 
   }
 });
 
-procurementRouter.get("/procurement/:id", async (req, res) => {
+procurementRouter.get("/procurement/:id", requireProcurerAuth, async (req, res) => {
   try {
-    const [task] = await db
-      .select()
-      .from(procurementTasks)
-      .where(eq(procurementTasks.id, req.params.id))
-      .limit(1);
-
+    const task = await loadOwnedTask(req.params.id, req.procurer!.email);
     if (!task) return res.status(404).json({ error: "not found" });
 
     const graph = await graphPromise;
@@ -229,14 +244,15 @@ async function resumeInBackground(task: typeof procurementTasks.$inferSelect, de
   }
 }
 
-procurementRouter.post("/procurement/:id/approve", async (req, res) => {
+procurementRouter.post("/procurement/:id/approve", requireProcurerAuth, async (req, res) => {
   try {
-    const [task] = await db
-      .select()
-      .from(procurementTasks)
-      .where(eq(procurementTasks.id, req.params.id))
-      .limit(1);
-
+    // Only the buyer who created the request can approve or reject it.
+        let task: typeof procurementTasks.$inferSelect | null;
+    try {
+      task = await loadOwnedTask(req.params.id, req.procurer!.email);
+    } catch {
+      task = null; // malformed id
+    }
     if (!task) return res.status(404).json({ error: "not found" });
 
     // Only a task that is waiting for approval can be approved or rejected.

@@ -445,8 +445,8 @@ export default function NewProcurementPage() {
               )}
 
               <span className="w-full text-[11px] text-neutral-400">
-                Based on public news from the last ~72 hours. May be incomplete. Shipments within the same country
-                are not analysed.
+                Based on public news and manually assessed ratings while live data feeds are being connected. May be
+                incomplete. Shipments within the same country are not analysed.
               </span>
 
               {needsCountry && (
