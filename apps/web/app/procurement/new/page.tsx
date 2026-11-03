@@ -21,6 +21,7 @@ import {
   createProcurementTask,
   fetchProcurementTask,
   approveProcurementTask,
+  rejectProcurementTask,
   type QuoteScore,
   type FulfillmentPlan,
   type RiskAssessment,
@@ -30,6 +31,16 @@ type SourceMode = "plm" | "bom" | "type";
 type Priority = "balanced" | "cheapest" | "fastest";
 // Which suppliers to search. Sent to the backend as `sourceMode`.
 type SearchScope = "registered" | "both" | "web";
+
+
+type RejectCategory = "price" | "risk" | "lead_time" | "supplier" | "other";
+const REJECT_REASONS: { value: RejectCategory; label: string }[] = [
+  { value: "price", label: "Price too high" },
+  { value: "risk", label: "Route or supply risk" },
+  { value: "lead_time", label: "Lead time too long" },
+  { value: "supplier", label: "Don't trust this supplier" },
+  { value: "other", label: "Other" },
+];
 
 /** What the buyer submitted, kept so it can be shown above the results. */
 type SubmittedRequest = {
@@ -272,6 +283,23 @@ function NewProcurementInner() {
   const approvingSource: string | null = approve.isPending
     ? (approve.variables?.source ?? null)
     : null;
+
+    const [rejecting, setRejecting] = useState(false);
+const [rejectCategory, setRejectCategory] = useState<RejectCategory>("price");
+const [rejectNote, setRejectNote] = useState("");
+
+const reject = useMutation({
+  mutationFn: () =>
+    rejectProcurementTask(activeTaskId as string, {
+      category: rejectCategory,
+      note: rejectNote.trim(),
+    }),
+  onSuccess: () => {
+    setRejecting(false);
+    setRejectNote("");
+    qc.invalidateQueries({ queryKey: ["procurement", activeTaskId] });
+  },
+});
 
   // Blocks a second approval while one is in flight, without greying out the other buttons.
   function startApprove(plan: number | undefined, source: string) {
@@ -754,20 +782,72 @@ function NewProcurementInner() {
               </h3>
               <PlanCard plan={state.recommendedPlan} show={money} highlight />
 
-              {state.status === "awaiting_approval" && (
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => startApprove(undefined, "recommended")}
-                    disabled={approvingSource === "recommended"}
-                    className="rounded-md bg-[#EA580C] px-4 py-2 text-xs font-medium text-white transition hover:bg-[#EA580C]/90 disabled:opacity-40"
-                  >
-                    {approvingSource === "recommended" ? "Approving…" : "Approve this plan"}
-                  </button>
-                  {approve.isError && (
-                    <span className="text-xs text-red-600">{(approve.error as Error).message}</span>
-                  )}
-                </div>
-              )}
+           {state.status === "awaiting_approval" && (
+  <div className="space-y-3">
+    <div className="flex items-center gap-3">
+      <button
+        onClick={() => startApprove(undefined, "recommended")}
+        disabled={approvingSource === "recommended" || reject.isPending}
+        className="rounded-md bg-[#EA580C] px-4 py-2 text-xs font-medium text-white transition hover:bg-[#EA580C]/90 disabled:opacity-40"
+      >
+        {approvingSource === "recommended" ? "Approving…" : "Approve this plan"}
+      </button>
+      <button
+        onClick={() => setRejecting((r) => !r)}
+        disabled={approve.isPending || reject.isPending}
+        className="rounded-md border border-neutral-300 px-4 py-2 text-xs font-medium text-neutral-700 transition hover:bg-neutral-50 disabled:opacity-40"
+      >
+        Reject
+      </button>
+      {approve.isError && (
+        <span className="text-xs text-red-600">{(approve.error as Error).message}</span>
+      )}
+    </div>
+
+    {rejecting && (
+      <div className="space-y-2.5 rounded-lg border border-neutral-200 bg-neutral-50 p-3.5">
+        <p className="text-xs font-medium text-neutral-800">Why are you rejecting this plan?</p>
+        <SelectField
+          label="Reason"
+          value={rejectCategory}
+          onChange={(v) => setRejectCategory(v as RejectCategory)}
+        >
+          {REJECT_REASONS.map((r) => (
+            <option key={r.value} value={r.value}>
+              {r.label}
+            </option>
+          ))}
+        </SelectField>
+        <input
+          value={rejectNote}
+          onChange={(e) => setRejectNote(e.target.value)}
+          placeholder="Add a note (optional)"
+          aria-label="Rejection note"
+          className="h-8 w-full rounded-lg border border-neutral-200 bg-white px-3 text-xs text-neutral-900 outline-none focus:border-[#EA580C] focus:ring-2 focus:ring-[#EA580C]/20"
+        />
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => reject.mutate()}
+            disabled={reject.isPending}
+            className="rounded-md bg-red-600 px-3 py-1.5 text-[11px] font-medium text-white transition hover:bg-red-700 disabled:opacity-40"
+          >
+            {reject.isPending ? "Rejecting…" : "Confirm reject"}
+          </button>
+          <button
+            onClick={() => setRejecting(false)}
+            disabled={reject.isPending}
+            className="text-[11px] font-medium text-neutral-500 hover:text-neutral-800"
+          >
+            Cancel
+          </button>
+        </div>
+        {reject.isError && (
+          <p className="text-xs text-red-600">{(reject.error as Error).message}</p>
+        )}
+      </div>
+    )}
+  </div>
+)}
 
               {state.alternativePlans && state.alternativePlans.length > 0 && (
                 <details className="rounded-lg border border-neutral-200">
@@ -879,11 +959,14 @@ function NewProcurementInner() {
                                   : null;
 
                                 // Is this row the supplier that was actually approved?
-                                const isApprovedRow =
-                                  approvedPlan !== null
-                                    ? planNumber === approvedPlan
-                                    : !!q.supplierId &&
-                                      !!state.rfqResults?.some((r) => r.supplierId === q.supplierId);
+                               // Is this the exact quote that was approved? Once the order is placed, the approved plan
+// becomes state.recommendedPlan (humanApproval.ts swaps it in), so plan 0 is the approved one.
+// While the order is still being placed, trust the click made in this session.
+const isApprovedRow =
+  planNumber !== null &&
+  (state.status === "purchasing" && approvedPlan !== null
+    ? planNumber === approvedPlan
+    : planNumber === 0);
 
                                 // Small grey line under the total: tax, shipping, and the rate used.
                                 const detailParts: string[] = [];

@@ -15,6 +15,7 @@ const graphPromise = buildProcurementGraph();
 
 const PRIORITIES = ["balanced", "cheapest", "fastest"] as const;
 const SOURCE_MODES = ["registered", "both", "web"] as const;
+const REJECT_CATEGORIES = ["price", "risk", "lead_time", "supplier", "other"] as const;
 const MAX_TEXT_LENGTH = 20_000;
 
 function summarizeItems(lineItems: { item: string }[]): string {
@@ -220,7 +221,7 @@ procurementRouter.get("/procurement/:id", requireProcurerAuth, async (req, res) 
 
 type Decision =
   | { approved: true; selectedPlanIndex?: number }
-  | { approved: false; note: string };
+  | { approved: false; note: string; category?: string };
 
 /** Resumes the graph after the response has been sent. Never throws. */
 async function resumeInBackground(task: typeof procurementTasks.$inferSelect, decision: Decision) {
@@ -270,9 +271,11 @@ procurementRouter.post("/procurement/:id/approve", requireProcurerAuth, async (r
     if (!body.approved) {
       // Rejections are quick, so keep them synchronous as before.
       const decision: Decision = {
-        approved: false,
-        note: typeof body.note === "string" ? body.note.slice(0, 2000) : "",
-      };
+  approved: false,
+  note: typeof body.note === "string" ? body.note.slice(0, 2000) : "",
+  // Only accept known categories; anything else is dropped, not stored.
+  category: REJECT_CATEGORIES.find((c) => c === body.category),
+};
       const result = await graph.invoke(new Command({ resume: decision }), {
         configurable: { thread_id: task.threadId },
       });

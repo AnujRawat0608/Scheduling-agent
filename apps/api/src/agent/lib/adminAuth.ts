@@ -6,6 +6,13 @@ if (!JWT_SECRET) {
   throw new Error("JWT_SECRET environment variable is required");
 }
 
+// Admin tokens may use their own secret. Without ADMIN_JWT_SECRET they fall back to JWT_SECRET,
+// and the tokenType check below still keeps buyer and supplier tokens out of admin routes.
+const ADMIN_SECRET = process.env.ADMIN_JWT_SECRET || JWT_SECRET;
+
+// Marks a token as an admin token. Buyer and supplier tokens never carry it.
+const ADMIN_TOKEN_TYPE = "admin";
+
 type AdminTokenPayload = {
   adminId: string;
   email: string;
@@ -13,12 +20,28 @@ type AdminTokenPayload = {
 };
 
 export function signAdminToken(payload: AdminTokenPayload): string {
-  return jwt.sign(payload, JWT_SECRET as string, { expiresIn: "7d" });
+  return jwt.sign({ ...payload, tokenType: ADMIN_TOKEN_TYPE }, ADMIN_SECRET, {
+    algorithm: "HS256",
+    expiresIn: "1d",
+  });
 }
 
 export function verifyAdminToken(token: string): AdminTokenPayload | null {
   try {
-    return jwt.verify(token, JWT_SECRET as string) as AdminTokenPayload;
+    const p = jwt.verify(token, ADMIN_SECRET, { algorithms: ["HS256"] }) as {
+      adminId?: unknown;
+      email?: unknown;
+      role?: unknown;
+      tokenType?: unknown;
+    };
+    // Any valid token signed with the shared secret is NOT enough: it must be an admin token.
+    if (p.tokenType !== ADMIN_TOKEN_TYPE) return null;
+    if (typeof p.adminId !== "string" || typeof p.email !== "string") return null;
+    return {
+      adminId: p.adminId,
+      email: p.email,
+      role: typeof p.role === "string" ? p.role : "admin",
+    };
   } catch {
     return null;
   }

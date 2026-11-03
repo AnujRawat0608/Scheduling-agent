@@ -4,6 +4,7 @@ import { db } from "../db/client.js";
 import { supplierOrders, supplierOrderItems,suppliers } from "../db/suppliersSchema.js";
 import { supplierOffers } from "../db/supplyChainSchema.js";
 import { requireSupplierAuth } from "../agent/lib/supplierAuth.js";
+import { requireProcurerAuth } from "../agent/lib/procurerAuth.js";
 import { notifyBuyerOrderShipped } from "../lib/orderNotifications.js";
 
 export const supplierOrdersRouter = Router();
@@ -73,6 +74,9 @@ async function attachItems(orders: OrderRow[]) {
  * Buyer-facing: place a direct order against one supplier, with one or more
  * line items (cart checkout).
  *
+ * SECURITY: needs a signed-in buyer. The buyer's email comes from their login token, never
+ * from the request body, so nobody can place an order in someone else's name.
+ *
  * The client only says WHICH products and HOW MANY. Name, price, currency, tax
  * and shipping are all read from the database here, so the browser can never
  * set its own price. Everything is saved as a snapshot, in one transaction.
@@ -80,9 +84,10 @@ async function attachItems(orders: OrderRow[]) {
  * Money maths is done in integer cents (2-decimal currencies only), then
  * stored as numeric(12,2). No platform fee is added.
  */
-supplierOrdersRouter.post("/supplier-orders", async (req, res) => {
+supplierOrdersRouter.post("/supplier-orders", requireProcurerAuth, async (req, res) => {
   try {
-    const { supplierId, items, deliveryAddress, requesterName, requesterEmail, notes } = req.body ?? {};
+    const { supplierId, items, deliveryAddress, requesterName, notes } = req.body ?? {};
+    const buyerEmail = req.procurer!.email;
 
     const nonEmpty = (v: unknown): v is string => typeof v === "string" && v.trim().length > 0;
 
@@ -92,12 +97,11 @@ supplierOrdersRouter.post("/supplier-orders", async (req, res) => {
       !Array.isArray(items) ||
       items.length === 0 ||
       !nonEmpty(deliveryAddress) ||
-      !nonEmpty(requesterName) ||
-      !nonEmpty(requesterEmail)
+      !nonEmpty(requesterName)
     ) {
       throw new HttpError(
         400,
-        "supplierId, a non-empty items array, deliveryAddress, requesterName, and requesterEmail are required"
+        "supplierId, a non-empty items array, deliveryAddress and requesterName are required"
       );
     }
     if (items.length > MAX_ITEMS) {
@@ -197,7 +201,7 @@ supplierOrdersRouter.post("/supplier-orders", async (req, res) => {
           supplierId,
           deliveryAddress: deliveryAddress.trim(),
           requesterName: requesterName.trim(),
-          requesterEmail: requesterEmail.trim(),
+          requesterEmail: buyerEmail,
           notes: typeof notes === "string" && notes.trim() ? notes.trim() : null,
           currency,
           subtotal: (subtotalC / 100).toFixed(2),
@@ -227,18 +231,23 @@ supplierOrdersRouter.post("/supplier-orders", async (req, res) => {
 
 /**
  * GET /api/supplier-orders
- * Billing-facing: all orders, newest first, with their line items.
+ * Billing-facing: the signed-in buyer's own orders, newest first, with their line items.
  *
- * NOTE: still public because the billing page has no login yet. This returns
- * buyer names, emails and addresses, so lock it down before production.
+ * SECURITY: needs a signed-in buyer and only returns orders placed under their email.
  */
-supplierOrdersRouter.get("/supplier-orders", async (_req, res) => {
-  const orders = await db
-    .select()
-    .from(supplierOrders)
-    .orderBy(desc(supplierOrders.createdAt));
+supplierOrdersRouter.get("/supplier-orders", requireProcurerAuth, async (req, res) => {
+  try {
+    const orders = await db
+      .select()
+      .from(supplierOrders)
+      .where(eq(supplierOrders.requesterEmail, req.procurer!.email))
+      .orderBy(desc(supplierOrders.createdAt));
 
-  res.json({ orders: await attachItems(orders) });
+    res.json({ orders: await attachItems(orders) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Could not load orders" });
+  }
 });
 
 /**
@@ -255,34 +264,13 @@ supplierOrdersRouter.get("/supplier-orders/mine", requireSupplierAuth, async (re
   res.json({ orders: await attachItems(orders) });
 });
 
-/**
- * PATCH /api/supplier-orders/:id/confirm
- * Marks an order as confirmed. Only the supplier the order was placed with
- * can confirm it.
+/*
+ * There is deliberately NO "confirm" route here any more.
+ *
+ * An order becomes "confirmed" in exactly one place: POST /api/payments/orders/:orderId/verify,
+ * after the payment has been checked. A separate route that could set "confirmed" without payment
+ * would let anyone skip paying.
  */
-supplierOrdersRouter.patch("/supplier-orders/:id/confirm", async (req, res) => {
-  try {
-    const [order] = await db
-      .update(supplierOrders)
-      .set({ status: "confirmed" })
-      .where(and(eq(supplierOrders.id, req.params.id), eq(supplierOrders.status, "pending")))
-      .returning();
-
-    if (!order) {
-      return res.status(404).json({ error: "Order not found, or it was already confirmed" });
-    }
-
-    const items = await db
-      .select()
-      .from(supplierOrderItems)
-      .where(eq(supplierOrderItems.orderId, order.id));
-
-    res.json({ order: serializeOrder(order, items) });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Could not confirm the order" });
-  }
-});
 
 /**
  * PATCH /api/supplier-orders/:id/ship

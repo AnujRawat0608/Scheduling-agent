@@ -257,10 +257,16 @@ export async function approveProcurementTask(id: string, selectedPlanIndex?: num
   return res.json();
 }
 
-export async function rejectProcurementTask(id: string, note: string) {
+export type RejectCategory = "price" | "risk" | "lead_time" | "supplier" | "other";
+
+
+export async function rejectProcurementTask(
+  id: string,
+  input: { note: string; category?: RejectCategory }
+) {
   const res = await authedFetch(`/procurement/${id}/approve`, {
     method: "POST",
-    body: JSON.stringify({ approved: false, note }),
+    body: JSON.stringify({ approved: false, note: input.note, category: input.category }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

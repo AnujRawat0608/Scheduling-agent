@@ -1,4 +1,5 @@
 import { formatMoney } from "./format";
+import { procurerAuthHeaders, logoutProcurer } from "./procurerAuthApi";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
 
@@ -43,11 +44,24 @@ interface PaymentSession {
 
 /* --------------------------------- helpers --------------------------------- */
 
+/**
+ * Payment calls are buyer-only: they carry the buyer's login token, and a stale login goes back
+ * to the sign-in page. The server also checks the order belongs to this buyer.
+ */
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers: {
+      "Content-Type": "application/json",
+      ...procurerAuthHeaders(),
+      ...(init?.headers ?? {}),
+    },
   });
+  if (res.status === 401 && typeof window !== "undefined") {
+    await logoutProcurer();
+    window.location.href = "/procurement/login";
+    throw new Error("Please sign in to continue.");
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error ?? "Request failed");

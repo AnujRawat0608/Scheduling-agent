@@ -351,7 +351,7 @@ export function QuoteModal({
           </div>
 
           <div className="mt-3 flex items-center justify-between rounded-lg bg-neutral-50 px-3 py-2.5">
-            <span className="text-xs font-medium text-neutral-600">Quote total</span>
+                        <span className="text-xs font-medium text-neutral-600">Goods total (before tax and shipping)</span>
             <span className="text-sm font-semibold">
               {orderTotal == null ? "—" : formatMoney(orderTotal, currency)}
             </span>
@@ -393,8 +393,8 @@ export function QuoteModal({
               </p>
               <p className="mt-1">
                 Order #{shortId(order.id)}
-                {order.total != null ? ` · ${formatMoney(order.total, order.currency)}` : ""}. The supplier is
-                notified once you have paid.
+                                {order.total != null ? ` · ${formatMoney(order.total, order.currency)}` : ""}. Pay to confirm
+                the order.
               </p>
               <button
                 onClick={() => setCheckoutOpen(true)}
@@ -417,7 +417,7 @@ export function QuoteModal({
                 {pay.isSuccess ? ORDER_STATUS_LABEL.confirmed : ORDER_STATUS_LABEL[order.status] ?? order.status}
                 {order.total != null ? ` · ${formatMoney(order.total, order.currency)}` : ""}
               </p>
-              <p className="mt-1 text-green-700">The supplier has been notified about this order.</p>
+                <p className="mt-1 text-green-700">The supplier can now ship this order.</p>
               <Link
                 href={`/billing?highlight=${order.id}`}
                 className="mt-3 inline-block rounded-md border border-green-300 bg-white px-3 py-1.5 text-[11px] font-medium text-green-800 transition hover:bg-green-100"
@@ -439,8 +439,8 @@ export function QuoteModal({
             <div className="mt-5 rounded-lg border border-[#EA580C]/30 bg-[#EA580C]/5 p-3">
               <p className="text-xs font-semibold">Accept this quote and place the order</p>
               <p className="mt-1 text-[11px] text-neutral-600">
-                Order total {orderTotal == null ? "—" : formatMoney(orderTotal, currency)}, based on the
-                supplier&apos;s quote. You&apos;ll pay on the next step.
+                                Goods total {orderTotal == null ? "—" : formatMoney(orderTotal, currency)}. Any tax and shipping
+                from the agreed listing are added, and you&apos;ll see the full total before you pay.
               </p>
 
               <label className="mt-3 block text-[10px] font-semibold uppercase tracking-wider text-neutral-500">

@@ -196,12 +196,12 @@ export function CheckoutDialog({
 
               {/* Totals */}
               <section className="rounded-lg bg-slate-50 p-4 text-sm">
-                <div className="flex justify-between font-semibold text-slate-900">
-                  <span>Subtotal</span>
+                  <div className="flex justify-between font-semibold text-slate-900">
+                  <span>Total to pay</span>
                   <span className="tabular-nums">{formatMoney(subtotal, currency)}</span>
                 </div>
                 <p className="mt-2 text-[11px] text-slate-400">
-                  Tax and shipping are added to your final invoice, which you can download from Billing.
+                  Includes any tax and shipping. You can download the invoice from Billing.
                 </p>
               </section>
 
@@ -223,7 +223,7 @@ export function CheckoutDialog({
               </button>
               <p className="flex items-center justify-center gap-1.5 text-[11px] text-slate-400">
                 <ShieldCheck size={12} />
-                Your order is only placed once payment succeeds.
+                Your order is confirmed once payment succeeds.
               </p>
             </footer>
           </>

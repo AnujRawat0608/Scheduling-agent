@@ -7,7 +7,7 @@ import { buildRfqNotificationEmail } from "../../agent/lib/mailer.js";
 import { sendMailBounded } from "../../agent/lib/mailSafe.js";
 import { getRates } from "./fx.js";
 import { convert, type RateTable } from "./fxMath.js";
-import type { FulfillmentLeg } from "../state.js";
+import type { FulfillmentLeg, QuoteScore } from "../state.js";
 
 /** How many days the supplier is given to send their quote (stored as the RFQ's dueDate). */
 const REPLY_WITHIN_DAYS = Number(process.env.RFQ_REPLY_WITHIN_DAYS ?? 3);
@@ -84,6 +84,9 @@ function convertUnitPrice(unitPrice: number, from: string, to: string, rates: Ra
  * the supplier's own listed price, converted at today's rate. The supplier cannot change it
  * (the quote route enforces that on the server).
  *
+ * Each priced line also carries the tax rate and shipping from the listing the plan was built on,
+ * so that when the buyer accepts the quote the order total matches the plan they approved.
+ *
  * Safe to call twice for the same task + supplier: the unique index on (task_id, supplier_id)
  * guarantees one row, and an existing row is returned without sending anything again.
  */
@@ -148,6 +151,12 @@ export async function createAgentRfq(input: {
     priced = leg.lineItems.map(() => null);
   }
 
+  /** Shipping for one line, in the RFQ currency (same rate as the unit price). */
+  const shippingIn = (q: QuoteScore): number => {
+    if (!rfqCurrency || q.currency === rfqCurrency) return round2(q.shippingCost);
+    return convertUnitPrice(q.shippingCost, q.currency, rfqCurrency, rates)?.unitPrice ?? 0;
+  };
+
   const lineItems = leg.lineItems.map((li, i) => {
     const quote = leg.quotes[i];
     const p = priced[i];
@@ -169,6 +178,10 @@ export async function createAgentRfq(input: {
             listedUnitPrice: round2(quote.unitPrice),
             listedCurrency: quote.currency,
             fxRate: p.fxRate,
+            // Fixed by the server so the accepted order adds up to the approved plan.
+            taxRate: quote.taxRate ?? null,
+            taxInclusive: quote.taxInclusive === true,
+            shippingCost: shippingIn(quote),
           }
         : {}),
     };

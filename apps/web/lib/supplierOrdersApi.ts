@@ -1,4 +1,5 @@
 import { authHeaders } from "./supplierAuthApi";
+import { procurerAuthHeaders, logoutProcurer } from "./procurerAuthApi";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
 
@@ -14,7 +15,8 @@ export interface SupplierOrderInput {
   items: SupplierOrderItemInput[];
   deliveryAddress: string;
   requesterName: string;
-  requesterEmail: string;
+  /** Ignored by the server: the buyer's email always comes from their login. */
+  requesterEmail?: string;
   notes?: string;
 }
 
@@ -51,19 +53,42 @@ async function parseErrorOr<T>(res: Response, fallback: string): Promise<T> {
   return res.json();
 }
 
-/** Buyer places an order. Only productId and quantity matter: the server reads price, currency, tax and shipping itself. */
+/**
+ * fetch() for buyer-only endpoints: attaches the buyer's login token and, if the server says
+ * the buyer isn't signed in (401), clears the stale token and sends them to the login page.
+ */
+async function buyerFetch(path: string, init?: RequestInit): Promise<Response> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...procurerAuthHeaders(),
+      ...(init?.headers ?? {}),
+    },
+  });
+  if (res.status === 401 && typeof window !== "undefined") {
+    await logoutProcurer();
+    window.location.href = "/procurement/login";
+    throw new Error("Please sign in to continue.");
+  }
+  return res;
+}
+
+/**
+ * Signed-in buyer places an order. Only productId and quantity matter: the server reads price,
+ * currency, tax and shipping itself, and takes the buyer's email from their login.
+ */
 export async function createSupplierOrder(input: SupplierOrderInput) {
-  const res = await fetch(`${API_BASE}/supplier-orders`, {
+  const res = await buyerFetch("/supplier-orders", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
   return parseErrorOr<{ order: SupplierOrder }>(res, "Failed to place order");
 }
 
-/** Billing page (buyer view): all orders. Public for now, to be locked down with buyer accounts. */
+/** Billing page: the signed-in buyer's own orders. */
 export async function fetchAllSupplierOrders() {
-  const res = await fetch(`${API_BASE}/supplier-orders`);
+  const res = await buyerFetch("/supplier-orders");
   return parseErrorOr<{ orders: SupplierOrder[] }>(res, "Failed to load orders");
 }
 
@@ -75,14 +100,8 @@ export async function fetchMySupplierOrders() {
   return parseErrorOr<{ orders: SupplierOrder[] }>(res, "Failed to load your orders");
 }
 
-/** Supplier accepts an order. The server only allows this for orders addressed to the logged-in supplier. */
-export async function confirmSupplierOrder(orderId: string) {
-  const res = await fetch(`${API_BASE}/supplier-orders/${orderId}/confirm`, {
-    method: "PATCH",
-    headers: authHeaders(),
-  });
-  return parseErrorOr<{ order: SupplierOrder }>(res, "Failed to confirm order");
-}
+// There is no "confirm" call any more. An order becomes confirmed only after the buyer's payment
+// is verified on the server (see supplierPaymentApi.ts).
 
 /**
  * Supplier starts shipping a confirmed order. The server marks it shipped and emails the

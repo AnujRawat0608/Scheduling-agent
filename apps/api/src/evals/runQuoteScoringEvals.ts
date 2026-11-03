@@ -99,16 +99,25 @@ export function runQuoteScoringEvals() {
     check("tax-changes-ranking", scored[0].supplierName === "TaxFree", `top was ${scored[0].supplierName}`);
   }
 
-  // 6. A valid quote that is worst on price AND lead time scores exactly 0.
-  //    It is still fulfillable (only -1 means "cannot fulfill").
-  {
-    const quotes = [
-      quote("Best", { unitPrice: 100, leadTimeDays: 2 }),
-      quote("Worst", { unitPrice: 200, leadTimeDays: 10 }),
-    ];
-    const worst = scoreQuotes(quotes, 1, rates).find((s) => s.supplierName === "Worst")!;
-    check("worst-valid-quote-scores-zero-not-minus-one", worst.score === 0, `got ${worst.score}`);
-  }
+  // 6. A valid quote that is worst on price AND lead time is still valid (>= 0) and ranks last.
+//    Only -1 means "cannot fulfill".
+{
+  const quotes = [
+    quote("Best", { unitPrice: 100, leadTimeDays: 2 }),
+    quote("Worst", { unitPrice: 200, leadTimeDays: 10 }),
+  ];
+  const scored = scoreQuotes(quotes, 1, rates);
+  const best = scored.find((s) => s.supplierName === "Best")!;
+  const worst = scored.find((s) => s.supplierName === "Worst")!;
+  check("worst-valid-quote-is-not-minus-one", worst.score >= 0, `got ${worst.score}`);
+  check("worst-valid-quote-ranks-below-best", worst.score < best.score);
+  // 0.5 price ratio * 0.6 + (3/11) lead ratio * 0.4
+  check(
+    "worst-quote-score-matches-formula",
+    Math.abs(worst.score - (0.5 * 0.6 + (3 / 11) * 0.4)) < 1e-9,
+    `got ${worst.score}`
+  );
+}
 
   // 7. A quote in a currency with no exchange rate is flagged, doesn't crash the request,
   //    and doesn't stop other suppliers from being ranked.

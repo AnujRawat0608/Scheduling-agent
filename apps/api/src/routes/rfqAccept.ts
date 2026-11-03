@@ -6,6 +6,7 @@ import { rfqQuotes } from "../db/rfqQuotesSchema.js";
 import { suppliers, supplierOrders, supplierOrderItems } from "../db/suppliersSchema.js";
 import { requireProcurerAuth } from "../agent/lib/procurerAuth.js";
 import { sendMailBounded } from "../agent/lib/mailSafe.js";
+import { priceOrderLine } from "../lib/orderMath.js";
 
 export const rfqAcceptRouter = Router();
 
@@ -26,7 +27,15 @@ const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 type QuoteLine = { productName?: string; quantity?: number; unitPrice?: number };
-type RfqLine = { productName?: string; quantity?: number };
+type RfqLine = {
+  productName?: string;
+  quantity?: number;
+  // Set by the procurement agent when it raises the RFQ (never by the supplier).
+  // Manual RFQs have none of these, so they total goods only, as before.
+  taxRate?: number | null;
+  taxInclusive?: boolean;
+  shippingCost?: number | null;
+};
 
 /**
  * POST /api/rfq-orders/:rfqId/accept
@@ -34,6 +43,8 @@ type RfqLine = { productName?: string; quantity?: number };
  *   1. checks the RFQ belongs to this buyer and is in "quoted" status,
  *   2. checks the quote the buyer saw (quoteId) is still the supplier's current quote,
  *   3. creates a normal "pending" order from the QUOTE's prices (never from the browser),
+ *      adding the tax and shipping the agent fixed on the RFQ, so the order total matches
+ *      the plan the buyer approved,
  *   4. marks the RFQ "accepted" so the quote can't be accepted twice or changed.
  * All of it happens in one transaction: either everything is saved or nothing is.
  *
@@ -92,27 +103,49 @@ rfqAcceptRouter.post("/:rfqId/accept", requireProcurerAuth, async (req, res) => 
     const rfqLines = (Array.isArray(rfq.lineItems) ? rfq.lineItems : []) as RfqLine[];
     if (quoteLines.length === 0) throw new HttpError(409, "This quote has no line items");
 
-    let subtotalC = 0;
+    let netTotalC = 0;
+    let taxTotalC = 0;
+    let shippingTotalC = 0;
+
     const items = quoteLines.map((li, i) => {
+      const rfqLine = rfqLines[i];
       const unit = Number(li.unitPrice);
-      const qty = Number(li.quantity ?? rfqLines[i]?.quantity);
+      const qty = Number(li.quantity ?? rfqLine?.quantity);
       if (!Number.isFinite(unit) || unit < 0 || unit >= 10_000_000) {
         throw new HttpError(409, "This quote has an invalid price");
       }
       if (!Number.isInteger(qty) || qty <= 0 || qty > 1_000_000) {
         throw new HttpError(409, "This quote has an invalid quantity");
       }
-      const unitC = Math.round(unit * 100);
-      const lineC = unitC * qty;
-      subtotalC += lineC;
-      return {
-        itemName: String(li.productName ?? rfqLines[i]?.productName ?? `Item ${i + 1}`).slice(0, 200),
-        unitPrice: (unitC / 100).toFixed(2),
+
+      // Tax and shipping come from the RFQ line, which the server wrote, not from the supplier's quote.
+      const line = priceOrderLine({
+        unitPrice: unit,
         quantity: qty,
-        subtotal: (lineC / 100).toFixed(2),
+        taxRate: rfqLine?.taxRate,
+        taxInclusive: rfqLine?.taxInclusive === true,
+        shippingCost: rfqLine?.shippingCost,
+      });
+      netTotalC += line.netC;
+      taxTotalC += line.taxC;
+      shippingTotalC += line.shippingC;
+
+      const rawRate = Number(rfqLine?.taxRate ?? 0);
+      const rate = Number.isFinite(rawRate) && rawRate > 0 && rawRate <= 100 ? rawRate : 0;
+
+      return {
+        itemName: String(li.productName ?? rfqLine?.productName ?? `Item ${i + 1}`).slice(0, 200),
+        unitPrice: (line.unitC / 100).toFixed(2),
+        quantity: qty,
+        subtotal: (line.netC / 100).toFixed(2),
+        taxAmount: (line.taxC / 100).toFixed(2),
+        taxRate: rate > 0 ? rate.toFixed(2) : null,
+        taxInclusive: rfqLine?.taxInclusive === true,
       };
     });
-    if (subtotalC <= 0) throw new HttpError(409, "The quote total is zero");
+
+    const totalC = netTotalC + taxTotalC + shippingTotalC;
+    if (totalC <= 0) throw new HttpError(409, "The quote total is zero");
 
     const currency = quote.currency ?? rfq.currency;
     if (!currency) throw new HttpError(409, "This quote has no currency");
@@ -141,10 +174,10 @@ rfqAcceptRouter.post("/:rfqId/accept", requireProcurerAuth, async (req, res) => 
           requesterEmail: procurer.email,
           notes: orderNotes,
           currency,
-          subtotal: (subtotalC / 100).toFixed(2),
-          taxAmount: "0.00",
-          shippingCost: "0.00",
-          total: (subtotalC / 100).toFixed(2),
+          subtotal: (netTotalC / 100).toFixed(2),
+          taxAmount: (taxTotalC / 100).toFixed(2),
+          shippingCost: (shippingTotalC / 100).toFixed(2),
+          total: (totalC / 100).toFixed(2),
         })
         .returning();
 
@@ -154,9 +187,6 @@ rfqAcceptRouter.post("/:rfqId/accept", requireProcurerAuth, async (req, res) => 
           orderId: order.id,
           productId: null,
           taxType: null,
-          taxRate: null,
-          taxInclusive: false,
-          taxAmount: "0.00",
         }))
       );
 
@@ -181,7 +211,7 @@ rfqAcceptRouter.post("/:rfqId/accept", requireProcurerAuth, async (req, res) => 
       buyerEmail: procurer.email,
       deliveryAddress: deliveryAddress.trim(),
       currency,
-      totalC: subtotalC,
+      totalC,
       items,
     });
   } catch (err) {

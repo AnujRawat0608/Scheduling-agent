@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import Razorpay from "razorpay";
 import { db } from "../db/client.js";
 import { supplierOrders } from "../db/suppliersSchema.js";
+import { requireProcurerAuth } from "../agent/lib/procurerAuth.js";
 
 /**
  * Payments for supplier orders.
@@ -16,6 +17,9 @@ import { supplierOrders } from "../db/suppliersSchema.js";
  * The amount charged is always the order's server-side `total` (goods + tax + shipping),
  * never a number sent from the browser. The order only becomes "confirmed" here, after
  * the payment has been verified.
+ *
+ * SECURITY: both routes need a signed-in buyer, and the order must belong to that buyer.
+ * Someone else's order is reported exactly like a missing one.
  */
 export const paymentsRouter = Router();
 
@@ -36,9 +40,14 @@ function getRazorpay(): Razorpay {
   return razorpayClient;
 }
 
-async function findOrder(orderId: string) {
+/** Loads an order only if it belongs to the signed-in buyer (orders are keyed by the buyer's email). */
+async function findOwnedOrder(orderId: string, buyerEmail: string) {
   if (!UUID_RE.test(orderId)) return null;
-  const [order] = await db.select().from(supplierOrders).where(eq(supplierOrders.id, orderId)).limit(1);
+  const [order] = await db
+    .select()
+    .from(supplierOrders)
+    .where(and(eq(supplierOrders.id, orderId), eq(supplierOrders.requesterEmail, buyerEmail)))
+    .limit(1);
   return order ?? null;
 }
 
@@ -46,9 +55,9 @@ async function findOrder(orderId: string) {
  * POST /api/payments/orders/:orderId/session
  * Starts a payment for a pending order.
  */
-paymentsRouter.post("/orders/:orderId/session", async (req, res) => {
+paymentsRouter.post("/orders/:orderId/session", requireProcurerAuth, async (req, res) => {
   try {
-    const order = await findOrder(req.params.orderId);
+    const order = await findOwnedOrder(req.params.orderId, req.procurer!.email);
     if (!order) return res.status(404).json({ error: "Order not found" });
     if (order.status !== "pending") {
       return res.status(409).json({ error: "This order is already paid or closed" });
@@ -94,9 +103,9 @@ paymentsRouter.post("/orders/:orderId/session", async (req, res) => {
  * POST /api/payments/orders/:orderId/verify
  * Checks the payment, then marks the order confirmed (pending -> confirmed).
  */
-paymentsRouter.post("/orders/:orderId/verify", async (req, res) => {
+paymentsRouter.post("/orders/:orderId/verify", requireProcurerAuth, async (req, res) => {
   try {
-    const order = await findOrder(req.params.orderId);
+    const order = await findOwnedOrder(req.params.orderId, req.procurer!.email);
     if (!order) return res.status(404).json({ error: "Order not found" });
 
     // Already paid (e.g. the buyer double-clicked or retried): succeed quietly.

@@ -9,6 +9,8 @@ import type {
   QuoteScore,
   LineItem,
 } from "../state.js";
+import { logPriceObservations } from "../../db/logPriceObservations.js";
+
 
 const MAX_COMBINATIONS = 5000; // safety cap — see note below buildAllPlans
 const TOP_QUOTES_LIMIT = 5;
@@ -218,6 +220,7 @@ export async function compareQuotes(state: ProcurementStateType) {
   const weights = (requested && WEIGHT_PRESETS[requested]) || WEIGHT_PRESETS.balanced;
 
   const scored = scoreAllLineItems(state.lineItemQuotes, rates, { daysUntilDeadline, weights });
+  void logPriceObservations(state.taskId, scored); // fire-and-forget, never throws
   const anyMatch = scored.some((liq) => liq.hasMatch);
 
   if (!anyMatch) {

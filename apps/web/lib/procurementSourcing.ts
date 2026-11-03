@@ -2,15 +2,17 @@ import { formatMoney } from "./format";
 import type { QuoteScore, FulfillmentPlan, LineItem } from "./procurementApi";
 
 /**
- * Finds which real fulfillment plan (if any) actually uses this exact
- * supplier for this exact line item. Matching on supplierId AND
- * supplierName (not supplierId alone) because supplierId is null for
- * every simulated/web-sourced quote — matching on null alone would let
- * unrelated simulated suppliers collide.
+ * Finds which real fulfillment plan (if any) contains this EXACT quote for this line item.
  *
- * Returns null when no plan uses this supplier/item combination, which
- * means there is nothing safe to "approve" for this row — the caller
- * should fall back to Trigger Auto-RFQ instead of guessing.
+ * A plan keeps only one quote per supplier per item, so a supplier with several listings of
+ * the same product has just one of them in any plan. Matching on the supplier alone would make
+ * every listing from that supplier look "approved" together, so we match the quote itself:
+ * supplier, unit price, currency and the listing title the supplier used.
+ *
+ * leg.lineItems and leg.quotes are built in the same order, so index k lines up.
+ *
+ * Returns null when no plan contains this exact quote. There is nothing safe to "approve"
+ * for that row, so the caller falls back to Trigger Auto-RFQ instead of guessing.
  */
 export function findApprovalTarget(
   lineItemName: string,
@@ -18,12 +20,17 @@ export function findApprovalTarget(
   recommendedPlan: FulfillmentPlan | null | undefined,
   alternativePlans: FulfillmentPlan[] | undefined
 ): { kind: "recommended" } | { kind: "alternative"; index: number } | null {
+  const sameQuote = (q: QuoteScore | undefined): boolean =>
+    !!q &&
+    q.supplierId === quote.supplierId &&
+    q.supplierName === quote.supplierName &&
+    q.unitPrice === quote.unitPrice &&
+    q.currency === quote.currency &&
+    (q.offerItem ?? "") === (quote.offerItem ?? "");
+
   const matchesPlan = (plan: FulfillmentPlan) =>
-    plan.legs.some(
-      (leg) =>
-        leg.supplierId === quote.supplierId &&
-        leg.supplierName === quote.supplierName &&
-        leg.lineItems.some((li) => li.item === lineItemName)
+    plan.legs.some((leg) =>
+      leg.lineItems.some((li, k) => li.item === lineItemName && sameQuote(leg.quotes[k]))
     );
 
   if (recommendedPlan && matchesPlan(recommendedPlan)) return { kind: "recommended" };
