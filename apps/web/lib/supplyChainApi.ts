@@ -106,3 +106,16 @@ export async function deleteSupplyChainOffer(id: string) {
   });
   if (!res.ok) throw new Error("Failed to delete offer");
 }
+
+export async function updateSupplyChainOffer(id: string, input: Partial<CreateOfferInput>) {
+  const res = await fetch(`${API_BASE}/supply-chain/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...(authHeaders() as Record<string, string>) },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? "Failed to update offer");
+  }
+  return res.json();
+}

@@ -13,7 +13,8 @@ import {
   Download,
   CircleCheck,
 } from "lucide-react";
-import { fetchAllSupplierOrders, confirmSupplierOrder, type SupplierOrder } from "../../lib/supplierOrdersApi";
+import { fetchAllSupplierOrders, type SupplierOrder } from "../../lib/supplierOrdersApi";
+import { payForOrder } from "../../lib/supplierPaymentApi";
 import { formatMoney } from "../../lib/format";
 import { downloadInvoicePdf, type InvoiceInput } from "../../lib/invoicePdf";
 
@@ -24,6 +25,20 @@ const STATUS_STYLES: Record<string, string> = {
   delivered: "bg-green-100 text-green-700",
   cancelled: "bg-red-100 text-red-700",
 };
+
+// What the buyer sees. "pending" means the order exists but has not been paid yet, and an order
+// only becomes "confirmed" after the payment is verified on the server.
+const STATUS_LABELS: Record<string, string> = {
+  pending: "awaiting payment",
+  confirmed: "paid",
+  shipped: "shipped",
+  delivered: "delivered",
+  cancelled: "cancelled",
+};
+
+function statusLabel(status: string): string {
+  return STATUS_LABELS[status] ?? status;
+}
 
 const FILTERS = ["all", "pending", "confirmed", "shipped", "delivered", "cancelled"] as const;
 type Filter = (typeof FILTERS)[number];
@@ -120,7 +135,7 @@ function itemsSummary(o: SupplierOrder): string {
 
 /* ---------- PDF invoice ---------- */
 
-/** Only confirmed, shipped and delivered orders with a known total can be invoiced. */
+/** Only paid (confirmed), shipped and delivered orders with a known total can be invoiced. */
 function canInvoice(o: SupplierOrder): boolean {
   return o.status !== "pending" && o.status !== "cancelled" && lineTotal(o) !== null;
 }
@@ -152,7 +167,7 @@ function toInvoiceInput(o: SupplierOrder): InvoiceInput {
   };
 }
 
-/* ---------- "Order confirmed" dialog: offers the PDF invoice ---------- */
+/* ---------- "Payment received" dialog: offers the PDF invoice ---------- */
 function InvoiceDialog({
   order,
   onClose,
@@ -193,11 +208,11 @@ function InvoiceDialog({
           <CircleCheck size={28} className="mt-0.5 shrink-0 text-green-600" />
           <div className="min-w-0">
             <h2 id="invoice-dialog-title" className="text-base font-semibold text-neutral-900">
-              Order confirmed
+              Payment received
             </h2>
             <p className="mt-1 text-sm text-neutral-600">
               {order.requesterName}&apos;s order ({itemCount} {itemCount === 1 ? "item" : "items"}
-              {total !== null ? `, ${formatMinor(total, currencyOf(order))}` : ""}) is now confirmed.
+              {total !== null ? `, ${formatMinor(total, currencyOf(order))}` : ""}) is paid and confirmed.
             </p>
           </div>
         </div>
@@ -304,7 +319,7 @@ function OrderDetailModal({
                     STATUS_STYLES[order.status] ?? ""
                   }`}
                 >
-                  {order.status}
+                  {statusLabel(order.status)}
                 </span>
               </div>
             </div>
@@ -407,7 +422,7 @@ function BillingContent() {
   const [page, setPage] = useState(1);
   const [confirmedMessage, setConfirmedMessage] = useState<string | null>(null);
   const [detailOrder, setDetailOrder] = useState<SupplierOrder | null>(null);
-  // The order that was just confirmed: shows the "Generate PDF?" dialog.
+  // The order that was just paid: shows the "Generate PDF?" dialog.
   const [invoiceOrder, setInvoiceOrder] = useState<SupplierOrder | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
@@ -421,10 +436,16 @@ function BillingContent() {
     refetchOnMount: "always",
   });
 
-  const confirmOrder = useMutation({
-    mutationFn: confirmSupplierOrder,
+  // Paying is the ONLY way an order becomes confirmed: the server verifies the payment first.
+  const payOrder = useMutation({
+    mutationFn: (order: SupplierOrder) =>
+      payForOrder({
+        orderId: String(order.id),
+        buyerName: order.requesterName,
+        buyerEmail: order.requesterEmail,
+      }),
     onSuccess: () => {
-      setConfirmedMessage("Order confirmed.");
+      setConfirmedMessage("Payment received. Your order is confirmed.");
       queryClient.invalidateQueries({ queryKey: ["supplier-orders"] });
     },
   });
@@ -507,6 +528,9 @@ function BillingContent() {
     document.getElementById(`order-${highlightId}`)?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [highlightId, isLoading, safePage]);
 
+  const payError = payOrder.isError ? (payOrder.error as Error).message : null;
+  const payCancelled = !!payError && /cancel/i.test(payError);
+
   return (
     <div className="mx-auto max-w-6xl px-8 py-10">
       <div className="mb-8 flex items-center gap-2">
@@ -520,9 +544,16 @@ function BillingContent() {
         </div>
       )}
 
-      {confirmOrder.isError && (
-        <div role="alert" className="mb-6 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          Couldn&apos;t confirm the order: {(confirmOrder.error as Error).message}. Try again.
+      {payError && (
+        <div
+          role="alert"
+          className={`mb-6 rounded-lg border p-3 text-sm ${
+            payCancelled
+              ? "border-neutral-200 bg-neutral-50 text-neutral-600"
+              : "border-red-200 bg-red-50 text-red-700"
+          }`}
+        >
+          {payCancelled ? "Payment cancelled. You can pay any time from this page." : payError}
         </div>
       )}
 
@@ -563,7 +594,7 @@ function BillingContent() {
                   filter === s ? "bg-[#c2410c] text-white" : "text-neutral-600 hover:bg-neutral-100"
                 }`}
               >
-                {s}
+                {s === "all" ? "all" : statusLabel(s)}
                 <span className={`ml-1.5 text-xs ${filter === s ? "text-white/80" : "text-neutral-400"}`}>
                   {counts[s] ?? 0}
                 </span>
@@ -590,7 +621,7 @@ function BillingContent() {
                   const total = lineTotal(o);
                   const cancelled = o.status === "cancelled";
                   const isNew = highlightId !== null && String(o.id) === highlightId;
-                  const confirmingThis = confirmOrder.isPending && confirmOrder.variables === o.id;
+                  const payingThis = payOrder.isPending && payOrder.variables?.id === o.id;
                   const downloadingThis = downloadingId === String(o.id);
 
                   return (
@@ -622,33 +653,33 @@ function BillingContent() {
                             STATUS_STYLES[o.status] ?? ""
                           }`}
                         >
-                          {o.status}
+                          {statusLabel(o.status)}
                         </span>
                       </td>
                       <td className="px-5 py-3">
                         <div className="flex items-center gap-2 whitespace-nowrap">
                           <button
                             onClick={() => setDetailOrder(o)}
-                            className={`${ACTION_BTN} border border-neutraL-200 text-neutral-700 hover:border-neutral-300`}
+                            className={`${ACTION_BTN} border border-neutral-200 text-neutral-700 hover:border-neutral-300`}
                           >
                             View details
                           </button>
                           {o.status === "pending" && (
                             <button
                               onClick={() =>
-                                // After a successful confirm, offer the PDF invoice in a dialog.
-                                confirmOrder.mutate(o.id, {
+                                // After a verified payment, offer the PDF invoice in a dialog.
+                                payOrder.mutate(o, {
                                   onSuccess: () => {
                                     setDownloadError(null);
                                     setInvoiceOrder({ ...o, status: "confirmed" as const });
                                   },
                                 })
                               }
-                              disabled={confirmOrder.isPending || total === null}
-                              title={total === null ? "Add a unit price before confirming" : undefined}
+                              disabled={payOrder.isPending || total === null}
+                              title={total === null ? "This order has no price yet" : undefined}
                               className={`${ACTION_BTN} bg-[#ea580c] text-white hover:bg-[#9a3412] disabled:opacity-50`}
                             >
-                              {confirmingThis ? "Confirming…" : "Confirm order"}
+                              {payingThis ? "Processing…" : "Pay now"}
                             </button>
                           )}
                           {canInvoice(o) && (
@@ -672,7 +703,7 @@ function BillingContent() {
                     <td colSpan={7} className="px-5 py-8 text-center text-sm text-neutral-400">
                       {filter === "all"
                         ? "No orders yet. Submit a request to get supplier options."
-                        : `No ${filter} orders.`}
+                        : `No ${filter === "pending" || filter === "confirmed" ? statusLabel(filter) : filter} orders.`}
                     </td>
                   </tr>
                 )}

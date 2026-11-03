@@ -714,15 +714,14 @@ export default function SupplyChainPage() {
                         </td>
                         <td className="px-6 py-3">
                           <div className="flex items-center justify-end gap-3">
-                            {/* TODO: link to /supply-chain/[id]/edit once that page exists */}
-                            <button
-                              type="button"
-                              title="Edit offer"
-                              className="text-neutral-400 transition hover:text-[#3d6bff]"
-                              aria-label="Edit offer"
-                            >
-                              <Pencil size={14} />
-                            </button>
+                            <Link
+  href={`/supply-chain/new?edit=${o.id}`}
+  title="Edit offer"
+  className="text-neutral-400 transition hover:text-[#3d6bff]"
+  aria-label="Edit offer"
+>
+  <Pencil size={14} />
+</Link>
                             <button
                               type="button"
                               onClick={() => handleDelete(o.id, o.item)}

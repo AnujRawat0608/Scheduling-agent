@@ -192,6 +192,186 @@ supplyChainRouter.post("/supply-chain", requireSupplierAuth, async (req, res) =>
   }
 });
 
+
+supplyChainRouter.put("/supply-chain/:id", requireSupplierAuth, async (req, res) => {
+  try {
+    const supplierId = req.supplier!.supplierId;
+
+    // Same 404 for "doesn't exist" and "not yours", like DELETE.
+    const [existing] = await db
+      .select()
+      .from(supplierOffers)
+      .where(and(eq(supplierOffers.id, req.params.id), eq(supplierOffers.supplierId, supplierId)));
+    if (!existing) {
+      return res.status(404).json({ error: "Offer not found" });
+    }
+
+    // supplierId / supplierName are never read from the body.
+    const {
+      item,
+      description,
+      category,
+      supplierType,
+      unitPrice,
+      unitOfMeasure,
+      leadTimeDays,
+      dispatchStatus,
+      shippingCost,
+      moq,
+      quantityAvailable,
+      aiScore,
+      specs,
+      taxType,
+      taxRate,
+      taxInclusive,
+      imageUrl,
+      currency,
+    } = req.body ?? {};
+
+    const changes: Partial<typeof supplierOffers.$inferInsert> = {};
+
+    if (item !== undefined) {
+      if (typeof item !== "string" || !item.trim()) {
+        return res.status(400).json({ error: "item cannot be empty" });
+      }
+      changes.item = item.trim();
+    }
+    if (description !== undefined) changes.description = description || null;
+    if (category !== undefined) changes.category = category || null;
+    if (supplierType !== undefined) changes.supplierType = supplierType || null;
+    if (unitOfMeasure !== undefined) changes.unitOfMeasure = unitOfMeasure;
+    if (dispatchStatus !== undefined) changes.dispatchStatus = dispatchStatus;
+    if (taxType !== undefined) changes.taxType = taxType || null;
+    if (taxInclusive !== undefined) changes.taxInclusive = !!taxInclusive;
+    if (aiScore !== undefined) changes.aiScore = aiScore ?? null;
+    if (specs !== undefined) {
+      changes.specs = specs && Object.keys(specs).length > 0 ? specs : null;
+    }
+
+    if (currency !== undefined) {
+      if (typeof currency !== "string" || !SUPPORTED_CURRENCIES.includes(currency)) {
+        return res.status(400).json({
+          error: `Unsupported currency. Use one of: ${SUPPORTED_CURRENCIES.join(", ")}`,
+        });
+      }
+      changes.currency = currency;
+    }
+
+    if (unitPrice !== undefined) {
+      if (!isMoney(unitPrice) || !hasMax2Decimals(unitPrice) || unitPrice <= 0) {
+        return res
+          .status(400)
+          .json({ error: "unitPrice must be greater than 0 with at most 2 decimal places" });
+      }
+      changes.unitPrice = unitPrice.toFixed(2);
+    }
+    if (shippingCost !== undefined) {
+      if (!isMoney(shippingCost) || !hasMax2Decimals(shippingCost)) {
+        return res
+          .status(400)
+          .json({ error: "shippingCost must be a non-negative number with at most 2 decimal places" });
+      }
+      changes.shippingCost = shippingCost.toFixed(2);
+    }
+
+    if (leadTimeDays !== undefined) {
+      if (!isWholeNumber(leadTimeDays)) {
+        return res.status(400).json({ error: "leadTimeDays must be a whole number (0 or more)" });
+      }
+      changes.leadTimeDays = leadTimeDays;
+    }
+    if (quantityAvailable !== undefined) {
+      if (!isWholeNumber(quantityAvailable)) {
+        return res.status(400).json({ error: "quantityAvailable must be a whole number (0 or more)" });
+      }
+      changes.quantityAvailable = quantityAvailable;
+    }
+    if (moq !== undefined) {
+      if (!isWholeNumber(moq) || moq < 1) {
+        return res.status(400).json({ error: "moq must be a whole number of at least 1" });
+      }
+      changes.moq = moq;
+    }
+
+    if (taxRate !== undefined) {
+      if (taxRate !== null && (typeof taxRate !== "number" || !Number.isFinite(taxRate) || taxRate < 0 || taxRate > 100)) {
+        return res.status(400).json({ error: "taxRate must be a number between 0 and 100" });
+      }
+      changes.taxRate = taxRate != null ? String(taxRate) : null;
+    }
+
+    // A new image is only accepted if it came from our own upload endpoint.
+    // Anything else (including the existing URL being re-sent) leaves the image alone.
+    const newImageUrl = isFreshUploadUrl(imageUrl) && imageUrl !== existing.imageUrl ? imageUrl : null;
+    if (newImageUrl) changes.imageUrl = newImageUrl;
+
+    if (Object.keys(changes).length === 0) {
+      return res.status(400).json({ error: "No valid fields to update" });
+    }
+
+    // Remember the old files so they can be removed after the DB update succeeds.
+    let oldPaths: string[] = [];
+    if (newImageUrl) {
+      const oldImages = await db
+        .select({ url: offerImages.url, publicId: offerImages.publicId })
+        .from(offerImages)
+        .where(eq(offerImages.offerId, existing.id));
+      const set = new Set<string>();
+      for (const img of oldImages) {
+        const p = img.publicId ?? pathFromUrl(img.url);
+        if (p) set.add(p);
+      }
+      const coverPath = pathFromUrl(existing.imageUrl);
+      if (coverPath) set.add(coverPath);
+      oldPaths = [...set];
+    }
+
+    const updated = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(supplierOffers)
+        .set(changes)
+        .where(and(eq(supplierOffers.id, existing.id), eq(supplierOffers.supplierId, supplierId)))
+        .returning();
+
+      if (newImageUrl) {
+        await tx.delete(offerImages).where(eq(offerImages.offerId, existing.id));
+        await tx.insert(offerImages).values({
+          offerId: existing.id,
+          url: newImageUrl,
+          publicId: pathFromUrl(newImageUrl),
+          sortOrder: 0,
+        });
+      }
+      return row;
+    });
+
+    if (!updated) {
+      return res.status(404).json({ error: "Offer not found" });
+    }
+
+    // Clean up the replaced image (failures are logged, not fatal).
+    if (oldPaths.length > 0) {
+      const { error } = await supabase.storage.from(BUCKET).remove(oldPaths);
+      if (error) console.error("Storage cleanup failed:", error);
+    }
+    if (newImageUrl && existing.imageUrl && LEGACY_IMAGE_URL_RE.test(existing.imageUrl)) {
+      fs.promises.unlink(path.join(process.cwd(), existing.imageUrl)).catch(() => {});
+    }
+
+    res.json({
+      offer: {
+        ...updated,
+        unitPrice: Number(updated.unitPrice),
+        shippingCost: Number(updated.shippingCost),
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: String((err as Error)?.message ?? err) });
+  }
+});
+
+
 supplyChainRouter.delete("/supply-chain/:id", requireSupplierAuth, async (req, res) => {
   try {
     const supplierId = req.supplier!.supplierId;

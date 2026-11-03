@@ -960,13 +960,13 @@ const reject = useMutation({
 
                                 // Is this row the supplier that was actually approved?
                                // Is this the exact quote that was approved? Once the order is placed, the approved plan
-// becomes state.recommendedPlan (humanApproval.ts swaps it in), so plan 0 is the approved one.
-// While the order is still being placed, trust the click made in this session.
-const isApprovedRow =
-  planNumber !== null &&
-  (state.status === "purchasing" && approvedPlan !== null
-    ? planNumber === approvedPlan
-    : planNumber === 0);
+                                // becomes state.recommendedPlan (humanApproval.ts swaps it in), so plan 0 is the approved one.
+                                // While the order is still being placed, trust the click made in this session.
+                                const isApprovedRow =
+                                  planNumber !== null &&
+                                  (state.status === "purchasing" && approvedPlan !== null
+                                    ? planNumber === approvedPlan
+                                    : planNumber === 0);
 
                                 // Small grey line under the total: tax, shipping, and the rate used.
                                 const detailParts: string[] = [];

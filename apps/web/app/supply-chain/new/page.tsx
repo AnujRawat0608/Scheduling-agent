@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Package,
   Tag,
@@ -16,7 +16,14 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { fetchCurrentSupplier, type Supplier } from "../../../lib/supplierAuthApi";
-import { createSupplyChainOffer, uploadProductImage, type CreateOfferInput } from "../../../lib/supplyChainApi";
+import {
+  createSupplyChainOffer,
+  updateSupplyChainOffer,
+  listSupplyChainOffers,
+  uploadProductImage,
+  resolveImageUrl,
+  type CreateOfferInput,
+} from "../../../lib/supplyChainApi";
 
 const UNIT_OF_MEASURE_OPTIONS = [
   { value: "piece", label: "Each" },
@@ -138,7 +145,7 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
   );
 }
 
-/* ---------- page ---------- */
+/* ---------- page (add + edit) ---------- */
 
 export default function AddProductPage() {
   const router = useRouter();
@@ -146,6 +153,15 @@ export default function AddProductPage() {
 
   const [supplier, setSupplier] = useState<Supplier | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
+
+  // undefined = not read yet, null = add mode, string = editing that offer id
+  const [editId, setEditId] = useState<string | null | undefined>(undefined);
+  const [existingImageUrl, setExistingImageUrl] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    setEditId(new URLSearchParams(window.location.search).get("edit"));
+  }, []);
 
   // Product details
   const [item, setItem] = useState("");
@@ -192,6 +208,45 @@ export default function AddProductPage() {
       .finally(() => setAuthChecked(true));
   }, [router]);
 
+  // Edit mode: load the offers and find the one being edited.
+  const { data: allOffers, isLoading: offersLoading } = useQuery({
+    queryKey: ["supply-chain"],
+    queryFn: listSupplyChainOffers,
+    enabled: !!editId && authChecked && !!supplier,
+  });
+
+  const offer = editId ? allOffers?.find((o) => String(o.id) === editId) : undefined;
+  const isOwner = !!offer && !!supplier && offer.supplierId === supplier.id;
+
+  // Prefill the form once, when the offer first arrives.
+  useEffect(() => {
+    if (!offer || !isOwner || loaded) return;
+    setItem(offer.item);
+    setDescription(offer.description ?? "");
+    setCategory(offer.category ?? CATEGORY_OPTIONS[0]);
+    setSupplierType(offer.supplierType ?? SUPPLIER_TYPE_OPTIONS[0]);
+    setCurrency(offer.currency ?? "INR");
+    setUnitPrice(String(offer.unitPrice));
+    setUnitOfMeasure(offer.unitOfMeasure ?? "piece");
+    setTaxType(offer.taxType ?? "None");
+    setTaxRate(String(offer.taxRate ?? "0"));
+    setTaxInclusive(!!offer.taxInclusive);
+    setShippingCost(String(offer.shippingCost ?? 0));
+    setLeadTimeDays(String(offer.leadTimeDays));
+    setDispatchStatus(offer.dispatchStatus ?? "Dispatch ready");
+    setQuantityAvailable(String(offer.quantityAvailable));
+    setMoq(offer.moq ?? 1);
+    setAiScore(offer.aiScore != null ? String(offer.aiScore) : "");
+    setExistingImageUrl(offer.imageUrl ?? null);
+
+    // SKU is stored inside specs, so pull it back into its own field.
+    const { SKU, ...otherSpecs } = (offer.specs ?? {}) as Record<string, string>;
+    setSku(SKU ?? "");
+    const rows = Object.entries(otherSpecs).map(([key, value]) => ({ key, value: String(value) }));
+    setSpecRows(rows.length > 0 ? rows : [{ key: "", value: "" }]);
+    setLoaded(true);
+  }, [offer, isOwner, loaded]);
+
   // Clean up the object URL used for the image preview.
   useEffect(() => {
     return () => {
@@ -201,7 +256,9 @@ export default function AddProductPage() {
 
   const create = useMutation({
     mutationFn: async ({ file, ...input }: CreateOfferInput & { file: File | null }) => {
+      // Only send imageUrl when a new file was picked; the server keeps the old image otherwise.
       const imageUrl = file ? await uploadProductImage(file) : undefined;
+      if (editId) return updateSupplyChainOffer(editId, { ...input, imageUrl });
       return createSupplyChainOffer({ ...input, imageUrl });
     },
     onSuccess: () => {
@@ -257,7 +314,8 @@ export default function AddProductPage() {
       quantityAvailable: Number(quantityAvailable),
       dispatchStatus,
       aiScore: aiScore ? Number(aiScore) : undefined,
-      specs: entries.length > 0 ? Object.fromEntries(entries) : undefined,
+      // In edit mode an empty object lets the user remove all specs.
+      specs: entries.length > 0 ? Object.fromEntries(entries) : editId ? {} : undefined,
       taxType,
       taxRate: Number(taxRate),
       taxInclusive,
@@ -266,7 +324,25 @@ export default function AddProductPage() {
     });
   }
 
-  if (!authChecked || !supplier) return <main className="mx-auto max-w-5xl px-6 py-12" />;
+  if (editId === undefined || !authChecked || !supplier || (!!editId && offersLoading)) {
+    return <main className="mx-auto max-w-5xl px-6 py-12 text-sm text-neutral-500">Loading…</main>;
+  }
+
+  if (editId && (!offer || !isOwner)) {
+    return (
+      <main className="mx-auto max-w-5xl px-6 py-12">
+        <p className="text-sm text-neutral-600">
+          {offer ? "You can only edit your own products." : "Product not found."}{" "}
+          <Link href="/supply-chain" className="font-medium text-[#3d6bff] hover:underline">
+            Back to catalog
+          </Link>
+        </p>
+      </main>
+    );
+  }
+
+  const isEdit = !!editId;
+  const shownImage = imagePreview ?? (existingImageUrl ? resolveImageUrl(existingImageUrl) : null);
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-12">
@@ -276,11 +352,14 @@ export default function AddProductPage() {
           Catalog
         </Link>
         <ChevronRight size={12} />
-        <span className="normal-case tracking-normal">Add product</span>
+        <span className="normal-case tracking-normal">{isEdit ? "Edit product" : "Add product"}</span>
       </nav>
-      <h1 className="mt-1 text-3xl font-bold text-neutral-900">Add Product</h1>
+      <h1 className="mt-1 text-3xl font-bold text-neutral-900">
+        {isEdit ? "Edit Product" : "Add Product"}
+      </h1>
       <p className="mt-1 text-sm text-neutral-400">
-        Listing as <span className="font-medium text-neutral-600">{supplier.businessName}</span>
+        {isEdit ? "Editing as" : "Listing as"}{" "}
+        <span className="font-medium text-neutral-600">{supplier.businessName}</span>
       </p>
 
       <form onSubmit={handleSubmit} className="mt-8 space-y-6">
@@ -352,10 +431,10 @@ export default function AddProductPage() {
             <div className="space-y-1.5">
               <span className="text-sm font-medium text-neutral-800">Product image</span>
               <label className="flex cursor-pointer flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-neutral-200 p-5 text-center transition hover:border-[#3d6bff]/50">
-                {imagePreview ? (
+                {shownImage ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={imagePreview}
+                    src={shownImage}
                     alt="Product preview"
                     className="aspect-[16/9] w-full rounded-xl object-cover"
                   />
@@ -366,7 +445,7 @@ export default function AddProductPage() {
                 )}
                 <UploadCloud size={18} className="text-neutral-400" />
                 <span className="text-xs text-neutral-500">
-                  {imageFile ? "Click to replace" : "Click to upload"} · JPG/PNG up to 5MB
+                  {shownImage ? "Click to replace" : "Click to upload"} · JPG/PNG up to 5MB
                 </span>
                 <input
                   type="file"
@@ -385,6 +464,8 @@ export default function AddProductPage() {
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
             <Field label="Category">
               <select value={category} onChange={(e) => setCategory(e.target.value)} className={inputClass}>
+                {/* Keep an older category selectable even if it's not in the list. */}
+                {!CATEGORY_OPTIONS.includes(category) && <option>{category}</option>}
                 {CATEGORY_OPTIONS.map((c) => (
                   <option key={c}>{c}</option>
                 ))}
@@ -396,6 +477,7 @@ export default function AddProductPage() {
                 onChange={(e) => setSupplierType(e.target.value)}
                 className={inputClass}
               >
+                {!SUPPLIER_TYPE_OPTIONS.includes(supplierType) && <option>{supplierType}</option>}
                 {SUPPLIER_TYPE_OPTIONS.map((t) => (
                   <option key={t}>{t}</option>
                 ))}
@@ -589,7 +671,13 @@ export default function AddProductPage() {
             disabled={create.isPending}
             className="rounded-xl bg-[#3d6bff] px-7 py-3 text-sm font-semibold text-white shadow-lg shadow-[#3d6bff]/25 transition hover:bg-[#3d6bff]/90 disabled:opacity-50"
           >
-            {create.isPending ? "Adding…" : "Add product"}
+            {create.isPending
+              ? isEdit
+                ? "Saving…"
+                : "Adding…"
+              : isEdit
+                ? "Save changes"
+                : "Add product"}
           </button>
         </div>
       </form>
