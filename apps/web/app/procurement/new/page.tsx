@@ -990,7 +990,7 @@ const reject = useMutation({
 
                                 return (
                                   <tr key={rowKey} className={q.isBest ? "bg-green-50/40" : "hover:bg-slate-50"}>
-                                    {/* Supplier */}
+                                                                       {/* Supplier */}
                                     <td className="px-4 py-3 font-medium">
                                       {href ? (
                                         <a
@@ -1008,7 +1008,16 @@ const reject = useMutation({
                                       ) : (
                                         <span className="text-neutral-900">{q.supplierName}</span>
                                       )}
+
+                                      {/* The listing the supplier actually offered */}
+                                      {(q as QuoteScore & { offerItem?: string }).offerItem && (
+                                        <div className="mt-0.5 text-[11px] font-normal text-neutral-500">
+                                          {(q as QuoteScore & { offerItem?: string }).offerItem}
+                                        </div>
+                                      )}
+
                                       <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                                        
                                         {isWeb ? (
                                           <span
                                             title={`Found on the web. Extraction confidence ${Math.round((q.confidence ?? 0) * 100)}%. Prices are indicative until the supplier confirms.`}

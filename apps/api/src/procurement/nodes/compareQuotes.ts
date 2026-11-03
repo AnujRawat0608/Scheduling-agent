@@ -15,6 +15,8 @@ import { logPriceObservations } from "../../db/logPriceObservations.js";
 const MAX_COMBINATIONS = 5000; // safety cap — see note below buildAllPlans
 const TOP_QUOTES_LIMIT = 5;
 const TOP_WEB_QUOTES_LIMIT = 3; // web quotes shown next to registered ones (up to 5 when there are none)
+const MAX_LISTINGS_PER_SUPPLIER = 3; // listings of one item per supplier that can form plans
+const MAX_ALTERNATIVE_PLANS = 25;    // keeps the "other combinations" list short
 const BUYER_CURRENCY = "INR";
 
 /** Totals are in INR with 2 decimals; round after every sum so float drift can't creep in. */
@@ -70,16 +72,32 @@ function scoreAllLineItems(
  * Only VERIFIED quotes are eligible: web quotes are never part of a plan, because plans can be
  * approved and turned into orders.
  */
+/**
+ * For one item, the best viable VERIFIED quotes, up to MAX_LISTINGS_PER_SUPPLIER per supplier.
+ * Each listing is its own candidate, so a supplier with several listings of the same product
+ * gets a plan for each one and every row in the buyer's table can be approved.
+ * Web quotes are never part of a plan, because plans can be approved and turned into orders.
+ */
 function candidatesFor(liq: LineItemQuotes): Map<string, QuoteScore> {
-  const bySupplier = new Map<string, QuoteScore>();
+  const result = new Map<string, QuoteScore>();
+  const perSupplier = new Map<string, number>();
+
+  // scoredQuotes is already ordered best-first (on-time first, then by score).
   for (const q of liq.scoredQuotes) {
     if (q.score < 0) continue; // only skip unfulfillable quotes (-1), not a valid score of 0
     if (!isVerifiedQuote(q)) continue;
-    const key = q.supplierId ?? q.supplierName;
-    const existing = bySupplier.get(key);
-    if (!existing || q.score > existing.score) bySupplier.set(key, q);
+
+    const supplierKey = q.supplierId ?? q.supplierName;
+    const used = perSupplier.get(supplierKey) ?? 0;
+    if (used >= MAX_LISTINGS_PER_SUPPLIER) continue;
+
+    const listingKey = `${supplierKey}|${q.offerItem ?? ""}|${q.unitPrice}|${q.currency}`;
+    if (result.has(listingKey)) continue;
+
+    result.set(listingKey, q);
+    perSupplier.set(supplierKey, used + 1);
   }
-  return bySupplier;
+  return result;
 }
 
 function legsFromAssignment(assignment: { lineItem: LineItem; quote: QuoteScore }[]): FulfillmentLeg[] {
@@ -251,7 +269,7 @@ export async function compareQuotes(state: ProcurementStateType) {
   }
 
   const recommendedPlan = plans[0];
-  const alternativePlans = capped ? [] : plans.slice(1);
+ const alternativePlans = capped ? [] : plans.slice(1, 1 + MAX_ALTERNATIVE_PLANS);
 
   if (capped) {
     recommendedPlan.rationale += " (Large item list — showing the best match found rather than every possible combination.)";

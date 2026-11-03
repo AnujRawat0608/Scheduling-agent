@@ -29,6 +29,25 @@ function isAccessoryOfOtherProduct(listingTitle: string, requestedItem: string):
   return ACCESSORY_WORDS.some((w) => wordIn(listingTitle, w) && !wordIn(requestedItem, w));
 }
 
+/** Lowercase, strip punctuation, collapse spaces: "Test Product-A" -> "test product a". */
+function normalize(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/**
+ * 0 = title is exactly what the buyer asked for
+ * 1 = title contains the requested words as a phrase ("test product" in "test product b")
+ * 2 = title only matched by full-text search (stopwords like "a" were ignored)
+ */
+function matchTier(listingTitle: string, requestedItem: string): 0 | 1 | 2 {
+  const title = normalize(listingTitle);
+  const wanted = normalize(requestedItem);
+  if (!wanted) return 2;
+  if (title === wanted) return 0;
+  if (` ${title} `.includes(` ${wanted} `)) return 1;
+  return 2;
+}
+
 async function sourceOneItem(item: string, quantity: number): Promise<SupplierQuote[]> {
   const searchQuery = sql`plainto_tsquery('english', ${item})`;
   // Match on the listing TITLE only. Descriptions often say "for Raspberry Pi 5" on accessories.
@@ -48,7 +67,15 @@ async function sourceOneItem(item: string, quantity: number): Promise<SupplierQu
     .orderBy(sql`ts_rank(${searchVector}, ${searchQuery}) DESC`)
     .limit(MAX_CANDIDATES);
 
-  const matches = rows.filter(({ offer }) => !isAccessoryOfOtherProduct(offer.item, item));
+ const candidates = rows
+  .filter(({ offer }) => !isAccessoryOfOtherProduct(offer.item, item))
+  .map((r) => ({ ...r, tier: matchTier(r.offer.item, item) }))
+  .sort((a, b) => a.tier - b.tier); // stable: keeps the full-text rank order within a tier
+
+// If anything matches the request exactly or as a phrase, show only those.
+// Loose full-text matches are a fallback for when nothing better exists.
+const bestTier = candidates.length > 0 ? candidates[0].tier : 2;
+const matches = bestTier < 2 ? candidates.filter((c) => c.tier <= 1) : candidates;
 
   if (matches.length > 0) {
     return matches.map(({ offer, supplierRegion, supplierCountry }) => ({
