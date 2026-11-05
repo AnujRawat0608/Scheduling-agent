@@ -36,7 +36,7 @@ export async function discoverWebQuotes(lineItem: LineItem): Promise<SupplierQuo
 
   // Skip pages that can't contain an offer: articles/listicles and pages with no price-like text.
   // Each skipped page saves a model call (time and tokens).
-  const NOT_A_SHOP = /\/(blog|articles?|news|guides?)\//i;
+    const NOT_A_SHOP = /\/(blog|articles?|news|guides?|cart|searchpage|search)\b|[?&](q|k|query|keyword)=/i;
   const PRICE_LIKE = /[$€£₹]|\b(usd|inr|eur|gbp|aud|cad)\b|\bprice\b/i;
   const candidates = hits.filter((h) => !NOT_A_SHOP.test(h.url) && PRICE_LIKE.test(h.text));
   console.log(`[webSourcing] "${lineItem.item}": ${hits.length} result(s), ${candidates.length} worth reading`);

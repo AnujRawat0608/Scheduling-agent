@@ -15,7 +15,12 @@ const OfferSchema = z.object({
   match: z
     .enum(["exact", "likely", "no"])
     .describe("Does this listing match the requested product? Use 'no' for accessories, other models or unrelated products"),
-  unitPrice: z.number().describe("Price for ONE unit as a plain number, no currency symbol"),
+    unitPrice: z.number().describe(
+    "CURRENT selling price of exactly ONE unit as a plain number. Not a 'was' price, savings, monthly/financing payment, shipping, a pack/bundle price, or the price of a different capacity or variant."
+  ),
+  priceBasis: z
+    .enum(["single_unit", "pack_or_bulk", "unclear"])
+    .describe("Is unitPrice the price of one single unit? Use 'pack_or_bulk' if it covers several units, 'unclear' if you cannot tell"),
   currency: z.string().describe("ISO 4217 code such as USD, INR, EUR"),
   evidence: z.string().describe("A short VERBATIM excerpt copied from the page that contains this price"),
   moq: z.number().nullable().describe("Minimum order quantity if stated, otherwise null"),
@@ -80,6 +85,33 @@ function hostnameOf(url: string): string {
   }
 }
 
+// Storage/memory sizes such as "64GB": a different size means a different product (and price).
+const SPEC_RE = /\b\d+(?:\.\d+)?\s?(?:gb|tb|mb|mah|ghz|mhz)\b/gi;
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Positions of `needle` in `haystack`, ignoring whitespace differences. */
+function indexesOf(haystack: string, needle: string, max = 50): number[] {
+  const words = needle.trim().split(/\s+/).filter(Boolean).map(escapeRe);
+  if (words.length === 0) return [];
+  const re = new RegExp(words.join("\\s+"), "gi");
+  const out: number[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(haystack)) && out.length < max) {
+    out.push(m.index);
+    if (m.index === re.lastIndex) re.lastIndex++;
+  }
+  return out;
+}
+
+/** true = the price text sits close to the product title, false = far away, null = couldn't tell. */
+function priceNearTitle(page: string, title: string, evidence: string, maxGap = 1200): boolean | null {
+  const t = indexesOf(page, title.slice(0, 80));
+  const e = indexesOf(page, evidence);
+  if (t.length === 0 || e.length === 0) return null;
+  return t.some((ti) => e.some((ei) => Math.abs(ti - ei) <= maxGap));
+}
+
 /** Extract offers from one search result page and return only the ones that pass validation. */
 export async function extractOffersFromHit(lineItem: LineItem, hit: SearchHit): Promise<SupplierQuote[]> {
   const fullText = hit.text.slice(0, 300_000);
@@ -99,7 +131,11 @@ Rules:
 - Copy "evidence" word for word from the page, including the price. Never invent or paraphrase it.
 - If a value is not stated on the page, return null. Never guess prices, stock, lead times or emails.
 - Prices are per single unit. If only a pack or bulk price is shown, skip that offer.
-- Return an empty list if the page has no clear offer.`,
+- Return an empty list if the page has no clear offer.
+- unitPrice must be the price of the SAME product whose title you return in productTitle. If the page lists several capacities, sizes or variants, use only the one that matches the request.
+- Ignore "was"/crossed-out prices, "save $X" amounts, monthly payment amounts, shipping fees and prices of related or recommended products.
+- Set priceBasis to "pack_or_bulk" if the price covers more than one unit.
+`,
     },
     {
       role: "user",
@@ -119,6 +155,7 @@ ${pageText}
   const lowerPage = fullText.toLowerCase();
   const now = new Date().toISOString();
   const quotes: SupplierQuote[] = [];
+  const wantedSpecs = (`${lineItem.item} ${lineItem.specifications ?? ""}`.match(SPEC_RE) ?? []).map(squash);
   const host = hostnameOf(hit.url);
   const reject = (why: string, o: { supplierName: string; unitPrice: number }) => {
     if (DEBUG) console.log(`[webSourcing] rejected offer from ${host} (${o.supplierName}, ${o.unitPrice}): ${why}`);
@@ -143,6 +180,23 @@ ${pageText}
       continue;
     }
     if (!priceAppearsIn(o.evidence, o.unitPrice)) { reject("price not in evidence", o); continue; }
+        // A pack or bundle price is not the price of one unit.
+    if (o.priceBasis === "pack_or_bulk") { reject("pack or bulk price", o); continue; }
+
+    // The listing is a different size/capacity than requested (e.g. 256GB when 64GB was asked for).
+    const titleSpecs = (o.productTitle.match(SPEC_RE) ?? []).map(squash);
+    if (wantedSpecs.length > 0 && titleSpecs.length > 0 && !titleSpecs.some((s) => wantedSpecs.includes(s))) {
+      reject(`different size (${titleSpecs.join(", ")})`, o);
+      continue;
+    }
+
+    // The price must sit near the product's own title, not in another product's tile.
+    if (priceNearTitle(fullText, o.productTitle, o.evidence) === false) {
+      reject("price is far from the product title", o);
+      continue;
+    }
+
+    if (DEBUG) console.log(`[webSourcing] accepted ${host}: "${o.productTitle}" ${currency} ${o.unitPrice} | evidence: ${o.evidence}`);
 
     // Only keep an email that is literally on the page.
     const email = o.contactEmail?.trim();
@@ -172,7 +226,8 @@ ${pageText}
       fetchedAt: now,
       contactEmail,
       // Computed here, not taken from the model.
-      confidence: (o.match === "exact" ? 0.75 : 0.5) + (o.inStock === true ? 0.05 : 0),
+            confidence:
+        (o.match === "exact" ? 0.75 : 0.5) + (o.inStock === true ? 0.05 : 0) - (o.priceBasis === "unclear" ? 0.15 : 0),
     });
   }
   return quotes;

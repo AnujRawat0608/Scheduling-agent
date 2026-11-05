@@ -42,6 +42,8 @@ export const suppliers = pgTable("suppliers", {
   averageLeadTimeDays: integer("average_lead_time_days"),
 
   // --- Business performance ---
+
+  
   responseRate: integer("response_rate"),
   responseTimeHours: text("response_time_hours"),
   transactionsCount: integer("transactions_count"),

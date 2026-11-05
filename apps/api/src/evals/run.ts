@@ -6,6 +6,7 @@ import { runQuoteScoringEvals } from "./runQuoteScoringEvals.js";
 import { runInvoiceEvals } from "./runInvoiceEvals.js";
 import { runOrderMathEvals } from "./runOrderMathEvals.js";
 import { runAuthEvals } from "./runAuthEvals.js";
+import { runProcurementExtractionEvals } from "./runProcurementExtractionEvals.js";
 
 async function main() {
   // The first three belong to the original scheduling agent and go away with the legacy code.
@@ -18,6 +19,8 @@ async function main() {
   const invoiceResult = runInvoiceEvals();
   const orderMathResult = runOrderMathEvals();
   const authResult = runAuthEvals();
+  const procExtraction = await runProcurementExtractionEvals();
+  console.log(`Procurement extraction (LLM):              ${procExtraction.passedChecks}/${procExtraction.totalChecks} checks passed`);
 
   const line = (r: { passed: number; failed: number }) => `${r.passed}/${r.passed + r.failed} checks passed`;
 
