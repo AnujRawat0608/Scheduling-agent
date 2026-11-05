@@ -2,6 +2,7 @@ import { ChatGroq } from "@langchain/groq";
 import { z } from "zod";
 import type { LineItem, SupplierQuote } from "../../state.js";
 import type { SearchHit } from "./search.js";
+import { looksUsedOrRefurbished, missingQualifier } from "./offerChecks.js";
 
 // Keep prompts small: big pages + parallel calls hit the provider's tokens-per-minute limit,
 // which shows up as long retry waits and timeouts.
@@ -171,6 +172,8 @@ Rules:
 - unitPrice must be the price of the SAME product whose title you return in productTitle. If the page lists several capacities, sizes or variants, use only the one that matches the request.
 - Ignore "was"/crossed-out prices, "save $X" amounts, monthly payment amounts, shipping fees and prices of related or recommended products.
 - Set priceBasis to "pack_or_bulk" if the price covers more than one unit.
+- Only return NEW items. Skip used, renewed, refurbished, open-box or "like new" listings and marketplace used offers.
+- Respect the form factor and variant: a full-size SD/SDXC card is not a microSD card, and "Plus", "Pro", "Max" or "Mini" models are different products. Use match "no" when the listing differs in these words.
 `,
     },
     {
@@ -192,6 +195,7 @@ ${pageText}
   const now = new Date().toISOString();
   const quotes: SupplierQuote[] = [];
   const wantedSpecs = (`${lineItem.item} ${lineItem.specifications ?? ""}`.match(SPEC_RE) ?? []).map(squash);
+  const wantsUsed = looksUsedOrRefurbished(`${lineItem.item} ${lineItem.specifications ?? ""}`);
   const host = hostnameOf(hit.url);
   const reject = (why: string, o: { supplierName: string; unitPrice: number }) => {
     if (DEBUG) console.log(`[webSourcing] rejected offer from ${host} (${o.supplierName}, ${o.unitPrice}): ${why}`);
@@ -214,13 +218,25 @@ ${pageText}
 
     // The evidence must really be on the page, and must contain the price the model claims.
     const evidenceSquashed = squash(o.evidence);
-    if (evidenceSquashed.length < 6 || !pageSquashed.includes(evidenceSquashed)) {
-      reject("evidence not found on the page", o);
+      if (evidenceSquashed.length < 6 || !pageSquashed.includes(evidenceSquashed)) {
+      reject(`evidence not found on the page (model quoted: ${JSON.stringify(o.evidence.slice(0, 120))})`, o);
       continue;
     }
     if (!priceAppearsIn(o.evidence, o.unitPrice)) { reject("price not in evidence", o); continue; }
         // A pack or bundle price is not the price of one unit.
     if (o.priceBasis === "pack_or_bulk") { reject("pack or bulk price", o); continue; }
+    // Used, renewed or open-box listings are not what a buyer ordering new stock is asking for.
+    if (!wantsUsed && looksUsedOrRefurbished(`${o.evidence} ${o.productTitle}`)) {
+      reject("used, renewed or open-box listing", o);
+      continue;
+    }
+
+// A word that defines the product (micro, mini, plus, pro...) is in the request but missing from the listing.
+const missing = missingQualifier(`${lineItem.item} ${lineItem.specifications ?? ""}`, o.productTitle);
+if (missing) {
+  reject(`listing title lacks "${missing}"`, o);
+  continue;
+}
 
     // The listing is a different size/capacity than requested (e.g. 256GB when 64GB was asked for).
     const titleSpecs = (o.productTitle.match(SPEC_RE) ?? []).map(squash);
