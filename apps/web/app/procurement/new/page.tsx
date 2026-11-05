@@ -13,9 +13,10 @@ import { RiskAssessmentBadge } from "../../../components/RiskAssessmentBadge";
 import { SupplierBadge } from "../../../components/SupplierBadge";
 import { COUNTRIES } from "../../../lib/countries";
 import { findApprovalTarget, buildRfqMailHref } from "../../../lib/procurementSourcing";
-import { Paperclip, ArrowUp, X, ExternalLink, Check, ChevronDown, AlertTriangle } from "lucide-react";
+import { Paperclip, ArrowUp, X, ExternalLink, Check, ChevronDown, AlertTriangle, Calculator } from "lucide-react";
 import { AgentActivity } from "../../../components/AgentActivity";
 import { RfqQuoteStatus } from "../../../components/RfqQuoteStatus";
+
 
 import {
   createProcurementTask,
@@ -499,11 +500,19 @@ const reject = useMutation({
             <h1 className="mt-1 text-base font-semibold text-neutral-900">New request</h1>
           </div>
 
-          <div className="flex gap-1.5">
-            <SourceTab label="From your PLM" disabled />
-            <SourceTab label="Paste a BOM" active={mode === "bom"} onClick={() => setMode("bom")} />
-            <SourceTab label="Just type it" active={mode === "type"} onClick={() => setMode("type")} />
-          </div>
+          <div className="flex items-center gap-1.5">
+  <SourceTab label="From your PLM" disabled />
+  <SourceTab label="Paste a BOM" active={mode === "bom"} onClick={() => setMode("bom")} />
+  <SourceTab label="Just type it" active={mode === "type"} onClick={() => setMode("type")} />
+  <span className="mx-1 h-5 w-px bg-neutral-200" aria-hidden />
+  <Link
+    href="/tariff"
+    className="flex items-center gap-1 text-[11px] font-medium text-neutral-500 transition hover:text-[#EA580C]"
+  >
+    <Calculator size={12} />
+    Tariff Estimator
+  </Link>
+</div>
         </div>
 
         {/* Request options */}

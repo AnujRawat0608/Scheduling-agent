@@ -22,6 +22,8 @@ import { paymentsRouter } from "./routes/payments.js";
 import { offerImagesRouter } from "./routes/offerImages.js";
 import { rfqTaskQuotesRouter } from "./routes/rfqTaskQuotes.js";
 import { rfqAcceptRouter } from "./routes/rfqAccept.js";
+import { tariffRouter } from "./routes/tariff.js";
+
 
 
 
@@ -64,6 +66,7 @@ app.use("/api/offers", offerImagesRouter);
 app.use("/api/rfqs/by-task", rfqTaskQuotesRouter);
 app.use("/api/rfqs", rfqRouter);
 app.use("/api/rfq-orders", rfqAcceptRouter);
+app.use("/api", tariffRouter);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
