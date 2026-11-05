@@ -1,344 +1,322 @@
-# AI Procurement & Supply Chain Risk Agent
+# Metis: AI procurement and supply-chain risk agent
 
-An AI-assisted procurement platform. A buyer describes what they need in plain English, the agent finds supplier quotes, ranks fulfillment plans by price, lead time and deadline fit, and pauses for human approval before anything is ordered. A built-in risk analysis service shows whether the shipping lane between supplier and destination is affected by blockades, conflict or other disruption.
+Metis helps hardware teams source components. A buyer describes what they need in plain English ("50 units of SanDisk Ultra 64GB microSD card by 2026-11-30"). The agent finds supplier quotes, ranks fulfilment plans by price, lead time and deadline fit, optionally checks shipping-route risk, and **always pauses for human approval** before anything is sent to a supplier.
 
-**Live app:** https://procurement-agent-web.vercel.app
+Live app: https://procurement-agent-web.vercel.app
+
+**Status:** pre-launch, built solo. No users or revenue yet. Payments run in Razorpay test mode.
 
 ---
 
 ## What it does
 
 ### 1. Sourcing agent (buyer)
-- Takes a freeform request, e.g. *"We need 50 units of SanDisk Ultra 64GB microSD card for the hardware team by 2026-10-27."*
-- Extracts line items, quantities and the required-by date with an LLM.
-- Searches **registered suppliers** (the platform catalog), the **web**, or both.
-- Scores every quote on price, lead time and deadline fit, with a **Prioritise** setting (balanced / cheapest / fastest).
-- Converts prices to the buyer's currency using live FX rates and includes tax and shipping.
-- Builds a **recommended fulfillment plan** (single supplier or split across suppliers) plus alternatives, with a plain-language rationale, e.g. *"Cheapest · fastest · arrives 12d before deadline"*.
-- Optionally runs a **supply chain risk check** on the supplier regions in the plan.
-- **Always stops for human approval.** The buyer approves the recommended plan, picks an alternative, or rejects.
-- After approval, creates and emails RFQs to the chosen suppliers.
-- Buyers can also place a **direct order** with a catalog supplier (cart checkout). The server prices it from the catalog, so the browser can never set its own price. See [Orders](#orders).
+- Takes a free-text request, a pasted BOM, or an uploaded BOM file (`.xlsx`, `.csv`, `.txt`).
+- Extracts line items, quantities and a required-by date with an LLM.
+- Searches registered suppliers (the platform catalog), the web, or both.
+- Prices every quote deterministically (tax, shipping, FX) and ranks by price, lead time and deadline fit, using a **Prioritise** setting (balanced, cheapest, fastest).
+- Builds a recommended fulfilment plan (one supplier, or split across suppliers) plus alternatives, each with a plain-language rationale.
+- Optionally runs a route-risk check for each supplier country against the buyer's delivery country.
+- Stops for a decision. The buyer approves the recommended plan, picks an alternative, or **rejects with a category and a note**.
+- After approval, creates one RFQ per chosen supplier, with the unit price fixed to the supplier's listed price, and emails it.
 
 ### 2. Supplier portal
-- Suppliers register, build a public profile and manage their product catalog (price, MOQ, lead time, category, tax, certifications).
-- They see confirmed orders and their status, and an inbox of RFQs to quote on.
-- New suppliers can be reviewed by an admin before going live.
+- Suppliers register, build a public profile, and manage a product catalog (price, MOQ, lead time, stock, tax, images).
+- They receive RFQs in an inbox and submit quotes, see orders, and mark orders as shipped.
+- An admin reviews and verifies suppliers.
 
-### 3. Route risk analysis
-- The user picks an **origin and destination** (typed or on a world map / globe).
-- The risk service reports status **per transport mode** (sea, air, road, rail): the chokepoints on the lane, their current risk level (green / yellow / red) and the news events behind it.
-- It also answers natural-language questions about current risk (`/ask`).
-- Risk data is **advisory**. It never blocks an order and does not change the quote ranking.
+### 3. Buyer orders and billing
+- Buyers accept a supplier's quote, which creates an order priced from the stored quote **including the tax and shipping the agent showed in the plan**.
+- Direct cart orders from a supplier's profile page are priced server-side from the catalog.
+- Payment goes through Razorpay (test mode today). An order becomes `confirmed` only after the server verifies the payment, and is then shipped by the supplier.
+- The Billing page lists the signed-in buyer's own orders, offers **Pay now** on unpaid orders, and generates PDF invoices for paid orders.
 
-### 4. Admin
-- Admin login and supplier review/approval.
+### 4. Route risk
+- The user picks an origin and destination country. The risk service reports risk per transport mode (sea, air, road, rail): the tracked chokepoints on the lane, their status (green, yellow, red) and the news events behind it.
+- A global overview shows all tracked chokepoints, and a Q&A endpoint answers natural-language questions over live risk data.
+- Risk data is advisory. It never blocks an order and does not change quote ranking.
 
 ---
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    Web["apps/web<br/>Next.js<br/>buyer, supplier and admin portals<br/>risk map / globe UI"]
-    API["apps/api<br/>Node + TypeScript + Express<br/>LangGraph procurement agent"]
-    Risk["apps/risk-agent<br/>Python + FastAPI<br/>GDELT ingestion + scoring + Q&A"]
-    PG1[("Postgres<br/>app data + LangGraph checkpoints")]
-    PG2[("Postgres + PostGIS<br/>chokepoints, routes, events, risk scores")]
-    GDELT["GDELT DOC 2.0 API"]
-    Groq["Groq LLMs"]
-    Mail["SMTP (Nodemailer)"]
-
-    Web -->|REST, cookie/JWT auth| API
-    Web -->|risk map, /ask| Risk
-    API -->|/procurement/route-risk| Risk
-    API --> PG1
-    API --> Groq
-    API --> Mail
-    Risk --> PG2
-    Risk --> GDELT
-    Risk --> Groq
+```
+                    Browser (buyer, supplier, admin)
+                              |
+                       Next.js web app  ---------------------+
+                       (Vercel)                              |  (map, overview, Q&A)
+                              |                              |
+                              v                              v
+        +----------------------------------------+   +----------------------+
+        | Express API (apps/api)                 |   | Risk service         |
+        |  - REST routes: auth, catalog, RFQs,   |-->|  (FastAPI, PostGIS,  |
+        |    orders, payments, uploads, FX       |   |   hosted on Render)  |
+        |  - LangGraph procurement agent         |   |  - ingestion         |
+        |  - Deterministic pricing core          |   |  - scoring           |
+        +----------------------------------------+   |  - route risk API    |
+                    |                                +----------------------+
+                    v                                          |
+   Postgres (data, history, agent checkpoints)                 v
+   Supabase Storage (product images)                 Postgres + PostGIS
+   Groq, Firecrawl / Tavily, Razorpay, SMTP          NewsAPI, Open-Meteo, Groq
 ```
 
 | Part | Stack | Responsibility |
 |---|---|---|
-| `apps/web` | Next.js 14, React 18, TypeScript, Tailwind, TanStack Query | Buyer, supplier and admin UIs; risk map (`react-simple-maps`, `d3-geo`, `topojson-client`) and 3D globe (`react-globe.gl`); cart; client-side PDF invoices (`jspdf`); currency display |
-| `apps/api` | Express, LangGraph, Drizzle ORM, Postgres, Langfuse, Nodemailer | Auth, catalog, RFQs, orders, FX, and the procurement agent |
-| `apps/risk-agent` | FastAPI, psycopg2, Groq, PostGIS | News ingestion, risk scoring, route-risk API, Q&A agent |
+| `apps/web` | Next.js 14, React 18, TypeScript, Tailwind, TanStack Query | Buyer, supplier and admin UIs, risk map (react-simple-maps, d3-geo) and globe (react-globe.gl), cart, PDF invoices (jspdf), BOM upload, display-currency conversion |
+| `apps/api` | Express, LangGraph (Postgres checkpointer), Drizzle ORM, Postgres, Nodemailer, Razorpay | Auth, catalog, RFQs, orders, payments, FX, and the procurement agent |
+| Risk service (`supply-chain-risk-agent`) | FastAPI, psycopg2 (pooled), PostGIS, Groq | News and weather ingestion, risk scoring, route risk by country pair, Q&A agent |
 
-### Procurement agent (LangGraph)
+The API's risk client calls `POST /route-risk` with `origin_country` and `destination_country`, defined in `supply-chain-risk-agent`. The older `apps/risk-agent` exposes `POST /procurement/route-risk` with a different request and response shape and is kept for reference.
+
+### Design principles
+1. **LLMs only understand intent or extract facts.** Prices, totals, FX, tax, deadline checks and ranking are deterministic code, in integer cents.
+2. **Humans approve every purchase.** No RFQ or order is created before approval.
+3. **Only registered suppliers can be in a plan.** Web-found quotes are shown for reference, with confidence and source link, and are never part of an approvable plan. The buyer orders those on the supplier's own site.
+4. **LLM output is never trusted on its own.** Web offers must pass code-side checks (see Web sourcing).
+5. **The order matches the plan.** The same money rules price a quote in the plan and an order built from it, and a test proves the totals agree.
+6. **Failures degrade gracefully.** Web discovery, route-risk checks, history logging and emails never fail a procurement run.
+
+---
+
+## The procurement agent
 
 ```
-START → contactSuppliers ─┬─ registered only ─────────────▶ compareQuotes
-                          └─ web / both ─▶ webDiscovery ──▶ compareQuotes
+START -> contactSuppliers -+- registered only ------> compareQuotes
+                           +- web / both -> webDiscovery -> compareQuotes
 
-compareQuotes ─┬─ no plan (failed / web-only results) ─▶ END
-               └─ plan ready ─▶ riskCheck ─▶ humanApproval ─▶ sendRfqs ─▶ END
+compareQuotes -+- nothing to approve (failed / web-only) -> END
+               +- plan ready -> riskCheck -> humanApproval -> sendRfqs -> END
 ```
 
-The run state is checkpointed to Postgres (`PostgresSaver`), so a run can wait for approval for minutes or days and survive a server restart.
+State is checkpointed to Postgres (`PostgresSaver`), so a run can wait for a decision for days and survive a restart.
 
-| Node | What it does |
+| Step | What it does |
 |---|---|
-| `extractRequest` (before the graph, in the route) | LLM (Groq, structured output via Zod) turns free text into line items and a deadline |
-| `contactSuppliers` | Full-text search over the supplier catalog (Postgres `tsvector`, listing title only), with an accessory filter so a "case" is not returned for a "Raspberry Pi 5" |
-| `webDiscovery` | Runs only when the buyer chose web or both. Finds and extracts quotes from the web (see [Web sourcing](#web-sourcing)), de-duplicates against registered suppliers by normalised company name, and never fails the run |
-| `compareQuotes` | Deterministic scoring and plan building (see below) |
-| `riskCheck` | Optional. Calls the risk service for each distinct supplier region in the plan and stores the result. Advisory only |
-| `humanApproval` | Uses LangGraph `interrupt()`. The run always pauses here |
-| `sendRfqs` | Creates and emails one RFQ per supplier (idempotent per task and supplier), reports partial failures |
+| `extractProcurementRequest` (route, before the graph) | Groq structured output (Zod) turns text into line items and a deadline. Past deadlines are rejected. |
+| `contactSuppliers` | Postgres full-text search on offer titles, with an accessory filter so a "case" is not returned for a "Raspberry Pi 5". |
+| `webDiscovery` | Runs only for web or both. De-duplicates web results against registered suppliers by normalised company name. Never fails the run. |
+| `compareQuotes` | Prices, scores and ranks quotes, then builds plans. |
+| `riskCheck` | Optional. One lane per distinct supplier country. Domestic lanes are skipped. Advisory only. |
+| `humanApproval` | `interrupt()`. The run always pauses here. The buyer approves a plan or rejects with a category and note. |
+| `sendRfqs` | One RFQ per supplier leg, idempotent per task and supplier. |
 
-**Design principles**
-- **LLMs only understand intent or write prose.** Anything that must be correct (prices, totals, FX, deadline checks, ranking) is deterministic code.
-- **Humans approve every purchase.** No RFQ or order is created before approval.
-- **Only verified suppliers can be in a plan.** Web-found quotes are shown for reference (with confidence and source URL) but are never approvable. Simulated suppliers are disabled unless explicitly enabled for demos.
-- **Failures degrade gracefully.** Web discovery and risk checks never break a procurement run.
-
-**How `compareQuotes` works**
-1. **Prices** each quote in integer cents: tax-inclusive prices have the tax extracted, tax-exclusive prices have it added, and shipping is added. Each component is then converted to the buyer currency (INR) with stored FX rates, and the rounded lines are summed so the breakdown always adds up. This assumes 2-decimal currencies.
-2. **Scores** each quote as `(priceScore × wPrice + leadScore × wSpeed) × trust`.
-   - `priceScore` is the cheapest total divided by this quote's total. `leadScore` is `(fastest lead time + 1) ÷ (this lead time + 1)`. Both are capped at 1.
-   - Weights (price / speed): balanced 0.6 / 0.4, cheapest 0.85 / 0.15, fastest 0.2 / 0.8.
-   - `trust` is 1 for verified quotes and `0.8 × confidence` for web quotes. The cheapest and fastest baselines come from verified quotes only, so one wrongly scraped price cannot drag every real supplier's score down.
-   - A quote whose stock is below the quantity, or whose MOQ is above it, scores −1 and is excluded. Unknown web stock or MOQ is not treated as zero.
-   - Ordering is: usable before unusable, on-time before late, higher score, then lower price, then faster. Only a verified, on-time quote can be marked "best".
-   - Each quote gets a plain-language rationale, e.g. *"Cheapest · fastest · arrives 12d before deadline"*.
-3. Enumerates every one-supplier-per-item combination (capped at 5,000, with a greedy fallback for large item lists).
-4. Sorts plans by: meets the deadline, then fewer suppliers, then higher average score, then lower total cost.
-5. Returns a recommended plan, alternatives, and a warning if no plan can meet the deadline.
+### Pricing and ranking (`compareQuotes`)
+- Every quote is priced in integer cents: tax-inclusive prices have tax extracted, tax-exclusive prices have it added, shipping is added, then each component is converted to INR with stored FX rates and the rounded lines are summed. Two-decimal currencies only. A missing exchange rate makes the quote unpriceable instead of guessing.
+- `score = (priceScore x wPrice + leadScore x wSpeed) x trust`
+  - `priceScore = cheapest total / this total` (capped at 1)
+  - `leadScore = (fastest lead time + 1) / (this lead time + 1)` (capped at 1)
+  - Weights (price / speed): balanced 0.6 / 0.4, cheapest 0.85 / 0.15, fastest 0.2 / 0.8
+  - `trust` is 1 for registered quotes and `0.8 x confidence` for web quotes
+- Cheapest and fastest baselines come from registered quotes only, so one wrong scraped price cannot drag everyone's score down.
+- A quote with less stock than the quantity, or an MOQ above it, scores -1 and is excluded.
+- Ordering: usable before unusable, on-time before late, higher score, lower price, faster.
+- Plans enumerate every one-supplier-per-item combination (capped at 5,000, with a greedy fallback). Plans sort by: meets deadline, fewer suppliers, higher average score, lower total cost.
 
 ### Web sourcing
+Uses a search API, not an in-house crawler, so the server never fetches arbitrary URLs.
+- Firecrawl (`/v1/search`) is preferred when `FIRECRAWL_API_KEY` is set. Tavily is the fallback. With neither, web and both requests return 400.
+- Up to 8 pages per item. Pages that look like blogs or news, or contain no price-like text, are skipped before any model call.
+- Groq extracts structured offers from the relevant lines of each page.
+- An offer is dropped unless the model marked it as the requested product, the page does not say out of stock, the price is positive with a valid currency code, and the model's evidence excerpt appears **verbatim on the page** and contains the claimed price.
+- A contact email is kept only if it appears on the page. Confidence is computed in code (0.75 exact, 0.5 likely, plus 0.05 if in stock).
+- Page text is treated as untrusted data in the prompt.
+- Web quotes are flagged with stock unknown, shipping unknown (0 means "not quoted"), MOQ 1 when unstated, and a 14-day lead time assumed when none is given.
 
-Web sourcing uses a **search API, not an in-house crawler**. The server never fetches arbitrary URLs itself, which avoids SSRF and robots.txt handling.
+---
 
-1. **Search.** The provider returns result pages with their text. [Firecrawl](https://www.firecrawl.dev) (`/v1/search`, page markdown) is preferred when `FIRECRAWL_API_KEY` is set. [Tavily](https://tavily.com) is the fallback when only `TAVILY_API_KEY` is set. With neither key, "web" and "both" requests are rejected with a 400. The query is the item, its specifications and the words "buy price supplier". Up to 8 pages are fetched per item (`WEB_MAX_PAGES`). Pages whose URL looks like a blog, article, news or guide, or that contain no price-like text, are skipped before any model call. Pages are read two at a time (`WEB_CONCURRENCY`) with a 45-second timeout per step (`WEB_TIMEOUT_MS`). Results are de-duplicated by site, price and currency, and the 6 most confident per item are kept (`WEB_MAX_QUOTES_PER_ITEM`).
-2. **Extraction.** For each page, an LLM on Groq (default `openai/gpt-oss-20b`, override with `WEB_EXTRACT_MODEL`) returns structured offers: supplier, product title, unit price, currency, MOQ, lead time, stock, contact email and region. Only the lines that mention the product or look like prices (about 6,000 characters) are sent to the model.
-3. **Validation in code.** The model's output is never trusted on its own. An offer is dropped unless:
-   - the model marked it as matching the requested product (not an accessory or another model),
-   - the page doesn't say it is out of stock,
-   - the price is positive and the currency is a valid 3-letter code,
-   - the model's `evidence` excerpt appears **verbatim on the page** and contains the claimed price.
-   
-   A contact email is kept only if it literally appears on the page. Confidence is computed in code (0.75 for an exact match, 0.5 for a likely match, plus 0.05 if in stock), not taken from the model.
-4. **Prompt-injection defence.** Page content is treated as untrusted data in the system prompt, and the verbatim-evidence check stops invented offers.
-5. **Honest gaps.** Web quotes are flagged `source: "web"` with the source URL and these markers: stock unknown, shipping unknown (0 means "not quoted", not free), MOQ defaults to 1 when unstated, and a 14-day lead time is assumed (and flagged) when the page gives none. They have no supplier region, so the risk check does not cover them.
+## RFQs, orders and payments
 
-Set `WEB_DEBUG=true` to log why individual offers were rejected.
+- **Agent RFQs** are created after approval, one per supplier, with reference `RFQ-<task id prefix>-<leg>`. A unique index on `(task_id, supplier_id)` makes retries safe. Unit prices are fixed to the supplier's listed price in the buyer's chosen currency, converted at that day's rate. Each line also carries the listing's tax rate, tax mode and shipping, fixed by the server. The server overwrites price, quantity and currency on the supplier's quote.
+- **Manual RFQs** come from the "Send RFQ" form.
+- **Accepting a quote** checks that the buyer owns the RFQ, the quote is current and not expired, then claims the RFQ and creates the order in one transaction. Tax and shipping come from the RFQ, never from the supplier's quote.
+- **Direct orders** take only product IDs and quantities from the client. Name, price, currency, tax and shipping come from the catalog, saved as a snapshot. The buyer's email comes from their login, never from the request.
+- **Order lifecycle:** `pending` (awaiting payment) -> `confirmed` (paid) -> `shipped`. The only route that sets `confirmed` is payment verification.
+- **Payments:** the charged amount is always the order's server-side total. Razorpay payments are verified with an HMAC signature check. Payment routes require the signed-in buyer who owns the order. `PAYMENT_MODE=demo` skips the gateway and is ignored when `NODE_ENV=production`.
+- **Email** (RFQs, shipping notices, inquiries) is best effort and bounded by a timeout so a slow mail server never blocks a purchase.
 
-### Procurement API
+### Authentication
+Buyer, supplier and admin each have their own token type. Every route accepts only its own kind, and this is covered by automated tests. Admin tokens carry an admin type marker and may use a separate secret (`ADMIN_JWT_SECRET`).
 
-| Method | Path | Auth | Purpose |
-|---|---|---|---|
-| POST | `/api/procurement` | Procurer login | Create a request. Returns `202` with `taskId` and `threadId`; the agent runs in the background and the UI polls for progress |
-| GET | `/api/procurement` | none | Last 50 tasks |
-| GET | `/api/procurement/:id` | none | Task plus live graph state |
-| POST | `/api/procurement/:id/approve` | none | Approve (optionally with `selectedPlanIndex`) or reject (with a note). Only accepted while the task is `awaiting_approval` |
+### Main API areas
+| Area | Purpose |
+|---|---|
+| `/api/procurement` | Create a request, list requests, read a task with live graph state, approve or reject |
+| `/api/rfqs`, `/api/rfqs/by-task`, `/api/rfq-orders` | RFQs, supplier quotes, buyer lookup by task, accepting a quote |
+| `/api/supplier-orders`, `/api/payments` | Direct orders, the buyer's order list, supplier shipping, payment sessions and verification |
+| `/api/catalog`, `/api/supply-chain`, `/api/offers` | Catalog search, supplier listings, product images |
+| `/api/procurer-auth`, `/api/supplier-auth`, `/api/admin-auth` | Registration and login for each role |
+| `/api/suppliers`, `/api/admin/suppliers` | Supplier profiles, admin verification |
+| `/api/fx-rates` | Exchange rates (units per USD) |
 
-Input rules: the request text is limited to 20,000 characters, unknown `priority` or `sourceMode` values fall back to `balanced` and `registered`, and a required-by date in the past is rejected. The buyer's identity comes from the login token, never from the form.
+---
 
-### Orders
+## Data model
 
-Direct orders (cart checkout) are separate from agent RFQs.
+**API database:** `procurers`, `suppliers`, `admins`, `supplier_offers` (catalog), `offer_images`, `procurement_tasks`, `risk_assessments`, `rfqs`, `rfq_quotes`, `supplier_orders`, `supplier_order_items`, `supplier_messages`, `supplier_certifications`, `supplier_verification_events`, `fx_rates`, plus the LangGraph checkpoint tables created at runtime by `PostgresSaver.setup()`.
 
-- **`POST /api/supplier-orders`** places an order with one supplier (1–100 items). The client sends only `productId` and `quantity`. Name, price, currency, tax and shipping are read from the catalog.
-- Each item must belong to the supplier and satisfy **MOQ ≤ quantity ≤ stock**, and all items must share one currency.
-- Money is computed in **integer cents**. Tax-inclusive prices have the tax extracted, and tax-exclusive prices have it added. One shipping fee applies per order (the highest among the items). No platform fee is added.
-- The order and its items are saved as a **price snapshot in one transaction**.
-- **Lifecycle:** `pending` → `confirmed` (`PATCH /api/supplier-orders/:id/confirm`) → `shipped` (`PATCH /api/supplier-orders/:id/ship`). Shipping requires supplier login, only works on that supplier's own orders, and only from `confirmed`. It emails the buyer, and a mail failure does not undo the shipment.
-- `GET /api/supplier-orders/mine` returns the logged-in supplier's orders. `GET /api/supplier-orders` returns all orders for the billing page.
+**History tables (append-only, row-level security on):**
+- `price_observations`: every real quote the agent sees (supplier, price, currency, lead time, shipping, tax). Simulated quotes and placeholder values are excluded.
+- `plan_decisions`: every approval and rejection, with the plan chosen, the options shown and the risk status. Rejections carry a category and a note.
+- `quote_requests` and `order_events`: RFQ and order activity history.
+- A trigger on `supplier_offers` logs every catalog price change.
+- `supplier_metrics` is a view for supplier reliability figures.
 
-### RFQs
+History logging never fails a request. See the migrations for exact columns.
 
-RFQs live in one `rfqs` table and have two origins, so a supplier sees both in the same inbox.
+**Risk database** (PostGIS): `chokepoints`, `routes`, `route_chokepoints`, `events`, `event_chokepoints`, `risk_scores`, `source_health`.
 
-**Agent RFQs** are created by `sendRfqs` (through `createAgentRfq`) after the buyer approves a plan.
-- One RFQ per supplier leg, with reference `RFQ-<first 8 characters of the task id>-<leg number>`. It is linked to the task and to the buyer (`procurerId`), so the buyer can see the supplier's quote later.
-- Line items carry the supplier's own listing title plus the buyer's specifications. The notes mention the supplier's listed price and lead time and ask them to confirm availability and a final price.
-- The supplier gets `RFQ_REPLY_WITHIN_DAYS` (default 3) to reply.
-- **Idempotent:** a unique index on (task, supplier) means a repeat or parallel call returns the existing RFQ and sends nothing.
-- The email is best effort. The RFQ is saved and visible in the supplier dashboard either way.
-- Buyer-supplied text is flattened to one line and length-capped before it is stored or emailed to an outside company.
+---
 
-**Manual RFQs** come from the "Send RFQ" form (`POST /api/rfqs`), either as a draft or sent. Creation is limited to 20 per IP per hour, using an in-memory counter that resets on restart.
-
-| Method | Path | Auth | Purpose |
-|---|---|---|---|
-| GET | `/api/rfqs/me` | Supplier | Incoming RFQs, newest first (drafts hidden) |
-| GET | `/api/rfqs/me/unread-count` | Supplier | Badge count |
-| GET | `/api/rfqs/me/:id` | Supplier | Full RFQ; marks it as read |
-| POST | `/api/rfqs/me/:id/quote` | Supplier | Submit a quote (line totals, lead time, validity, payment terms, notes). A resubmission replaces the earlier quote, and the RFQ status becomes `quoted` |
-| GET | `/api/rfqs/:id` | none | RFQ with supplier details and quotes, for the buyer |
-| POST | `/api/rfqs` | none | Create a manual RFQ |
-
-### Risk agent
+## Risk service
 
 **Pipeline**
-1. `gdelt_ingest.py` queries GDELT for supply-chain-relevant news (blockades, port strikes, sanctions, airspace closures, shipping attacks, canal drought and more).
-2. For each article, an LLM (Llama 3.3 70B on Groq) returns structured JSON: relevance, event type, severity (1–5), confidence, likely chokepoint and a summary.
-3. Relevant events are stored in `events` and linked to chokepoints.
-4. `risk_scoring.py` rolls events up into a **0–100 score per chokepoint**. It uses a 72-hour window, a 24-hour half-life decay, and `severity^1.5 × confidence × decay`. Status is green below 34, yellow from 34 to 66, and red from 67.
-5. `procurement_bridge.py` maps an origin and destination to routes and chokepoints and returns the worst status per transport mode.
+1. `newsapi_ingest.py` fetches headlines. Groq classifies each into relevance, event type, severity (1-5), confidence and likely chokepoint (from a fixed list). `weather_ingest.py` turns Open-Meteo wave height into weather events with no LLM. Both write through shared helpers that de-duplicate by `source_ref` and clamp values to the database constraints.
+2. `risk_scoring.py` rolls events from the last 72 hours into a 0-100 score per chokepoint: `sum(severity^1.5 x confidence x decay) x 4`, capped at 100, with a 24-hour half-life. Green below 34, yellow from 34, red from 67.
+3. `route_risk_api.py` and `route_inference.py` map a country pair to chokepoints per mode: curated lanes in the database first, then sea-region corridors; air uses a straight-line proxy; rail and road use small curated corridor tables. Lanes with no mapping report "unknown", never "safe".
 
-**Endpoints**
+**Endpoints:** `GET /chokepoints`, `GET /chokepoints/{id}`, `GET /routes`, `GET /routes/{id}/alternatives`, `POST /ask`, `POST /route-risk`, `GET /health`.
 
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/chokepoints`, `/chokepoints/{id}` | Current status, score history, recent events |
-| GET | `/routes`, `/routes/{id}/alternatives` | Routes with rolled-up status; alternate routes |
-| POST | `/ask` | Natural-language Q&A over live risk data (tool-calling agent) |
-| POST | `/procurement/route-risk` | Per-mode risk for a supplier-region → destination lane |
-| GET | `/health` | Health check |
-
-### Data model (summary)
-
-- **API database (Drizzle migrations in `apps/api/drizzle`)**: procurers, suppliers, admin, procurement runs, supplier offers (catalog), RFQs and quotes, supplier messages, orders, FX rates, risk assessments. LangGraph checkpoint tables are created at runtime by `PostgresSaver.setup()`.
-- **Risk database (`apps/risk-agent/db/schema.sql`, needs PostGIS)**: `chokepoints`, `routes`, `route_chokepoints`, `events`, `event_chokepoints`, `risk_scores`.
+Risk output is directional, based on publicly reported events from roughly the last 72 hours. It is not a guarantee of safety.
 
 ---
 
 ## Getting started
 
-### Prerequisites
-- Node.js 20+
-- Python 3.12
-- Postgres for the API. Postgres **with PostGIS** for the risk agent.
-- A Groq API key.
+**Prerequisites:** Node.js 20+, Python 3.11, Postgres for the API, Postgres with PostGIS for the risk service, a Groq API key.
 
 ### 1. Install
-
 ```bash
 npm install
 ```
 
-### 2. Configure environment
-
-Create `.env` files from the examples. **Never commit them.**
+### 2. Environment
+Create `.env` files from the examples and never commit them.
 
 `apps/api/.env`
 
 | Variable | Purpose |
 |---|---|
-| `DATABASE_URL` | API Postgres connection string (also used for agent checkpoints) |
-| `GROQ_API_KEY` | LLM calls (request extraction, web extraction) |
+| `DATABASE_URL` | API Postgres (also used for agent checkpoints) |
+| `JWT_SECRET` | Required. Signs login tokens |
+| `ADMIN_JWT_SECRET` | Optional. A separate secret for admin tokens (falls back to `JWT_SECRET`) |
+| `GROQ_API_KEY` | Request extraction and web extraction |
 | `WEB_APP_URL` | Allowed CORS origin (default `http://localhost:3000`) |
-| `PORT` | API port (default `3001`) |
-| `RISK_AGENT_URL` | Risk service base URL (default `http://localhost:8000`) |
-| `PROCUREMENT_REPLY_TO` | Reply-to address on RFQ emails (shared mailbox) |
+| `PORT` | API port (default 3001) |
+| `RISK_AGENT_URL` | Risk service base URL (default `http://127.0.0.1:8000`) |
+| `FIRECRAWL_API_KEY`, `TAVILY_API_KEY` | Web sourcing providers |
+| `WEB_EXTRACT_MODEL`, `WEB_DEBUG`, `WEB_MAX_PAGES`, `WEB_CONCURRENCY`, `WEB_TIMEOUT_MS`, `WEB_MAX_QUOTES_PER_ITEM` | Optional web sourcing settings |
 | `ALLOW_SIMULATED_SUPPLIERS` | `true` enables fake demo quotes. Keep off in production |
-| `FIRECRAWL_API_KEY` | Web sourcing search provider (preferred) |
-| `TAVILY_API_KEY` | Web sourcing fallback provider, used only if no Firecrawl key is set |
-| `WEB_EXTRACT_MODEL` | Optional. Groq model for web offer extraction (default `openai/gpt-oss-20b`) |
-| `WEB_DEBUG` | Optional. `true` logs why web offers were rejected |
-| `WEB_MAX_PAGES`, `WEB_CONCURRENCY`, `WEB_TIMEOUT_MS`, `WEB_MAX_QUOTES_PER_ITEM` | Optional web sourcing limits (defaults: 8 pages, 2 at a time, 45,000 ms, 6 quotes per item) |
-| `RFQ_REPLY_WITHIN_DAYS` | Optional. Days a supplier is given to answer an agent RFQ (default 3) |
-| `LANGFUSE_*`, SMTP and JWT settings | Tracing, outgoing mail and auth. See `.env.example` |
+| `PROCUREMENT_REPLY_TO` | Reply-to address on RFQ emails (must be a real address) |
+| `RFQ_REPLY_WITHIN_DAYS` | Days a supplier has to answer an agent RFQ (default 3) |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`, `MAIL_TIMEOUT_MS` | Outgoing email |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_BUCKET` | Product image storage |
+| `PAYMENT_MODE`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `MERCHANT_NAME` | Payments (`demo` or `razorpay`, use `rzp_test_` keys while developing) |
+| `NODE_ENV` | Set to `production` in production |
 
-`apps/risk-agent/.env`
+`apps/web/.env.local`: `NEXT_PUBLIC_API_URL` (default `http://localhost:3001/api`) and the risk service URL used by `apps/web/lib/riskAgentApi.ts`.
 
-| Variable | Purpose |
-|---|---|
-| `DATABASE_URL` | Risk Postgres (PostGIS) connection string |
-| `GROQ_API_KEY` | Event extraction and Q&A |
+`supply-chain-risk-agent/.env`: `DATABASE_URL` (PostGIS), `GROQ_API_KEY`, `NEWSAPI_KEY`, and optionally `SEA_GEOSPATIAL_FALLBACK`.
 
-### 3. Set up the databases
-
+### 3. Databases
 ```bash
 # API database
-npm run db:migrate                            # applies the Drizzle migrations
-npm run seed:admin --workspace=apps/api      # creates the first admin
+npm run db:migrate
+npm run seed:admin --workspace=apps/api        # creates the first admin
 
-# After changing a Drizzle schema file, generate a new migration first:
-# npm run db:generate
-
-# Risk database (PostGIS required)
-psql "$RISK_DATABASE_URL" -f apps/risk-agent/db/schema.sql
+# After changing a Drizzle schema file
+npm run db:generate
 ```
 
-The risk `routes` and `route_chokepoints` tables are **not populated by `schema.sql`** (it seeds chokepoints only). Add your lanes there, or route-risk lookups will return "no mapped route".
+Risk database (PostGIS required): apply `db/schema.sql`, then the migrations in `db/`. The ingestion helpers expect a unique constraint on `events.source_ref` and a `source_health` table. Lanes in `routes` and `route_chokepoints` are not seeded by `schema.sql`; add them or rely on the built-in region corridors.
 
 ### 4. Run
-
 ```bash
-# API
-npm run dev:api
+npm run dev:api          # API
+npm run dev:web          # web (new terminal)
 
-# Web (new terminal)
-npm run dev:web
-
-# Risk agent (new terminal)
-cd apps/risk-agent
+cd supply-chain-risk-agent
 python -m venv venv && venv\Scripts\activate      # Windows
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-### 5. Feed the risk agent
-
-Ingestion and scoring are plain scripts. **Schedule them** (cron, Task Scheduler, or your host's cron job), for example every 15–30 minutes:
-
+### 5. Feed the risk service
+Ingestion and scoring are plain scripts. Schedule them (cron, GitHub Actions or your host's cron job). NewsAPI's free plan allows about 100 requests a day, so every few hours is enough for news, and weather can run hourly or every few hours.
 ```bash
-cd apps/risk-agent
-python -m app.services.gdelt_ingest     # fetch + classify news into events
-python -m app.services.risk_scoring     # recompute chokepoint scores
+cd supply-chain-risk-agent
+python -m app.services.newsapi_ingest
+python -m app.services.weather_ingest
+python -m app.services.risk_scoring
 ```
+If these do not run, risk scores go stale. Free hosting tiers can put the service to sleep, so the first request after idle time may be slow.
 
-If these do not run, risk scores go stale.
+---
 
-### Evals
-
+## Tests and evals
 ```bash
 npm run eval --workspace=apps/api
 ```
 
-Deterministic evals cover quote scoring and invoice calculation. The extraction evals call the LLM and are scored rather than exact-matched.
+| Suite | What it checks | Kind |
+|---|---|---|
+| Quote scoring (15 checks) | Currency conversion, tax, stock and MOQ filtering, ranking behaviour, missing exchange rates | Deterministic |
+| Invoice calculation (22 checks) | Totals, tax-inclusive and tax-exclusive, FX, rounding, bad input | Deterministic |
+| Order maths (24 checks) | An order built from a quote totals the same as the plan, including tax and shipping | Deterministic |
+| Auth separation (17 checks) | Buyer, supplier and admin tokens are each accepted only by their own routes | Deterministic |
+| Procurement extraction (48 checks, 10 scenarios) | Item count, names, quantities and dates from real-style requests, including shared quantities, "a dozen", thousands separators, relative dates and a pasted BOM | LLM (Groq) |
+
+- LLM evals need a Groq key and are subject to Groq's rate limits. The extraction eval reports a pass rate and does not fail the run, because model output can vary between runs.
+- Scenarios live in `apps/api/src/evals/procurementExtractionScenarios.ts`. Add one whenever the extractor gets a real request wrong.
+- The free/busy, constraint and meeting-extraction sections belong to the original scheduling agent and go away with the legacy code.
 
 ---
 
 ## Project structure
-
 ```
-apps/
-├── api/                      Express API + procurement agent
-│   ├── src/procurement/      LangGraph graph, nodes, scoring, pricing, FX, web sourcing
-│   ├── src/routes/           REST routers (procurement, rfqs, catalog, suppliers, admin, fx, uploads)
-│   ├── src/db/               Drizzle schemas and client
-│   ├── src/evals/            Evaluation suites
-│   └── drizzle/              SQL migrations
-├── risk-agent/               FastAPI risk service
-│   ├── app/main.py           API endpoints
-│   ├── app/services/         gdelt_ingest, risk_scoring, procurement_bridge, agent
-│   └── db/schema.sql         PostGIS schema + chokepoint seed
-└── web/                      Next.js app
-    ├── app/                  Pages: procurement, quotes, rfq, suppliers, admin, routing, supply-chain
-    ├── components/           Risk map/globe, RFQ inbox, cart, badges
-    └── lib/                  API clients
+scheduling-agent/              (repo folder name is historical)
+  apps/
+    api/                       Express API + procurement agent
+      src/procurement/         graph, nodes, scoring, pricing, FX, web sourcing, risk client
+      src/routes/              REST routers
+      src/lib/                 shared helpers (order maths, mail, storage, countries)
+      src/db/                  Drizzle schemas and client
+      src/agent/               auth helpers, mail helpers (also legacy scheduling agent)
+      src/evals/               evaluation suites
+      drizzle/                 SQL migrations
+    web/                       Next.js app
+      app/                     pages: procurement, quotes, rfq, suppliers, supply-chain, routing, billing, catalog, admin
+      components/              risk badges and overview, agent activity, RFQ and checkout dialogs
+      lib/                     API clients and helpers
+    risk-agent/                earlier version of the risk service (kept for reference)
+  supply-chain-risk-agent/     risk service used by the API (FastAPI)
+    app/main.py                endpoints
+    app/services/              ingestion, scoring, route inference, Q&A agent
+    db/                        schema and migrations
 ```
 
 ---
 
-## Known limitations
+## Known limitations and roadmap
 
-- **Route-to-chokepoint mapping drives risk accuracy.** Results are only as good as the seeded `routes` and `route_chokepoints` data. Some lanes (for example India → Italy) need their chokepoints reviewed. Alternate routes (such as around the Cape of Good Hope) should be added.
-- **Risk checks during sourcing need a destination region.** The API's risk client does not always send one, while the risk service requires it, so the check can report "unavailable". Pass the buyer's destination region or make it optional.
-- **GDELT events are not de-duplicated**, and `event_time` is the ingestion time, not the article's publish time. Repeated stories can inflate scores.
-- **Event classification is headline-only.** The LLM sees the headline and URL, not the article body.
-- **Web-sourced quotes are unverified by design.** They are shown with confidence and source URL but can never be part of an approvable plan. Stock, shipping and often lead time are unknown.
-- **Several endpoints have no authentication.** Anyone who knows a task ID can read or approve a procurement task (`GET /api/procurement`, `GET /api/procurement/:id`, `POST /api/procurement/:id/approve`), and approval does not check that the task belongs to the caller. `PATCH /api/supplier-orders/:id/confirm` has no auth or ownership check even though its comment says only the supplier can confirm. `GET /api/supplier-orders` returns every order, including buyer names, emails and addresses. The RFQ endpoints are open too: `POST /api/rfqs` trusts the requester name and email from the form (limited only by an in-memory per-IP counter, and manual RFQs are not linked to a buyer account), and `GET /api/rfqs/:id` returns an RFQ and its quotes to anyone with the ID. Lock these down before production.
-- **A failed RFQ send cannot be retried through the approve endpoint.** The task ends as `failed`, and approval is only accepted from `awaiting_approval`.
-- **The first agent run is started in-process after the HTTP response.** A server restart mid-run can leave a task stuck in an early status, because nothing resumes it.
-- **The "web search isn't set up" error still mentions `TAVILY_API_KEY`**, although Firecrawl is now the preferred provider.
-- **Catalog matching is full-text search on listing titles.** It has no synonym or fuzzy matching.
-- **Risk API has open CORS and no authentication.** Tighten before production.
-- **Uploads are stored on local disk** (`apps/api/uploads`), which is lost on redeploy on most hosts. Use object storage.
-- **Legacy scheduling-agent code** (`apps/api/src/agent/*`, `routes/runs.ts`, `apps/web/app/runs/*`) is still in the repo and mounted but is not part of the product.
+This is an early build. Before real customers:
 
-## Roadmap ideas
-- Remove the legacy scheduling code and rename the package and repo.
-- Use risk as a scored factor in plan ranking, not only as a badge.
-- Read supplier email replies back into the system automatically.
-- Add article-body analysis and de-duplication to the risk pipeline.
-- Scheduler and monitoring for ingestion and scoring.
+- **Payments:** move from test mode to live, with a payment webhook as the source of truth, order expiry for unpaid orders, supplier payouts and refunds.
+- **Orders:** reserve or decrement stock, key order ownership to the buyer account instead of email, and use one shipping policy (plans add shipping per line, direct orders charge the highest once).
+- **Sourcing:** approve the exact listing a buyer clicked (rows from one supplier can map to the same plan), allow only KYC-verified suppliers in plans, add part-number (MPN) matching and fuzzier search.
+- **Buyer UI:** show a goods, tax, shipping and total breakdown before a quote is accepted. The supplier quote screen currently shows goods only.
+- **Reliability:** run agent jobs through a durable queue, add an email outbox with retries, reconcile tasks stuck in transient states, and reduce polling.
+- **Observability:** attach Langfuse tracing to the procurement graph (a helper exists from the original agent but is not yet wired in), and track cost and latency per run.
+- **Evals:** grow the extraction set with real buyer requests and harder cases, and add evals for web-offer extraction.
+- **Risk data:** schedule ingestion and monitor source health, widen news queries beyond the current few, de-duplicate syndicated stories, calibrate scoring against known disruptions, and show data age honestly in the UI.
+- **Coverage:** more currencies beyond USD, INR, EUR, GBP, AED and SGD, a buyer currency other than INR, and use risk as a ranking factor.
+- **Cleanup:** remove the legacy scheduling code and rename the repo and packages.
 
 ## Security notes
-- Keep `.env`, `cookies.txt` and `eval-output.txt` out of version control, and rotate any key that was ever committed.
-- RFQ emails require a real reply-to address. Placeholder `*.local` addresses are rejected.
+- Keep `.env` files out of version control and rotate any key that was ever committed.
+- Set `NODE_ENV=production` in production so demo payments cannot run, and prefer a separate `ADMIN_JWT_SECRET`.
+- RFQ emails need a real reply-to address. Placeholder `*.local` addresses are rejected.
+- Use unique passwords for demo accounts.
+
+## Author
+Built by Anuj Rawat.
