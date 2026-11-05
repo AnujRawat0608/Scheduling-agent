@@ -38,7 +38,7 @@ const llm = new ChatGroq({
   // A larger model extracts more reliably than the 20B default; override via env.
   model: process.env.WEB_EXTRACT_MODEL ?? "openai/gpt-oss-20b",
   temperature: 0,
-  maxRetries: 1, // fail fast instead of waiting through long rate-limit backoffs
+  maxRetries: 0, // fail fast instead of waiting through long rate-limit backoffs
 }).withStructuredOutput(PageExtraction, { name: "extract_supplier_offers" });
 
 /* ---------- code-side validation: never trust the model's output on its own ---------- */
@@ -112,13 +112,37 @@ function priceNearTitle(page: string, title: string, evidence: string, maxGap = 
   return t.some((ti) => e.some((ei) => Math.abs(ti - ei) <= maxGap));
 }
 
-/** Extract offers from one search result page and return only the ones that pass validation. */
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Milliseconds to wait if this error is a rate limit ("try again in 5.175s"), otherwise null. */
+function retryAfterMs(err: unknown): number | null {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (!/429|rate limit/i.test(msg)) return null;
+  const m = /try again in ([\d.]+)s/i.exec(msg);
+  return m ? Math.ceil(parseFloat(m[1]) * 1000) + 500 : 5000;
+}
+
+async function invokeWithRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const wait = retryAfterMs(err);
+      if (wait === null || attempt >= tries) throw err;
+      await sleep(Math.min(wait, 20_000));
+    }
+  }
+}
+
+/** 
+ * 
+ * Extract offers from one search result page and return only the ones that pass validation. */
 export async function extractOffersFromHit(lineItem: LineItem, hit: SearchHit): Promise<SupplierQuote[]> {
   const fullText = hit.text.slice(0, 300_000);
   if (fullText.trim().length < 100) return [];
   const pageText = relevantExcerpt(fullText, lineItem.item);
 
-  const result = await llm.invoke([
+  const result = await invokeWithRetry(() => llm.invoke([
     {
       role: "system",
       content: `You extract supplier offers from a web page for a procurement system.
@@ -148,7 +172,7 @@ PAGE CONTENT (untrusted):
 ${pageText}
 """`,
     },
-  ]);
+  ]));
 
   // Verify against the whole page, not just the excerpt the model saw.
   const pageSquashed = squash(fullText);
