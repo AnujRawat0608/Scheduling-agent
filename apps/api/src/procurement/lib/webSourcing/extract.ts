@@ -5,7 +5,7 @@ import type { SearchHit } from "./search.js";
 
 // Keep prompts small: big pages + parallel calls hit the provider's tokens-per-minute limit,
 // which shows up as long retry waits and timeouts.
-const MAX_PAGE_CHARS = 6_000;
+const MAX_PAGE_CHARS = 9_000;
 const DEBUG = process.env.WEB_DEBUG === "true";
 const DEFAULT_LEAD_TIME_DAYS = 14; // used (and flagged) when the page gives no lead time
 
@@ -55,27 +55,37 @@ function priceAppearsIn(evidence: string, price: number): boolean {
  * Pages can be huge (menus, reviews, footers). Send only the lines that mention the product
  * or look like prices, so the model sees what matters and the prompt stays small.
  */
-function relevantExcerpt(text: string, item: string): string {
-  if (text.length <= MAX_PAGE_CHARS) return text;
+   function relevantExcerpt(text: string, item: string): string {
+     if (text.length <= MAX_PAGE_CHARS) return text;
 
-  const tokens = item.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= 3);
-  const priceLike = /[$€£₹]|\b(usd|inr|eur|gbp|aud|cad)\b|\bprice\b|\bin stock\b|\bmoq\b/i;
+     const lines = text.split(/\n+/).map((l) => l.trim()).filter(Boolean);
+     const tokens = item.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= 3);
+     const priceLike = /[$€£₹]\s?\d|\d\s?(usd|inr|eur|gbp)\b|\bprice\b|\bin stock\b|\bmoq\b/i;
 
-  const keep: string[] = [];
-  let size = 0;
-  for (const raw of text.split(/\n+/)) {
-    const line = raw.trim();
-    if (!line) continue;
-    const lower = line.toLowerCase();
-    if (tokens.some((t) => lower.includes(t)) || priceLike.test(line)) {
-      const cut = line.slice(0, 400);
-      keep.push(cut);
-      size += cut.length + 1;
-      if (size >= MAX_PAGE_CHARS) break;
-    }
-  }
-  return keep.length > 0 ? keep.join("\n") : text.slice(0, MAX_PAGE_CHARS);
-}
+     // Anchor lines: the ones that look like the product title (2+ words from the request).
+     const keep = new Set<number>();
+     lines.forEach((line, i) => {
+       const lower = line.toLowerCase();
+       if (tokens.filter((t) => lower.includes(t)).length >= 2) {
+         // The price usually comes shortly after the title.
+         for (let k = Math.max(0, i - 1); k <= Math.min(lines.length - 1, i + 8); k++) keep.add(k);
+       }
+     });
+     // Then any other price lines, if there is room.
+     lines.forEach((line, i) => {
+       if (priceLike.test(line)) keep.add(i);
+     });
+
+     const out: string[] = [];
+     let size = 0;
+     for (const i of [...keep].sort((a, b) => a - b)) {
+       const cut = lines[i].slice(0, 300);
+       if (size + cut.length + 1 > MAX_PAGE_CHARS) break;
+       out.push(cut);
+       size += cut.length + 1;
+     }
+     return out.length > 0 ? out.join("\n") : text.slice(0, MAX_PAGE_CHARS);
+   }
 
 function hostnameOf(url: string): string {
   try {
@@ -187,6 +197,9 @@ ${pageText}
 
   // The model can return nothing usable (rate limit, malformed output). Treat that as "no offers".
   const offers = result?.offers ?? [];
+     if (DEBUG && offers.length === 0) {
+     console.log(`[webSourcing] ${host}: 0 offers. excerpt ${pageText.length} chars: ${JSON.stringify(pageText.slice(0, 300))}`);
+   }
   if (DEBUG) console.log(`[webSourcing] ${host}: model returned ${offers.length} offer(s)`);
 
   for (const o of offers) {
