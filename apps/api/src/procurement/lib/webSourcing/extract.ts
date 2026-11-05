@@ -5,7 +5,7 @@ import type { SearchHit } from "./search.js";
 
 // Keep prompts small: big pages + parallel calls hit the provider's tokens-per-minute limit,
 // which shows up as long retry waits and timeouts.
-const MAX_PAGE_CHARS = 9_000;
+const MAX_PAGE_CHARS = 6_000;
 const DEBUG = process.env.WEB_DEBUG === "true";
 const DEFAULT_LEAD_TIME_DAYS = 14; // used (and flagged) when the page gives no lead time
 
