@@ -125,13 +125,15 @@ function priceNearTitle(page: string, title: string, evidence: string, maxGap = 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Milliseconds to wait if this error is a rate limit ("try again in 5.175s"), otherwise null. */
+/** Milliseconds to wait before retrying this error, or null if it should not be retried. */
 function retryAfterMs(err: unknown): number | null {
   const msg = err instanceof Error ? err.message : String(err);
+  // The model sometimes returns no tool call at all (Groq: tool_use_failed). It is transient.
+  if (/tool_use_failed|Tool choice is required/i.test(msg)) return 800;
   if (!/429|rate limit/i.test(msg)) return null;
   const m = /try again in ([\d.]+)s/i.exec(msg);
   return m ? Math.ceil(parseFloat(m[1]) * 1000) + 500 : 5000;
 }
-
 async function invokeWithRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
   for (let attempt = 1; ; attempt++) {
     try {
