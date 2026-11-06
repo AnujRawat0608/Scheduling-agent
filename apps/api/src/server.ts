@@ -37,6 +37,7 @@ process.on("uncaughtException", (err) => {
 });
 
 const app = express();
+app.set("trust proxy", 1); // one proxy hop (Render)
 
 app.use(
   cors({
