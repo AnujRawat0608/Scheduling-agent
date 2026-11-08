@@ -1,0 +1,5 @@
+# Lines starting with # are ignored. Required columns: hs_code, destination_country, name, rate_percent.
+# layer: standard (the product's own duty) or additional (a surcharge). mode: add, or top_up_to (additional only).
+# verified=true needs source_url AND reviewed_on (YYYY-MM-DD). Leave verified blank until you have checked the official schedule.
+# An additional row with an empty hs_code applies to EVERY product from that origin.
+hs_code,origin_country,destination_country,name,layer,mode,rate_percent,valuation_basis,verified,source_url,source_note,effective_from,effective_to,reviewed_on

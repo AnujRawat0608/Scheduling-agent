@@ -3,10 +3,10 @@ export type Mode = "add" | "top_up_to";
 export type Basis = "cif" | "fob";
 
 interface Scope {
-  hsCode: string; // prefix; '' = all products (additional measures only)
+  hsCode: string;
   originCountry: string | null;
   destinationCountry: string;
-  effectiveFrom: string | null; // YYYY-MM-DD
+  effectiveFrom: string | null;
   effectiveTo: string | null;
 }
 
@@ -19,6 +19,7 @@ export interface TariffMeasure extends Scope {
   verified: boolean;
   sourceUrl: string | null;
   sourceNote: string | null;
+  reviewedOn: string | null; // YYYY-MM-DD, when someone last checked the rate against the official source
 }
 
 export interface ImportRestriction extends Scope {
@@ -26,6 +27,7 @@ export interface ImportRestriction extends Scope {
   note: string;
   verified: boolean;
   sourceUrl: string | null;
+  reviewedOn: string | null;
 }
 
 export interface DutyInput {
@@ -41,13 +43,15 @@ export interface DutyComponent {
   name: string;
   layer: Layer;
   mode: Mode;
-  ratePercent: number; // as published
-  appliedRatePercent: number; // after a top-up is worked out
+  ratePercent: number;
+  appliedRatePercent: number;
   dutiableValue: number;
   amount: number;
   verified: boolean;
   source: string | null;
   sourceUrl: string | null;
+  reviewedOn: string | null;
+  stale: boolean; // verified, but last checked longer ago than STALE_AFTER_DAYS allows
 }
 
 export interface RestrictionNote {
@@ -55,6 +59,8 @@ export interface RestrictionNote {
   note: string;
   verified: boolean;
   sourceUrl: string | null;
+  reviewedOn: string | null;
+  stale: boolean;
 }
 
 export type DutyEstimate =
@@ -64,12 +70,29 @@ export type DutyEstimate =
   | {
       status: "estimated";
       dutyAmount: number;
-      effectiveRatePercent: number; // duty as a % of the goods value
+      effectiveRatePercent: number;
       components: DutyComponent[];
       allVerified: boolean;
+      anyStale: boolean;
       restrictions: RestrictionNote[];
       assumptions: string[];
     };
+
+/** How long a verified rate stays trustworthy. Temporary surcharges change faster than base duties. */
+export const STALE_AFTER_DAYS = { standard: 90, additional: 30, restriction: 90 } as const;
+
+const DAY_MS = 86_400_000;
+
+/**
+ * A rate is stale when it is verified but its last check is older than the limit (or has no date).
+ * Unverified rates are not "stale": they already carry the stronger "unverified" label.
+ */
+function isStale(verified: boolean, reviewedOn: string | null, today: string, limitDays: number): boolean {
+  if (!verified) return false;
+  if (!reviewedOn) return true;
+  const age = (Date.parse(today) - Date.parse(reviewedOn)) / DAY_MS;
+  return !Number.isFinite(age) || age > limitDays;
+}
 
 const norm = (s: string) => s.trim().toLowerCase();
 const digitsOnly = (s: string) => s.replace(/\D/g, "");
@@ -87,7 +110,6 @@ function matches(r: Scope, input: DutyInput, hs: string, today: string): boolean
 
 const specificity = (r: Scope) => digitsOnly(r.hsCode).length * 10 + (r.originCountry !== null ? 1 : 0);
 
-/** One measure per name: the most specific match (longest HS prefix, origin-specific, newest). */
 function pickMeasures(all: TariffMeasure[], input: DutyInput, hs: string, today: string): TariffMeasure[] {
   const best = new Map<string, TariffMeasure>();
   for (const m of all) {
@@ -126,9 +148,15 @@ export function estimateDuty(
 
   const notes: RestrictionNote[] = restrictions
     .filter((r) => matches(r, input, hs, today))
-    .map((r) => ({ status: r.status, note: r.note, verified: r.verified, sourceUrl: r.sourceUrl }));
+    .map((r) => ({
+      status: r.status,
+      note: r.note,
+      verified: r.verified,
+      sourceUrl: r.sourceUrl,
+      reviewedOn: r.reviewedOn,
+      stale: isStale(r.verified, r.reviewedOn, today, STALE_AFTER_DAYS.restriction),
+    }));
 
-  // A prohibited import has no meaningful duty figure.
   if (notes.some((n) => n.status === "prohibited")) return { status: "prohibited", restrictions: notes };
 
   const chosen = pickMeasures(measures, input, hs, today);
@@ -144,7 +172,6 @@ export function estimateDuty(
   const baseRate = standard.reduce((sum, m) => sum + m.ratePercent, 0);
 
   const components: DutyComponent[] = [...standard, ...chosen.filter((m) => m.layer === "additional")].map((m) => {
-    // A top-up raises the standard total to its rate, so it only adds the shortfall.
     const applied = m.mode === "top_up_to" ? Math.max(0, m.ratePercent - baseRate) : m.ratePercent;
     const dutiable = m.valuationBasis === "cif" ? goods + shipping + insurance : goods;
     return {
@@ -158,6 +185,8 @@ export function estimateDuty(
       verified: m.verified,
       source: m.sourceNote,
       sourceUrl: m.sourceUrl,
+      reviewedOn: m.reviewedOn,
+      stale: isStale(m.verified, m.reviewedOn, today, STALE_AFTER_DAYS[m.layer]),
     };
   });
 
@@ -176,6 +205,7 @@ export function estimateDuty(
     effectiveRatePercent: goods > 0 ? round2((dutyAmount / goods) * 100) : 0,
     components,
     allVerified: components.every((c) => c.verified),
+    anyStale: components.some((c) => c.stale) || notes.some((n) => n.stale),
     restrictions: notes,
     assumptions,
   };

@@ -174,6 +174,7 @@ Rules:
 - Set priceBasis to "pack_or_bulk" if the price covers more than one unit.
 - Only return NEW items. Skip used, renewed, refurbished, open-box or "like new" listings and marketplace used offers.
 - Respect the form factor and variant: a full-size SD/SDXC card is not a microSD card, and "Plus", "Pro", "Max" or "Mini" models are different products. Use match "no" when the listing differs in these words.
+- evidence must be the full line from the page containing the price, including its label or the product name (at least 15 characters), not just the number.
 `,
     },
     {
@@ -217,9 +218,14 @@ ${pageText}
     if (!/^[A-Z]{3}$/.test(currency)) { reject(`bad currency "${o.currency}"`, o); continue; }
 
     // The evidence must really be on the page, and must contain the price the model claims.
-    const evidenceSquashed = squash(o.evidence);
-      if (evidenceSquashed.length < 6 || !pageSquashed.includes(evidenceSquashed)) {
+       const evidenceSquashed = squash(o.evidence);
+    if (evidenceSquashed.length < 4 || !pageSquashed.includes(evidenceSquashed)) {
       reject(`evidence not found on the page (model quoted: ${JSON.stringify(o.evidence.slice(0, 120))})`, o);
+      continue;
+    }
+    // A bare price like "$21.99" could belong to any product tile, so it must sit next to the title.
+    if (evidenceSquashed.length < 10 && priceNearTitle(fullText, o.productTitle, o.evidence) !== true) {
+      reject("bare price is not next to the product title", o);
       continue;
     }
     if (!priceAppearsIn(o.evidence, o.unitPrice)) { reject("price not in evidence", o); continue; }

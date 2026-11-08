@@ -1,0 +1,3 @@
+# Lines starting with # are ignored. status: permit_required or prohibited. note is shown to the buyer.
+# verified=true needs source_url AND reviewed_on (YYYY-MM-DD).
+hs_code,origin_country,destination_country,status,note,verified,source_url,effective_from,effective_to,reviewed_on

@@ -1,0 +1,6 @@
+hs_code,origin_country,destination_country,name,layer,mode,rate_percent,valuation_basis,verified,source_url,source_note,effective_from,effective_to,reviewed_on
+010121,,United States,Basic customs duty (general rate),standard,add,0,fob,false,https://hts.usitc.gov/search?query=010121,"USITC HTS general rate, 2026 HTS Revision 22",,,
+010129,,United States,Basic customs duty (general rate),standard,add,0,fob,false,https://hts.usitc.gov/search?query=010129,"USITC HTS general rate, 2026 HTS Revision 22",,,
+010130,,United States,Basic customs duty (general rate),standard,add,6.8,fob,false,https://hts.usitc.gov/search?query=010130,"USITC HTS general rate, 2026 HTS Revision 22",,,
+01019030,,United States,Basic customs duty (general rate),standard,add,0,fob,false,https://hts.usitc.gov/search?query=01019030,"USITC HTS general rate, 2026 HTS Revision 22",,,
+01019040,,United States,Basic customs duty (general rate),standard,add,4.5,fob,false,https://hts.usitc.gov/search?query=01019040,"USITC HTS general rate, 2026 HTS Revision 22",,,

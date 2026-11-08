@@ -13,6 +13,10 @@ export interface DutyComponent {
   verified: boolean;
   source: string | null;
   sourceUrl: string | null;
+  /** YYYY-MM-DD: when the rate was last checked against the official source. */
+  reviewedOn: string | null;
+  /** Verified, but last checked longer ago than the allowed window. */
+  stale: boolean;
 }
 
 export interface RestrictionNote {
@@ -20,6 +24,8 @@ export interface RestrictionNote {
   note: string;
   verified: boolean;
   sourceUrl: string | null;
+  reviewedOn: string | null;
+  stale: boolean;
 }
 
 export type DutyEstimate =
@@ -32,6 +38,7 @@ export type DutyEstimate =
       effectiveRatePercent: number;
       components: DutyComponent[];
       allVerified: boolean;
+      anyStale: boolean;
       restrictions: RestrictionNote[];
       assumptions: string[];
     };

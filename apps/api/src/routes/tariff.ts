@@ -40,6 +40,7 @@ tariffRouter.post("/tariff/estimate", requireProcurerAuth, async (req, res) => {
       sourceNote: r.sourceNote,
       effectiveFrom: r.effectiveFrom,
       effectiveTo: r.effectiveTo,
+      reviewedOn: r.reviewedOn,
     }));
 
     const restrictions: ImportRestriction[] = restrictionRows.map((r) => ({
@@ -52,6 +53,7 @@ tariffRouter.post("/tariff/estimate", requireProcurerAuth, async (req, res) => {
       sourceUrl: r.sourceUrl,
       effectiveFrom: r.effectiveFrom,
       effectiveTo: r.effectiveTo,
+      reviewedOn: r.reviewedOn,
     }));
 
     res.json(
