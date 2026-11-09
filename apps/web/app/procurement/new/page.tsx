@@ -159,6 +159,20 @@ function SelectField({
 
 // useSearchParams() must sit under a Suspense boundary or `next build` fails.
 export default function NewProcurementPage() {
+  const router = useRouter();
+  const [authed, setAuthed] = useState(false);
+
+  // Don't render anything until we know the buyer is signed in.
+  useEffect(() => {
+    if (hasProcurerToken()) {
+      setAuthed(true);
+    } else {
+      router.replace("/procurement/login");
+    }
+  }, [router]);
+
+  if (!authed) return null;
+
   return (
     <Suspense fallback={null}>
       <NewProcurementInner />
@@ -172,10 +186,6 @@ function NewProcurementInner() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  // Buyers must be signed in: the server takes their identity from the login token.
-  useEffect(() => {
-    if (!hasProcurerToken()) router.replace("/procurement/login");
-  }, [router]);
 
   const [mode, setMode] = useState<SourceMode>("type");
   const [text, setText] = useState("");
