@@ -72,12 +72,7 @@ router.push("/procurement/new");
       {/* Top bar */}
       <header className="border-b border-neutral-100">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#EA580C]/10 text-[#EA580C]">
-              <Briefcase size={16} />
-            </span>
-            <p className="text-sm font-semibold text-neutral-900">Procurement portal</p>
-          </div>
+                    <p className="text-lg font-bold tracking-[0.3em] text-neutral-900">METIS</p>
           <p className="text-sm text-neutral-500">
             New here?{" "}
             <Link href="/procurement/register" className="font-medium text-[#EA580C] hover:underline">

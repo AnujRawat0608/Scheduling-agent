@@ -4,10 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Inbox } from "lucide-react";
+import { ArrowLeft, Inbox, Printer } from "lucide-react";
 import { fetchCurrentSupplier } from "../../../lib/supplierAuthApi";
 import { fetchMySupplierOrders, startShipping, type SupplierOrder } from "../../../lib/supplierOrdersApi";
 import { formatMoney } from "../../../lib/format";
+import ShippingLabel, { trackingCode } from "../../../components/ShippingLabel";
 
 const STATUS_STYLES: Record<string, string> = {
   confirmed: "bg-indigo-50 text-indigo-700",
@@ -41,12 +42,13 @@ export default function SupplierOrdersPage() {
   const [notice, setNotice] = useState<{ kind: "ok" | "warn"; text: string } | null>(null);
   // Orders shipped in this session: their button is hidden at once, before the list reloads.
   const [shippedIds, setShippedIds] = useState<Set<string>>(new Set());
-
+  const [labelOrderId, setLabelOrderId] = useState<string | null>(null);
   // Start shipping: the server marks the order shipped and emails the buyer.
   const ship = useMutation({
     mutationFn: startShipping,
     onSuccess: (result, orderId) => {
       setShippedIds((prev) => new Set(prev).add(orderId));
+      setLabelOrderId(orderId);
       setNotice(
         result.notified
           ? { kind: "ok", text: `Order marked as shipped. ${result.order.requesterName} has been emailed.` }
@@ -86,6 +88,7 @@ export default function SupplierOrdersPage() {
   });
 
   const all = data?.orders ?? [];
+  const labelOrder = all.find((o) => o.id === labelOrderId) ?? null;
   const waitingForBuyer = all.filter((o) => o.status === "pending").length;
 
   // Confirmed or later, newest first.
@@ -250,6 +253,17 @@ export default function SupplierOrdersPage() {
                           {ship.isPending && ship.variables === o.id ? "Starting…" : "Start shipping"}
                         </button>
                       )}
+
+                      {o.status === "shipped" && (
+                    <button
+                      type="button"
+                      onClick={() => setLabelOrderId(o.id)}
+                      className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-slate-300"
+                    >
+                      <Printer size={12} />
+                      Print label
+                    </button>
+                  )}
                     </div>
                   </div>
 
@@ -278,6 +292,7 @@ export default function SupplierOrdersPage() {
                       </p>
                     )}
                     <p className="text-slate-400">Order ID {o.id}</p>
+                    <p className="text-slate-400">Tracking {trackingCode(o.id)}</p>
                   </div>
                 </li>
               );
@@ -300,6 +315,15 @@ export default function SupplierOrdersPage() {
           </div>
         )}
       </div>
+      {labelOrder && (
+        <ShippingLabel
+          order={labelOrder}
+          supplierName={supplierName}
+          onClose={() => setLabelOrderId(null)}
+        />
+      )}
     </main>
+
+
   );
 }
