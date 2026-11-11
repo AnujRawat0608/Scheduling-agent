@@ -1,11 +1,12 @@
 import { Router } from "express";
 import { and, eq, desc, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { supplierOrders, supplierOrderItems,suppliers } from "../db/suppliersSchema.js";
+import { supplierOrders, supplierOrderItems, suppliers } from "../db/suppliersSchema.js";
 import { supplierOffers } from "../db/supplyChainSchema.js";
 import { requireSupplierAuth } from "../agent/lib/supplierAuth.js";
 import { requireProcurerAuth } from "../agent/lib/procurerAuth.js";
 import { notifyBuyerOrderShipped } from "../lib/orderNotifications.js";
+import { reserveStock, cancelPendingOrder, OutOfStockError } from "../lib/stock.js";
 
 export const supplierOrdersRouter = Router();
 
@@ -81,6 +82,9 @@ async function attachItems(orders: OrderRow[]) {
  * and shipping are all read from the database here, so the browser can never
  * set its own price. Everything is saved as a snapshot, in one transaction.
  *
+ * STOCK: the ordered quantities are taken off the supplier's available stock inside
+ * the same transaction (see lib/stock.ts). If any line is short, nothing is saved.
+ *
  * Money maths is done in integer cents (2-decimal currencies only), then
  * stored as numeric(12,2). No platform fee is added.
  */
@@ -140,6 +144,7 @@ supplierOrdersRouter.post("/supplier-orders", requireProcurerAuth, async (req, r
       if (o.supplierId !== supplierId) {
         throw new HttpError(400, `"${o.item}" does not belong to this supplier`);
       }
+      // Friendly early check on possibly stale data. The real guard is reserveStock() below.
       if (quantity < o.moq || quantity > o.quantityAvailable) {
         throw new HttpError(
           400,
@@ -193,8 +198,12 @@ supplierOrdersRouter.post("/supplier-orders", requireProcurerAuth, async (req, r
 
     const totalC = subtotalC + taxC + shippingC;
 
-    // Order and items are saved together: both succeed or neither does.
+    // Stock, order and items are saved together: all succeed or none does.
     const created = await db.transaction(async (tx) => {
+      // Take the stock first. Throws OutOfStockError if any line is short,
+      // which rolls the whole transaction back.
+      await reserveStock(tx, itemsToInsert);
+
       const [order] = await tx
         .insert(supplierOrders)
         .values({
@@ -208,6 +217,7 @@ supplierOrdersRouter.post("/supplier-orders", requireProcurerAuth, async (req, r
           taxAmount: (taxC / 100).toFixed(2),
           shippingCost: (shippingC / 100).toFixed(2),
           total: (totalC / 100).toFixed(2),
+          stockReserved: true,
         })
         .returning();
 
@@ -221,6 +231,9 @@ supplierOrdersRouter.post("/supplier-orders", requireProcurerAuth, async (req, r
 
     res.status(201).json({ order: serializeOrder(created.order, created.insertedItems) });
   } catch (err) {
+    if (err instanceof OutOfStockError) {
+      return res.status(409).json({ error: err.message });
+    }
     if (err instanceof HttpError) {
       return res.status(err.status).json({ error: err.message });
     }
@@ -271,6 +284,70 @@ supplierOrdersRouter.get("/supplier-orders/mine", requireSupplierAuth, async (re
  * after the payment has been checked. A separate route that could set "confirmed" without payment
  * would let anyone skip paying.
  */
+
+/**
+ * PATCH /api/supplier-orders/:id/cancel
+ * Buyer-facing: cancel your own order while it is still unpaid ("pending").
+ * The reserved stock goes back to the supplier. Repeating the call is safe:
+ * the second time the order is no longer pending, so it answers 404 and restocks nothing.
+ */
+supplierOrdersRouter.patch("/supplier-orders/:id/cancel", requireProcurerAuth, async (req, res) => {
+  try {
+    if (!UUID_RE.test(req.params.id)) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    const order = await cancelPendingOrder(
+      req.params.id,
+      eq(supplierOrders.requesterEmail, req.procurer!.email)
+    );
+    if (!order) {
+      return res.status(404).json({ error: "Order not found, or it can no longer be cancelled" });
+    }
+
+    const items = await db
+      .select()
+      .from(supplierOrderItems)
+      .where(eq(supplierOrderItems.orderId, order.id));
+
+    res.json({ order: serializeOrder(order, items) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Could not cancel the order" });
+  }
+});
+
+/**
+ * PATCH /api/supplier-orders/:id/decline
+ * Supplier-facing: decline an unpaid order placed against your account.
+ * The reserved stock goes back. Only works while the order is "pending";
+ * declining a paid order also needs a refund and is not handled here.
+ */
+supplierOrdersRouter.patch("/supplier-orders/:id/decline", requireSupplierAuth, async (req, res) => {
+  try {
+    if (!UUID_RE.test(req.params.id)) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    const order = await cancelPendingOrder(
+      req.params.id,
+      eq(supplierOrders.supplierId, req.supplier!.supplierId)
+    );
+    if (!order) {
+      return res.status(404).json({ error: "Order not found, or it can no longer be declined" });
+    }
+
+    const items = await db
+      .select()
+      .from(supplierOrderItems)
+      .where(eq(supplierOrderItems.orderId, order.id));
+
+    res.json({ order: serializeOrder(order, items) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Could not decline the order" });
+  }
+});
 
 /**
  * PATCH /api/supplier-orders/:id/ship

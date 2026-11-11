@@ -13,7 +13,11 @@ import {
   Download,
   CircleCheck,
 } from "lucide-react";
-import { fetchAllSupplierOrders, type SupplierOrder } from "../../lib/supplierOrdersApi";
+import {
+  fetchAllSupplierOrders,
+  cancelSupplierOrder,
+  type SupplierOrder,
+} from "../../lib/supplierOrdersApi";
 import { payForOrder } from "../../lib/supplierPaymentApi";
 import { formatMoney } from "../../lib/format";
 import { downloadInvoicePdf, type InvoiceInput } from "../../lib/invoicePdf";
@@ -450,6 +454,31 @@ function BillingContent() {
     },
   });
 
+  // Cancelling an unpaid order: the server cancels it and returns the reserved stock.
+  const cancelOrder = useMutation({
+    mutationFn: (order: SupplierOrder) => cancelSupplierOrder(String(order.id)),
+    onSuccess: () => {
+      setConfirmedMessage("Order cancelled.");
+      queryClient.invalidateQueries({ queryKey: ["supplier-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["supplier-orders-mine"] }); // supplier's view
+    },
+    onError: () => {
+      // The order may have been paid or declined in the meantime, so show the real state.
+      queryClient.invalidateQueries({ queryKey: ["supplier-orders"] });
+    },
+  });
+
+  function handleCancel(order: SupplierOrder) {
+    if (cancelOrder.isPending || payOrder.isPending) return;
+    const ok = window.confirm(
+      `Cancel the unpaid order for ${itemsSummary(order)}? This can't be undone.`
+    );
+    if (!ok) return;
+    cancelOrder.reset();
+    payOrder.reset();
+    cancelOrder.mutate(order);
+  }
+
   /** Creates and downloads the PDF. Resolves to true on success; the error text is shown in the UI. */
   async function handleDownload(order: SupplierOrder): Promise<boolean> {
     setDownloadError(null);
@@ -530,6 +559,7 @@ function BillingContent() {
 
   const payError = payOrder.isError ? (payOrder.error as Error).message : null;
   const payCancelled = !!payError && /cancel/i.test(payError);
+  const cancelError = cancelOrder.isError ? (cancelOrder.error as Error).message : null;
 
   return (
     <div className="mx-auto max-w-6xl px-8 py-10">
@@ -554,6 +584,12 @@ function BillingContent() {
           }`}
         >
           {payCancelled ? "Payment cancelled. You can pay any time from this page." : payError}
+        </div>
+      )}
+
+      {cancelError && (
+        <div role="alert" className="mb-6 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          Couldn&apos;t cancel the order: {cancelError}
         </div>
       )}
 
@@ -622,6 +658,8 @@ function BillingContent() {
                   const cancelled = o.status === "cancelled";
                   const isNew = highlightId !== null && String(o.id) === highlightId;
                   const payingThis = payOrder.isPending && payOrder.variables?.id === o.id;
+                  const cancellingThis = cancelOrder.isPending && cancelOrder.variables?.id === o.id;
+                  const busy = payOrder.isPending || cancelOrder.isPending;
                   const downloadingThis = downloadingId === String(o.id);
 
                   return (
@@ -675,11 +713,20 @@ function BillingContent() {
                                   },
                                 })
                               }
-                              disabled={payOrder.isPending || total === null}
+                              disabled={busy || total === null}
                               title={total === null ? "This order has no price yet" : undefined}
                               className={`${ACTION_BTN} bg-[#ea580c] text-white hover:bg-[#9a3412] disabled:opacity-50`}
                             >
                               {payingThis ? "Processing…" : "Pay now"}
+                            </button>
+                          )}
+                          {o.status === "pending" && (
+                            <button
+                              onClick={() => handleCancel(o)}
+                              disabled={busy}
+                              className={`${ACTION_BTN} border border-neutral-200 text-neutral-600 hover:border-red-300 hover:text-red-600 disabled:opacity-50`}
+                            >
+                              {cancellingThis ? "Cancelling…" : "Cancel order"}
                             </button>
                           )}
                           {canInvoice(o) && (

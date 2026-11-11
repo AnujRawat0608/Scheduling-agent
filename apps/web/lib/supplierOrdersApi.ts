@@ -114,3 +114,26 @@ export async function startShipping(orderId: string) {
   });
   return parseErrorOr<{ order: SupplierOrder; notified: boolean }>(res, "Failed to start shipping");
 }
+
+/**
+ * Supplier declines an unpaid ("pending") order. The server cancels it and returns
+ * the reserved stock to the catalog. Fails if the order is already paid or cancelled.
+ */
+export async function declineSupplierOrder(orderId: string) {
+  const res = await fetch(`${API_BASE}/supplier-orders/${orderId}/decline`, {
+    method: "PATCH",
+    headers: authHeaders(),
+  });
+  return parseErrorOr<{ order: SupplierOrder }>(res, "Failed to decline the order");
+}
+
+/**
+ * Signed-in buyer cancels their own unpaid ("pending") order. The server cancels it
+ * and returns the reserved stock. Fails if the order is already paid or cancelled.
+ */
+export async function cancelSupplierOrder(orderId: string) {
+  const res = await buyerFetch(`/supplier-orders/${orderId}/cancel`, {
+    method: "PATCH",
+  });
+  return parseErrorOr<{ order: SupplierOrder }>(res, "Failed to cancel the order");
+}

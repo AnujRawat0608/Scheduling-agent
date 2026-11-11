@@ -6,17 +6,28 @@ import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Inbox, Printer } from "lucide-react";
 import { fetchCurrentSupplier } from "../../../lib/supplierAuthApi";
-import { fetchMySupplierOrders, startShipping, type SupplierOrder } from "../../../lib/supplierOrdersApi";
+import {
+  fetchMySupplierOrders,
+  startShipping,
+  declineSupplierOrder,
+  type SupplierOrder,
+} from "../../../lib/supplierOrdersApi";
 import { formatMoney } from "../../../lib/format";
 import ShippingLabel, { trackingCode } from "../../../components/ShippingLabel";
 
 const STATUS_STYLES: Record<string, string> = {
+  pending: "bg-amber-50 text-amber-700",
   confirmed: "bg-indigo-50 text-indigo-700",
   shipped: "bg-purple-50 text-purple-700",
   delivered: "bg-emerald-50 text-emerald-700",
 };
 
-const FILTERS = ["all", "confirmed", "shipped", "delivered"] as const;
+/** "pending" means the buyer has not paid yet, so say that instead of the raw status. */
+const STATUS_LABEL: Record<string, string> = {
+  pending: "awaiting payment",
+};
+
+const FILTERS = ["all", "pending", "confirmed", "shipped", "delivered"] as const;
 type Filter = (typeof FILTERS)[number];
 
 const PAGE_STEP = 10;
@@ -27,9 +38,10 @@ function money(value: number | null, currency: string) {
 }
 
 /**
- * Orders buyers have placed with the logged-in supplier AND confirmed on their side.
- * Read-only: the buyer confirms an order, the supplier fulfils it. Pending orders
- * (not yet confirmed by the buyer) and cancelled ones are not listed, only counted.
+ * Orders buyers have placed with the logged-in supplier.
+ * Unpaid ("pending") orders are listed too, because they hold stock until they are paid,
+ * cancelled by the buyer, or declined here. Cancelled orders are not listed.
+ * The buyer pays, the supplier ships.
  */
 export default function SupplierOrdersPage() {
   const router = useRouter();
@@ -43,6 +55,7 @@ export default function SupplierOrdersPage() {
   // Orders shipped in this session: their button is hidden at once, before the list reloads.
   const [shippedIds, setShippedIds] = useState<Set<string>>(new Set());
   const [labelOrderId, setLabelOrderId] = useState<string | null>(null);
+
   // Start shipping: the server marks the order shipped and emails the buyer.
   const ship = useMutation({
     mutationFn: startShipping,
@@ -59,6 +72,17 @@ export default function SupplierOrdersPage() {
     },
   });
 
+  // Decline: the server cancels the unpaid order and puts its stock back.
+  const decline = useMutation({
+    mutationFn: declineSupplierOrder,
+    onSuccess: () => {
+      setNotice({ kind: "ok", text: "Order declined. The stock has been returned to your catalog." });
+      queryClient.invalidateQueries({ queryKey: ["supplier-orders-mine"] });
+      queryClient.invalidateQueries({ queryKey: ["supplier-orders"] }); // buyer's billing view
+      queryClient.invalidateQueries({ queryKey: ["supplier-profile"] }); // catalog stock, if cached
+    },
+  });
+
   function handleStartShipping(o: SupplierOrder) {
     if (ship.isPending) return;
     const ok = window.confirm(
@@ -67,6 +91,16 @@ export default function SupplierOrdersPage() {
     if (!ok) return;
     setNotice(null);
     ship.mutate(o.id);
+  }
+
+  function handleDecline(o: SupplierOrder) {
+    if (decline.isPending) return;
+    const ok = window.confirm(
+      `Decline the unpaid order from ${o.requesterName}? The reserved stock will be returned, and this can't be undone.`
+    );
+    if (!ok) return;
+    setNotice(null);
+    decline.mutate(o.id);
   }
 
   // Only suppliers can see this page.
@@ -84,29 +118,30 @@ export default function SupplierOrdersPage() {
     queryKey: ["supplier-orders-mine"],
     queryFn: fetchMySupplierOrders,
     enabled: !!supplierName,
-    refetchInterval: 30_000, // pick up newly confirmed orders without a manual reload
+    refetchInterval: 30_000, // pick up new and newly paid orders without a manual reload
   });
 
   const all = data?.orders ?? [];
   const labelOrder = all.find((o) => o.id === labelOrderId) ?? null;
-  const waitingForBuyer = all.filter((o) => o.status === "pending").length;
 
-  // Confirmed or later, newest first.
-  const fulfilable = useMemo(
+  // Everything except cancelled orders, newest first.
+  const listed = useMemo(
     () =>
-      all
-        .filter((o) => o.status !== "pending" && o.status !== "cancelled")
+      (data?.orders ?? [])
+        .filter((o) => o.status !== "cancelled")
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
-    [all]
+    [data]
   );
 
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: fulfilable.length };
-    for (const o of fulfilable) c[o.status] = (c[o.status] ?? 0) + 1;
+    const c: Record<string, number> = { all: listed.length };
+    for (const o of listed) c[o.status] = (c[o.status] ?? 0) + 1;
     return c;
-  }, [fulfilable]);
+  }, [listed]);
 
-  const filtered = filter === "all" ? fulfilable : fulfilable.filter((o) => o.status === filter);
+  const waitingForPayment = counts.pending ?? 0;
+
+  const filtered = filter === "all" ? listed : listed.filter((o) => o.status === filter);
   const shown = filtered.slice(0, visibleCount);
 
   function changeFilter(next: Filter) {
@@ -136,13 +171,17 @@ export default function SupplierOrdersPage() {
             </span>
             <div>
               <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Orders</h1>
-              <p className="text-sm text-slate-500">Orders buyers have confirmed with {supplierName}</p>
+              <p className="text-sm text-slate-500">Orders buyers have placed with {supplierName}</p>
             </div>
           </div>
-          {waitingForBuyer > 0 && (
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
-              {waitingForBuyer} waiting for the buyer to confirm
-            </span>
+          {waitingForPayment > 0 && (
+            <button
+              type="button"
+              onClick={() => changeFilter("pending")}
+              className="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 transition hover:bg-amber-100"
+            >
+              {waitingForPayment} awaiting payment
+            </button>
           )}
         </div>
 
@@ -158,7 +197,7 @@ export default function SupplierOrdersPage() {
                 filter === f ? "bg-[#3d6bff] text-white" : "text-slate-600 hover:bg-slate-100"
               }`}
             >
-              {f}
+              {f === "pending" ? "Awaiting payment" : f}
               <span className={`ml-1.5 text-xs ${filter === f ? "text-white/80" : "text-slate-400"}`}>
                 {counts[f] ?? 0}
               </span>
@@ -185,6 +224,12 @@ export default function SupplierOrdersPage() {
           </div>
         )}
 
+        {decline.isError && !notice && (
+          <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            Couldn&apos;t decline the order: {(decline.error as Error).message}
+          </div>
+        )}
+
         {isLoading && <p className="text-sm text-slate-500">Loading orders…</p>}
 
         {error && (
@@ -199,10 +244,12 @@ export default function SupplierOrdersPage() {
               <Inbox size={18} />
             </span>
             <p className="text-sm font-medium text-slate-700">
-              {filter === "all" ? "No confirmed orders yet" : `No ${filter} orders`}
+              {filter === "all"
+                ? "No orders yet"
+                : `No ${STATUS_LABEL[filter] ?? filter} orders`}
             </p>
             <p className="max-w-xs text-xs text-slate-500">
-              When a buyer orders from your profile page and confirms it, it will show up here.
+              When a buyer orders from your profile page, it will show up here.
             </p>
           </div>
         )}
@@ -222,7 +269,7 @@ export default function SupplierOrdersPage() {
                             STATUS_STYLES[o.status] ?? "bg-slate-100 text-slate-600"
                           }`}
                         >
-                          {o.status}
+                          {STATUS_LABEL[o.status] ?? o.status}
                         </span>
                       </div>
                       <p className="text-xs text-slate-500">
@@ -243,6 +290,18 @@ export default function SupplierOrdersPage() {
                         {tax > 0 && ` · Tax ${money(tax, o.currency)}`}
                         {` · Shipping ${Number(o.shippingCost ?? 0) > 0 ? money(o.shippingCost, o.currency) : "free"}`}
                       </div>
+
+                      {o.status === "pending" && (
+                        <button
+                          type="button"
+                          onClick={() => handleDecline(o)}
+                          disabled={decline.isPending}
+                          className="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-red-300 hover:text-red-600 disabled:opacity-50"
+                        >
+                          {decline.isPending && decline.variables === o.id ? "Declining…" : "Decline order"}
+                        </button>
+                      )}
+
                       {o.status === "confirmed" && !shippedIds.has(o.id) && (
                         <button
                           type="button"
@@ -255,15 +314,15 @@ export default function SupplierOrdersPage() {
                       )}
 
                       {o.status === "shipped" && (
-                    <button
-                      type="button"
-                      onClick={() => setLabelOrderId(o.id)}
-                      className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-slate-300"
-                    >
-                      <Printer size={12} />
-                      Print label
-                    </button>
-                  )}
+                        <button
+                          type="button"
+                          onClick={() => setLabelOrderId(o.id)}
+                          className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-slate-300"
+                        >
+                          <Printer size={12} />
+                          Print label
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -323,7 +382,5 @@ export default function SupplierOrdersPage() {
         />
       )}
     </main>
-
-
   );
 }

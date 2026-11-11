@@ -82,6 +82,7 @@ export const supplierOrders = pgTable("supplier_orders", {
   requesterEmail: text("requester_email").notNull(),
   notes: text("notes"),
   status: text("status").notNull().default("pending"),
+  stockReserved: boolean("stock_reserved").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   subtotal: numeric("subtotal", { precision: 12, scale: 2 }),
   taxAmount: numeric("tax_amount", { precision: 12, scale: 2 }),
@@ -89,6 +90,7 @@ export const supplierOrders = pgTable("supplier_orders", {
   total: numeric("total", { precision: 12, scale: 2 }), // subtotal + taxAmount + shippingCost
   currency: text("currency").notNull(),
   rfqId: uuid("rfq_id"), // optional link to the RFQ that generated this order
+
 
   // --- Payment (set when the buyer pays) ---
   razorpayOrderId: text("razorpay_order_id"),
