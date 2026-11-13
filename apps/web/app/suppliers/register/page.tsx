@@ -119,6 +119,8 @@ export default function SupplierRegisterPage() {
   const [contactName, setContactName] = useState("");
   const [country, setCountry] = useState("");
   const [phone, setPhone] = useState("");
+  // Any business registration or tax ID (GST, VAT, unified social credit code, ...).
+  // Sent to the API as `gstNumber`, which is the existing field name.
   const [gstNumber, setGstNumber] = useState("");
   const [address, setAddress] = useState("");
   const [city, setCity] = useState("");
@@ -215,18 +217,9 @@ export default function SupplierRegisterPage() {
                 Grow your business with the right connections.
               </h1>
               <p className="mt-2 text-sm text-neutral-500">
-                Create your supplier profile in a few simple steps. It only takes a couple of
+                Create your supplier profile in two short steps. It only takes a couple of
                 minutes.
               </p>
-
-              <div className="mt-6 flex items-center gap-3">
-                <div className="flex flex-1 gap-1.5">
-                  <div className="h-1.5 flex-1 rounded-full bg-[#3d6bff]" />
-                  <div className="h-1.5 flex-1 rounded-full bg-neutral-200" />
-                  <div className="h-1.5 flex-1 rounded-full bg-neutral-200" />
-                </div>
-                <span className="text-xs text-neutral-400">1 of 3</span>
-              </div>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-5">
@@ -248,7 +241,7 @@ export default function SupplierRegisterPage() {
                         type="email"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
-                        placeholder="sales@acmecomponents.com"
+                        placeholder="sales@yourcompany.com"
                         className={inputWithIconClass}
                       />
                     </div>
@@ -290,13 +283,14 @@ export default function SupplierRegisterPage() {
                       required
                       value={businessName}
                       onChange={(e) => setBusinessName(e.target.value)}
-                      placeholder="Acme Components Pvt Ltd"
+                      placeholder="Acme Components Co., Ltd"
                       className={inputClass}
                     />
                   </Field>
                   <Field label="Country">
                     <select
                       required
+                      autoComplete="off"
                       value={country}
                       onChange={(e) => setCountry(e.target.value)}
                       className={`${inputClass} cursor-pointer ${country ? "" : "text-neutral-400"}`}
@@ -313,7 +307,7 @@ export default function SupplierRegisterPage() {
                     <input
                       value={contactName}
                       onChange={(e) => setContactName(e.target.value)}
-                      placeholder="Riya Sharma"
+                      placeholder="Full name"
                       className={inputClass}
                     />
                   </Field>
@@ -321,23 +315,23 @@ export default function SupplierRegisterPage() {
                     <input
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
-                      placeholder="+91 98765 43210"
+                      placeholder="Include country code"
                       className={inputClass}
                     />
                   </Field>
-                  <Field label="GST number" optional>
+                  <Field label="Tax / VAT / GST number" optional>
                     <input
                       value={gstNumber}
                       onChange={(e) => setGstNumber(e.target.value)}
-                      placeholder="27ABCDE1234F1Z5"
+                      placeholder="Business registration or tax ID"
                       className={inputClass}
                     />
                   </Field>
-                  <Field label="Pincode" optional>
+                  <Field label="Postal code" optional>
                     <input
                       value={pincode}
                       onChange={(e) => setPincode(e.target.value)}
-                      placeholder="411001"
+                      placeholder="e.g. 518000"
                       className={inputClass}
                     />
                   </Field>
@@ -350,7 +344,7 @@ export default function SupplierRegisterPage() {
                       <input
                         value={address}
                         onChange={(e) => setAddress(e.target.value)}
-                        placeholder="Plot 12, MIDC Industrial Area"
+                        placeholder="Street address"
                         className={inputWithIconClass}
                       />
                     </div>
@@ -359,15 +353,15 @@ export default function SupplierRegisterPage() {
                     <input
                       value={city}
                       onChange={(e) => setCity(e.target.value)}
-                      placeholder="Pune"
+                      placeholder="City"
                       className={inputClass}
                     />
                   </Field>
-                  <Field label="State" optional>
+                  <Field label="State / Province" optional>
                     <input
                       value={state}
                       onChange={(e) => setState(e.target.value)}
-                      placeholder="Maharashtra"
+                      placeholder="e.g. Guangdong"
                       className={inputClass}
                     />
                   </Field>
