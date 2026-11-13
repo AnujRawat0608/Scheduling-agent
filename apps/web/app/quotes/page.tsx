@@ -3,16 +3,35 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { FileText, Plus, Hourglass, CheckCircle2, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  FileText,
+  Plus,
+  Hourglass,
+  CheckCircle2,
+  RefreshCw,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 import { fetchAllQuotes, type Quote, type QuoteStatus } from "../../lib/quotesAPI";
+import { hasProcurerToken } from "../../lib/procurerAuthApi";
 
 const STATUS_STYLES: Record<QuoteStatus, string> = {
   draft: "bg-neutral-100 text-neutral-600",
   sent: "bg-orange-100 text-orange-700",
   quoted: "bg-green-100 text-green-700",
+  revision_requested: "bg-amber-100 text-amber-800",
+  accepted: "bg-emerald-100 text-emerald-800",
 };
 
-const FILTERS = ["all", "draft", "sent", "quoted"] as const;
+const STATUS_LABELS: Record<QuoteStatus, string> = {
+  draft: "Draft",
+  sent: "Sent",
+  quoted: "Quoted",
+  revision_requested: "Revision requested",
+  accepted: "Accepted",
+};
+
+const FILTERS = ["all", "draft", "sent", "quoted", "revision_requested", "accepted"] as const;
 type Filter = (typeof FILTERS)[number];
 
 const PAGE_SIZE = 10;
@@ -93,7 +112,7 @@ function QuotesContent() {
           <h1 className="text-2xl font-semibold text-neutral-900">Quotes</h1>
         </div>
         <button
-          onClick={() => router.push("/quotes/new")}
+          onClick={() => router.push("/sendquote")}
           className="flex items-center gap-1.5 rounded-md bg-[#f97316] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#f97316]/90"
         >
           <Plus size={15} />
@@ -118,11 +137,11 @@ function QuotesContent() {
                 key={s}
                 onClick={() => setFilter(s)}
                 aria-pressed={filter === s}
-                className={`rounded-md px-3 py-1.5 text-sm font-medium capitalize transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#f97316] ${
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#f97316] ${
                   filter === s ? "bg-[#f97316] text-white" : "text-neutral-600 hover:bg-neutral-100"
                 }`}
               >
-                {s}
+                {s === "all" ? "All" : STATUS_LABELS[s]}
                 <span className={`ml-1.5 text-xs ${filter === s ? "text-white/80" : "text-neutral-400"}`}>
                   {counts[s] ?? 0}
                 </span>
@@ -160,11 +179,13 @@ function QuotesContent() {
                       <td className="px-5 py-3 text-neutral-500">{formatDate(q.dueDate)}</td>
                       <td className="px-5 py-3">
                         <span
-                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium capitalize ${STATUS_STYLES[q.status]}`}
+                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[q.status]}`}
                         >
                           {q.status === "quoted" && <CheckCircle2 size={10} />}
                           {q.status === "sent" && <Hourglass size={10} />}
-                          {q.status}
+                          {q.status === "revision_requested" && <RefreshCw size={10} />}
+                          {q.status === "accepted" && <CheckCircle2 size={10} />}
+                          {STATUS_LABELS[q.status]}
                         </span>
                       </td>
                       <td className="px-5 py-3">
@@ -182,7 +203,9 @@ function QuotesContent() {
                 {filtered.length === 0 && (
                   <tr>
                     <td colSpan={7} className="px-5 py-8 text-center text-sm text-neutral-400">
-                      {filter === "all" ? "No quotes sent yet." : `No ${filter} quotes.`}
+                      {filter === "all"
+                        ? "No quotes sent yet."
+                        : `No ${STATUS_LABELS[filter].toLowerCase()} quotes.`}
                     </td>
                   </tr>
                 )}
@@ -229,6 +252,20 @@ function QuotesContent() {
 }
 
 export default function QuotesPage() {
+  const router = useRouter();
+  const [authed, setAuthed] = useState(false);
+
+  // Don't render anything until we know the buyer is signed in.
+  useEffect(() => {
+    if (hasProcurerToken()) {
+      setAuthed(true);
+    } else {
+      router.replace("/procurement/login");
+    }
+  }, [router]);
+
+  if (!authed) return null;
+
   return (
     <Suspense fallback={null}>
       <QuotesContent />
