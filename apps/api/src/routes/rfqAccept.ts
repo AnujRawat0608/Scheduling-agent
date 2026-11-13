@@ -98,6 +98,13 @@ rfqAcceptRouter.post("/:rfqId/accept", requireProcurerAuth, async (req, res) => 
       throw new HttpError(409, "This quote has expired. Ask the supplier for a new one.");
     }
 
+    // An external supplier has no supplierId on the RFQ until they submit a quote,
+    // but their quote carries it. Use whichever one exists.
+    const supplierId = rfq.supplierId ?? quote.supplierId;
+    if (!supplierId) {
+      throw new HttpError(409, "This supplier hasn't completed onboarding yet.");
+    }
+
     // Order lines come from the stored quote. Money is handled in integer cents.
     const quoteLines = (Array.isArray(quote.lineItemQuotes) ? quote.lineItemQuotes : []) as QuoteLine[];
     const rfqLines = (Array.isArray(rfq.lineItems) ? rfq.lineItems : []) as RfqLine[];
@@ -167,7 +174,7 @@ rfqAcceptRouter.post("/:rfqId/accept", requireProcurerAuth, async (req, res) => 
       const [order] = await tx
         .insert(supplierOrders)
         .values({
-          supplierId: rfq.supplierId,
+          supplierId,
           rfqId: rfq.id,
           deliveryAddress: deliveryAddress.trim(),
           requesterName: rfq.requesterName,
@@ -204,7 +211,7 @@ rfqAcceptRouter.post("/:rfqId/accept", requireProcurerAuth, async (req, res) => 
 
     // After responding: tell the supplier. A mail failure never undoes the order.
     void notifySupplier({
-      supplierId: rfq.supplierId,
+      supplierId,
       referenceNumber: rfq.referenceNumber,
       orderId: created.id,
       buyerName: rfq.requesterName,
