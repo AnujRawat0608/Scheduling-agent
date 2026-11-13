@@ -1,9 +1,13 @@
 "use client";
 
+/* app/quotes/[id]/page.tsx: your page with AcceptQuotePanel wired in.
+ * Also needs: app/quotes/[id]/AcceptQuotePanel.tsx and the edits listed in api-changes.ts. */
+
 import { useParams, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, CheckCircle2, Clock, FileText, Building2, Truck, Hourglass } from "lucide-react";
 import { fetchQuote, type ResponseLineItem } from "../../../lib/quotesAPI";
+import AcceptQuotePanel from "./AcceptQuotePanel";
 
 function formatDate(value: string | null) {
   if (!value) return "—";
@@ -25,7 +29,11 @@ export default function QuoteDetailPage() {
     queryKey: ["quote", id],
     queryFn: () => fetchQuote(id),
     enabled: !!id,
-    refetchInterval: (query) => (query.state.data?.responses.length ? false : 10_000),
+    // Keep checking while a reply from the supplier is expected; stop once the RFQ is settled.
+    refetchInterval: (query) => {
+      const s = query.state.data?.status;
+      return s === "sent" || s === "revision_requested" ? 10_000 : false;
+    },
   });
 
   if (isLoading) {
@@ -47,6 +55,7 @@ export default function QuoteDetailPage() {
   }
 
   const response = quote.responses[0] ?? null;
+  const awaitingRevision = quote.status === "revision_requested";
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-16 space-y-6">
@@ -160,7 +169,9 @@ export default function QuoteDetailPage() {
       <div className="rounded-2xl border border-neutral-200 bg-white p-6 space-y-5">
         <div className="flex items-center gap-2">
           <Building2 size={16} className="text-[#f97316]" />
-          <h2 className="text-sm font-medium text-neutral-700">Supplier response</h2>
+          <h2 className="text-sm font-medium text-neutral-700">
+            {awaitingRevision ? "Previous quote" : "Supplier response"}
+          </h2>
         </div>
 
         {!response ? (
@@ -178,9 +189,14 @@ export default function QuoteDetailPage() {
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="flex items-center gap-2 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+            <div
+              className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${
+                awaitingRevision ? "bg-neutral-100 text-neutral-600" : "bg-green-50 text-green-700"
+              }`}
+            >
               <CheckCircle2 size={15} />
-              Quote received {formatDate(response.createdAt)}
+              {awaitingRevision ? "Superseded once the supplier replies. " : ""}Quote received{" "}
+              {formatDate(response.createdAt)}
             </div>
 
             <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-3">
@@ -247,6 +263,9 @@ export default function QuoteDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Accept this quote, or ask the supplier for a revision */}
+      <AcceptQuotePanel rfq={quote} />
     </main>
   );
 }

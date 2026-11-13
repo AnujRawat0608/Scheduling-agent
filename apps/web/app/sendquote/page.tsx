@@ -3,7 +3,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { FileText, Plus, Send, Trash2, UploadCloud, X } from "lucide-react";
+import { FileText, Plus, Send, Trash2, UploadCloud, X, Box } from "lucide-react";
 import {
   fetchSuppliers,
   saveQuote,
@@ -11,11 +11,19 @@ import {
 } from "../../lib/quotesAPI";
 
 /* NOTE ON FILE UPLOADS
- * Technical documents are held in local state only. File objects can't be
+ * CAD / drawing files are held in local state only. File objects can't be
  * JSON-serialised, so just the file NAMES go to saveQuote(). To persist them,
- * add an upload endpoint and upload each File before calling saveQuote(). */
+ * add an upload endpoint and upload each File before calling saveQuote().
+ *
+ * NOTE ON EXTERNAL SUPPLIERS
+ * When supplierType === "external", saveQuote() receives supplierId = "" plus
+ * supplierEmail / supplierContactName / supplierCountry. Your backend should
+ * create a pending supplier invite, email a tokenised RFQ link, and onboard
+ * the supplier when they submit a price through that link. Update the
+ * saveQuote payload type in lib/quotesAPI.ts with the new fields.
+ */
 
-const CURRENCY_OPTIONS = ["INR", "USD", "EUR", "GBP", "AED", "SGD"];
+const CURRENCY_OPTIONS = ["INR", "USD", "CNY", "EUR", "GBP", "AED", "SGD"];
 const UNIT_OPTIONS = ["Pcs", "Box", "Kg", "Litre", "Lot"];
 const INCOTERMS = ["EXW", "FCA", "FAS", "FOB", "CFR", "CIF", "CPT", "CIP", "DAP", "DPU", "DDP"];
 const PAYMENT_TERMS_OPTIONS = [
@@ -28,6 +36,13 @@ const PAYMENT_TERMS_OPTIONS = [
   "Against Letter of Credit (LC)",
   "Custom (see notes)",
 ];
+
+// CAD / drawing uploads
+const CAD_EXTENSIONS = [".step", ".stp", ".stl", ".iges", ".igs", ".dwg", ".pdf"];
+const CAD_ACCEPT = CAD_EXTENSIONS.join(",");
+const CAD_LABEL = "STEP, STP, STL, IGES, DWG, PDF";
+const MAX_FILE_MB = 50;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Shared styles
 const inputCls =
@@ -45,6 +60,11 @@ function formatFileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function fileExt(name: string) {
+  const i = name.lastIndexOf(".");
+  return i === -1 ? "" : name.slice(i).toLowerCase();
 }
 
 function Section({
@@ -102,12 +122,21 @@ export default function NewQuotePage() {
     queryFn: fetchSuppliers,
   });
 
+  // Supplier: from directory OR external (by email)
+  const [supplierType, setSupplierType] = useState<"directory" | "external">("directory");
   const [supplierId, setSupplierId] = useState("");
+  const [externalCompany, setExternalCompany] = useState("");
+  const [externalContactName, setExternalContactName] = useState("");
+  const [externalEmail, setExternalEmail] = useState("");
+  const [externalCountry, setExternalCountry] = useState("");
+
   const [dueDate, setDueDate] = useState("");
   const [referenceNumber, setReferenceNumber] = useState(
     () => `RFQ-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 9000) + 1000)}`
   );
   const [currency, setCurrency] = useState("INR");
+  const [incoterm, setIncoterm] = useState("");
+  const [incotermPlace, setIncotermPlace] = useState("");
   const [priceValidUntil, setPriceValidUntil] = useState("");
   const [requesterName, setRequesterName] = useState("");
   const [requesterEmail, setRequesterEmail] = useState("");
@@ -116,19 +145,21 @@ export default function NewQuotePage() {
   const [scopeNotes, setScopeNotes] = useState("");
   const [assumptionsExclusions, setAssumptionsExclusions] = useState("");
 
+  // CAD / drawings
+  const [technicalDocuments, setTechnicalDocuments] = useState<File[]>([]);
+  const [dragActive, setDragActive] = useState(false);
+  const [fileErrors, setFileErrors] = useState<string[]>([]);
+
   const [paymentTerms, setPaymentTerms] = useState("");
 
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [requiredDeliveryDate, setRequiredDeliveryDate] = useState("");
-  const [incoterm, setIncoterm] = useState("");
   const [packagingRequirements, setPackagingRequirements] = useState("");
 
   const [warrantyPeriod, setWarrantyPeriod] = useState("");
   const [qualityRequirements, setQualityRequirements] = useState("");
   const [requiredCertifications, setRequiredCertifications] = useState("");
   const [insuranceRequired, setInsuranceRequired] = useState(false);
-  const [technicalDocuments, setTechnicalDocuments] = useState<File[]>([]);
-  const [dragActive, setDragActive] = useState(false);
 
   const [notes, setNotes] = useState("");
 
@@ -136,7 +167,10 @@ export default function NewQuotePage() {
     () => suppliers?.find((s) => s.id === supplierId) ?? null,
     [suppliers, supplierId]
   );
-  const supplierName = selectedSupplier?.businessName ?? "";
+
+  const isExternal = supplierType === "external";
+  const supplierName = isExternal ? externalCompany.trim() : selectedSupplier?.businessName ?? "";
+  const externalEmailValid = EMAIL_RE.test(externalEmail.trim());
 
   function updateLineItem(id: string, patch: Partial<QuoteLineItem>) {
     setLineItems((items) => items.map((it) => (it.id === id ? { ...it, ...patch } : it)));
@@ -148,9 +182,22 @@ export default function NewQuotePage() {
 
   function addFiles(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) return;
+    const errors: string[] = [];
+    const valid: File[] = [];
+
+    Array.from(fileList).forEach((f) => {
+      if (!CAD_EXTENSIONS.includes(fileExt(f.name))) {
+        errors.push(`${f.name}: unsupported type. Allowed: ${CAD_LABEL}.`);
+      } else if (f.size > MAX_FILE_MB * 1024 * 1024) {
+        errors.push(`${f.name}: larger than ${MAX_FILE_MB} MB.`);
+      } else {
+        valid.push(f);
+      }
+    });
+
+    setFileErrors(errors);
     setTechnicalDocuments((existing) => {
-      const incoming = Array.from(fileList);
-      const deduped = incoming.filter(
+      const deduped = valid.filter(
         (f) => !existing.some((e) => e.name === f.name && e.size === f.size)
       );
       return [...existing, ...deduped];
@@ -162,8 +209,12 @@ export default function NewQuotePage() {
   }
 
   const hasValidLineItems = lineItems.some((it) => it.productName.trim() && it.quantity > 0);
+  const supplierOk = isExternal
+    ? Boolean(externalCompany.trim()) && externalEmailValid
+    : Boolean(supplierId);
+
   const canSubmit =
-    Boolean(supplierId) &&
+    supplierOk &&
     Boolean(dueDate) &&
     Boolean(requesterName.trim()) &&
     Boolean(requesterEmail.trim()) &&
@@ -182,13 +233,19 @@ export default function NewQuotePage() {
   function submit(status: "draft" | "sent") {
     saveMutation.mutate({
       status,
-      supplierId,
+      supplierType,
+      supplierId: isExternal ? "" : supplierId,
       supplierName,
+      supplierEmail: isExternal ? externalEmail.trim() : selectedSupplier?.email ?? "",
+      supplierContactName: isExternal ? externalContactName.trim() : selectedSupplier?.contactName ?? "",
+      supplierCountry: isExternal ? externalCountry.trim() : "",
       dueDate,
       referenceNumber,
       requesterName,
       requesterEmail,
       currency,
+      incoterm,
+      incotermPlace,
       priceValidUntil,
       lineItems: lineItems.filter((it) => it.productName.trim()),
       scopeNotes,
@@ -196,7 +253,6 @@ export default function NewQuotePage() {
       paymentTerms,
       deliveryAddress,
       requiredDeliveryDate,
-      incoterm,
       packagingRequirements,
       warrantyPeriod,
       qualityRequirements,
@@ -216,12 +272,18 @@ export default function NewQuotePage() {
       <button
         onClick={() => submit("sent")}
         disabled={!canSubmit || saveMutation.isPending}
-className="flex items-center gap-1.5 rounded-md bg-[#ea580c] px-3.5 py-2 text-xs font-medium text-white transition hover:bg-[#c2410c] disabled:opacity-50"      >
+        className="flex items-center gap-1.5 rounded-md bg-[#ea580c] px-3.5 py-2 text-xs font-medium text-white transition hover:bg-[#c2410c] disabled:opacity-50"
+      >
         <Send size={13} />
         {saveMutation.isPending && saveMutation.variables?.status === "sent" ? "Sending…" : "Send RFQ"}
       </button>
     </div>
   );
+
+  const modeBtn = (active: boolean) =>
+    `flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition ${
+      active ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-500 hover:text-neutral-800"
+    }`;
 
   return (
     <div className="min-h-screen bg-white">
@@ -258,90 +320,165 @@ className="flex items-center gap-1.5 rounded-md bg-[#ea580c] px-3.5 py-2 text-xs
           <Section n="01" title="RFQ details" desc="Core information for this quotation request.">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <Field label="Supplier" className="sm:col-span-3">
-                <select
-                  value={supplierId}
-                  onChange={(e) => setSupplierId(e.target.value)}
-                  className={inputCls}
-                >
-                  <option value="">{suppliersLoading ? "Loading…" : "Select a supplier"}</option>
-                  {suppliers?.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.businessName}
-                      {s.verificationStatus === "verified" ? " — Verified" : ""}
-                      {s.city ? ` (${s.city}${s.state ? `, ${s.state}` : ""})` : ""}
-                    </option>
-                  ))}
-                </select>
+                {/* Directory / External toggle */}
+                <div className="mb-3 flex gap-1 rounded-lg bg-neutral-100 p-1">
+                  <button
+                    type="button"
+                    onClick={() => setSupplierType("directory")}
+                    className={modeBtn(!isExternal)}
+                  >
+                    From directory
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSupplierType("external")}
+                    className={modeBtn(isExternal)}
+                  >
+                    New / external supplier
+                  </button>
+                </div>
 
-                {selectedSupplier && (
-                  <div className="mt-3 rounded-md border border-neutral-200 bg-[#FCFAF6] p-3.5">
-                    <div className="mb-2 flex items-center justify-between">
-                      <span className="text-xs font-semibold text-neutral-900">
-                        {selectedSupplier.businessName}
-                      </span>
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                          selectedSupplier.verificationStatus === "verified"
-                            ? "bg-green-100 text-green-700"
-                            : selectedSupplier.verificationStatus === "rejected"
-                            ? "bg-red-100 text-red-700"
-                            : "bg-amber-100 text-amber-700"
-                        }`}
-                      >
-                        {selectedSupplier.verificationStatus === "verified"
-                          ? "Verified"
-                          : selectedSupplier.verificationStatus === "rejected"
-                          ? "Rejected"
-                          : "Pending verification"}
-                      </span>
+                {isExternal ? (
+                  <div className="rounded-md border border-neutral-200 bg-[#FCFAF6] p-3.5">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className={labelCls}>Company name</label>
+                        <input
+                          type="text"
+                          value={externalCompany}
+                          onChange={(e) => setExternalCompany(e.target.value)}
+                          placeholder="e.g. Yijin Solution"
+                          className={inputCls}
+                        />
+                      </div>
+                      <div>
+                        <label className={labelCls}>Contact name (optional)</label>
+                        <input
+                          type="text"
+                          value={externalContactName}
+                          onChange={(e) => setExternalContactName(e.target.value)}
+                          placeholder="Sales / export manager"
+                          className={inputCls}
+                        />
+                      </div>
+                      <div>
+                        <label className={labelCls}>Supplier email</label>
+                        <input
+                          type="email"
+                          value={externalEmail}
+                          onChange={(e) => setExternalEmail(e.target.value)}
+                          placeholder="sales@supplier.com"
+                          aria-invalid={externalEmail.length > 0 && !externalEmailValid}
+                          className={inputCls}
+                        />
+                        {externalEmail.length > 0 && !externalEmailValid && (
+                          <p className="mt-1 text-[11px] text-red-600">Enter a valid email address.</p>
+                        )}
+                      </div>
+                      <div>
+                        <label className={labelCls}>Country (optional)</label>
+                        <input
+                          type="text"
+                          value={externalCountry}
+                          onChange={(e) => setExternalCountry(e.target.value)}
+                          placeholder="e.g. China"
+                          className={inputCls}
+                        />
+                      </div>
                     </div>
+                    <p className="mt-3 text-[11px] text-neutral-500">
+                      They don&apos;t need an account. We&apos;ll email them a secure RFQ link, and they&apos;ll be
+                      onboarded automatically when they open it to submit their price.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <select
+                      value={supplierId}
+                      onChange={(e) => setSupplierId(e.target.value)}
+                      className={inputCls}
+                    >
+                      <option value="">{suppliersLoading ? "Loading…" : "Select a supplier"}</option>
+                      {suppliers?.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.businessName}
+                          {s.verificationStatus === "verified" ? " — Verified" : ""}
+                          {s.city ? ` (${s.city}${s.state ? `, ${s.state}` : ""})` : ""}
+                        </option>
+                      ))}
+                    </select>
 
-                    <div className="grid grid-cols-1 gap-x-6 gap-y-1 text-[11px] text-neutral-500 sm:grid-cols-2">
-                      {selectedSupplier.contactName && (
-                        <div>Contact: <span className="text-neutral-900">{selectedSupplier.contactName}</span></div>
-                      )}
-                      <div>Email: <span className="text-neutral-900">{selectedSupplier.email}</span></div>
-                      {selectedSupplier.phone && (
-                        <div>Phone: <span className="text-neutral-900">{selectedSupplier.phone}</span></div>
-                      )}
-                      {(selectedSupplier.city || selectedSupplier.state) && (
-                        <div>
-                          Location:{" "}
-                          <span className="text-neutral-900">
-                            {[selectedSupplier.city, selectedSupplier.state, selectedSupplier.region]
-                              .filter(Boolean)
-                              .join(", ")}
+                    {selectedSupplier && (
+                      <div className="mt-3 rounded-md border border-neutral-200 bg-[#FCFAF6] p-3.5">
+                        <div className="mb-2 flex items-center justify-between">
+                          <span className="text-xs font-semibold text-neutral-900">
+                            {selectedSupplier.businessName}
+                          </span>
+                          <span
+                            className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                              selectedSupplier.verificationStatus === "verified"
+                                ? "bg-green-100 text-green-700"
+                                : selectedSupplier.verificationStatus === "rejected"
+                                ? "bg-red-100 text-red-700"
+                                : "bg-amber-100 text-amber-700"
+                            }`}
+                          >
+                            {selectedSupplier.verificationStatus === "verified"
+                              ? "Verified"
+                              : selectedSupplier.verificationStatus === "rejected"
+                              ? "Rejected"
+                              : "Pending verification"}
                           </span>
                         </div>
-                      )}
-                      {selectedSupplier.gstNumber && (
-                        <div>GST: <span className="text-neutral-900">{selectedSupplier.gstNumber}</span></div>
-                      )}
-                      {selectedSupplier.averageLeadTimeDays != null && (
-                        <div>
-                          Typical lead time:{" "}
-                          <span className="text-neutral-900">{selectedSupplier.averageLeadTimeDays} days</span>
-                        </div>
-                      )}
-                      {selectedSupplier.mainProducts && (
-                        <div className="sm:col-span-2">
-                          Main products: <span className="text-neutral-900">{selectedSupplier.mainProducts}</span>
-                        </div>
-                      )}
-                      {selectedSupplier.certifications && (
-                        <div className="sm:col-span-2">
-                          Certifications on file:{" "}
-                          <span className="text-neutral-900">{selectedSupplier.certifications}</span>
-                        </div>
-                      )}
-                    </div>
 
-                    {selectedSupplier.verificationStatus !== "verified" && (
-                      <p className="mt-2 text-[11px] text-amber-700">
-                        This supplier hasn&apos;t completed verification yet.
-                      </p>
+                        <div className="grid grid-cols-1 gap-x-6 gap-y-1 text-[11px] text-neutral-500 sm:grid-cols-2">
+                          {selectedSupplier.contactName && (
+                            <div>Contact: <span className="text-neutral-900">{selectedSupplier.contactName}</span></div>
+                          )}
+                          <div>Email: <span className="text-neutral-900">{selectedSupplier.email}</span></div>
+                          {selectedSupplier.phone && (
+                            <div>Phone: <span className="text-neutral-900">{selectedSupplier.phone}</span></div>
+                          )}
+                          {(selectedSupplier.city || selectedSupplier.state) && (
+                            <div>
+                              Location:{" "}
+                              <span className="text-neutral-900">
+                                {[selectedSupplier.city, selectedSupplier.state, selectedSupplier.region]
+                                  .filter(Boolean)
+                                  .join(", ")}
+                              </span>
+                            </div>
+                          )}
+                          {selectedSupplier.gstNumber && (
+                            <div>GST: <span className="text-neutral-900">{selectedSupplier.gstNumber}</span></div>
+                          )}
+                          {selectedSupplier.averageLeadTimeDays != null && (
+                            <div>
+                              Typical lead time:{" "}
+                              <span className="text-neutral-900">{selectedSupplier.averageLeadTimeDays} days</span>
+                            </div>
+                          )}
+                          {selectedSupplier.mainProducts && (
+                            <div className="sm:col-span-2">
+                              Main products: <span className="text-neutral-900">{selectedSupplier.mainProducts}</span>
+                            </div>
+                          )}
+                          {selectedSupplier.certifications && (
+                            <div className="sm:col-span-2">
+                              Certifications on file:{" "}
+                              <span className="text-neutral-900">{selectedSupplier.certifications}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {selectedSupplier.verificationStatus !== "verified" && (
+                          <p className="mt-2 text-[11px] text-amber-700">
+                            This supplier hasn&apos;t completed verification yet.
+                          </p>
+                        )}
+                      </div>
                     )}
-                  </div>
+                  </>
                 )}
               </Field>
 
@@ -374,6 +511,14 @@ className="flex items-center gap-1.5 rounded-md bg-[#ea580c] px-3.5 py-2 text-xs
                   className={inputCls}
                 />
               </Field>
+              <Field label="Quote valid until">
+                <input
+                  type="date"
+                  value={priceValidUntil}
+                  onChange={(e) => setPriceValidUntil(e.target.value)}
+                  className={inputCls}
+                />
+              </Field>
               <Field label="Currency">
                 <select value={currency} onChange={(e) => setCurrency(e.target.value)} className={inputCls}>
                   {CURRENCY_OPTIONS.map((c) => (
@@ -383,11 +528,22 @@ className="flex items-center gap-1.5 rounded-md bg-[#ea580c] px-3.5 py-2 text-xs
                   ))}
                 </select>
               </Field>
-              <Field label="Quote valid until">
+              <Field label="Incoterm">
+                <select value={incoterm} onChange={(e) => setIncoterm(e.target.value)} className={inputCls}>
+                  <option value="">Select…</option>
+                  {INCOTERMS.map((term) => (
+                    <option key={term} value={term}>
+                      {term}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Named place (port / city)">
                 <input
-                  type="date"
-                  value={priceValidUntil}
-                  onChange={(e) => setPriceValidUntil(e.target.value)}
+                  type="text"
+                  value={incotermPlace}
+                  onChange={(e) => setIncotermPlace(e.target.value)}
+                  placeholder="e.g. Shenzhen, Nhava Sheva"
                   className={inputCls}
                 />
               </Field>
@@ -465,7 +621,7 @@ className="flex items-center gap-1.5 rounded-md bg-[#ea580c] px-3.5 py-2 text-xs
             </div>
           </Section>
 
-          {/* 03 Technical specification & scope */}
+          {/* 03 Technical specification & scope (+ CAD upload) */}
           <Section
             n="03"
             title="Technical specification & scope"
@@ -489,6 +645,90 @@ className="flex items-center gap-1.5 rounded-md bg-[#ea580c] px-3.5 py-2 text-xs
                   placeholder="What's explicitly included/excluded, and any dependencies or assumptions the supplier should confirm…"
                   className={inputCls}
                 />
+              </Field>
+
+              {/* CAD / drawing upload */}
+              <Field label="CAD models & drawings">
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setDragActive(true);
+                  }}
+                  onDragLeave={() => setDragActive(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDragActive(false);
+                    addFiles(e.dataTransfer.files);
+                  }}
+                  className={`flex flex-col items-center justify-center gap-1.5 rounded-md border border-dashed px-4 py-8 text-center transition ${
+                    dragActive
+                      ? "border-[#ea580c] bg-[#ea580c]/15"
+                      : "border-neutral-300 bg-[#ea580c]/10"
+                  }`}
+                >
+                  <UploadCloud size={18} className="text-[#ea580c]" />
+                  <p className="text-xs text-neutral-600">
+                    Drag & drop 3D CAD models or 2D drawings here
+                  </p>
+                  <p className="text-[11px] text-neutral-500">
+                    {CAD_LABEL} · up to {MAX_FILE_MB} MB each
+                  </p>
+                  <label className="cursor-pointer text-[11px] font-medium text-[#ea580c] hover:underline">
+                    or browse files
+                    <input
+                      type="file"
+                      multiple
+                      accept={CAD_ACCEPT}
+                      className="hidden"
+                      onChange={(e) => {
+                        addFiles(e.target.files);
+                        e.target.value = ""; // allow re-selecting the same file
+                      }}
+                    />
+                  </label>
+                </div>
+
+                <p className="mt-2 text-[11px] text-neutral-500">
+                  Custom machined or fabricated parts can&apos;t be quoted accurately from text alone. Attach the 3D model
+                  (STEP/STP preferred) plus a PDF/DWG drawing with tolerances.
+                </p>
+
+                {fileErrors.length > 0 && (
+                  <ul role="alert" className="mt-2 space-y-0.5 rounded-md border border-red-200 bg-red-50 p-2.5 text-[11px] text-red-700">
+                    {fileErrors.map((err) => (
+                      <li key={err}>{err}</li>
+                    ))}
+                  </ul>
+                )}
+
+                {technicalDocuments.length > 0 && (
+                  <ul className="mt-3 space-y-1.5">
+                    {technicalDocuments.map((file, index) => (
+                      <li
+                        key={`${file.name}-${file.size}-${index}`}
+                        className="flex items-center justify-between rounded-md border border-neutral-200 bg-white px-3 py-1.5 text-xs"
+                      >
+                        <span className="flex min-w-0 items-center gap-2">
+                          <Box size={14} className="shrink-0 text-neutral-400" />
+                          <span className="truncate text-neutral-700">{file.name}</span>
+                          <span className="shrink-0 rounded bg-neutral-100 px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase text-neutral-600">
+                            {fileExt(file.name).replace(".", "")}
+                          </span>
+                        </span>
+                        <span className="ml-2 flex shrink-0 items-center gap-3">
+                          <span className="text-[11px] text-neutral-400">{formatFileSize(file.size)}</span>
+                          <button
+                            onClick={() => removeFile(index)}
+                            aria-label={`Remove ${file.name}`}
+                            className="text-neutral-400 hover:text-red-600"
+                          >
+                            <X size={14} />
+                          </button>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </Field>
             </div>
           </Section>
@@ -536,22 +776,12 @@ className="flex items-center gap-1.5 rounded-md bg-[#ea580c] px-3.5 py-2 text-xs
                   className={inputCls}
                 />
               </Field>
-              <Field label="Shipping terms (Incoterm)">
-                <select value={incoterm} onChange={(e) => setIncoterm(e.target.value)} className={inputCls}>
-                  <option value="">Select…</option>
-                  {INCOTERMS.map((term) => (
-                    <option key={term} value={term}>
-                      {term}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Packaging requirements" className="sm:col-span-2">
+              <Field label="Packaging requirements">
                 <input
                   type="text"
                   value={packagingRequirements}
                   onChange={(e) => setPackagingRequirements(e.target.value)}
-                  placeholder="Packaging standard, labelling, tracking requirements…"
+                  placeholder="Packaging standard, labelling, tracking…"
                   className={inputCls}
                 />
               </Field>
@@ -562,7 +792,7 @@ className="flex items-center gap-1.5 rounded-md bg-[#ea580c] px-3.5 py-2 text-xs
           <Section
             n="06"
             title="Quality, warranty & compliance"
-            desc="Capture quality controls, certifications, and supporting documents."
+            desc="Capture quality controls and certifications."
           >
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Warranty period required">
@@ -604,59 +834,6 @@ className="flex items-center gap-1.5 rounded-md bg-[#ea580c] px-3.5 py-2 text-xs
                   Supplier must carry insurance coverage for this order
                 </label>
               </div>
-
-              {/* Technical documents upload */}
-              <Field label="Technical documents" className="sm:col-span-2">
-                <div
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    setDragActive(true);
-                  }}
-                  onDragLeave={() => setDragActive(false)}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setDragActive(false);
-                    addFiles(e.dataTransfer.files);
-                  }}
-                  className={`flex flex-col items-center justify-center gap-1.5 rounded-md border px-4 py-8 text-center transition ${
-                    dragActive
-                      ? "border-[#ea580c] bg-[#ea580c]/15"
-                      : "border-neutral-200 bg-[#ea580c]/10"
-                  }`}
-                >
-                  <UploadCloud size={18} className="text-[#ea580c]" />
-                  <p className="text-xs text-neutral-600">
-                    Drag & drop CAD files, blueprints, or spec sheets here
-                  </p>
-                  <label className="cursor-pointer text-[11px] font-medium text-[#ea580c] hover:underline">
-                    or browse files
-                    <input type="file" multiple className="hidden" onChange={(e) => addFiles(e.target.files)} />
-                  </label>
-                </div>
-
-                {technicalDocuments.length > 0 && (
-                  <ul className="mt-3 space-y-1.5">
-                    {technicalDocuments.map((file, index) => (
-                      <li
-                        key={`${file.name}-${file.size}-${index}`}
-                        className="flex items-center justify-between rounded-md border border-neutral-200 bg-white px-3 py-1.5 text-xs"
-                      >
-                        <span className="truncate text-neutral-700">{file.name}</span>
-                        <span className="ml-2 flex shrink-0 items-center gap-3">
-                          <span className="text-[11px] text-neutral-400">{formatFileSize(file.size)}</span>
-                          <button
-                            onClick={() => removeFile(index)}
-                            aria-label={`Remove ${file.name}`}
-                            className="text-neutral-400 hover:text-red-600"
-                          >
-                            <X size={14} />
-                          </button>
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </Field>
             </div>
           </Section>
 

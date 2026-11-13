@@ -2,7 +2,17 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, ChevronDown, ChevronUp, FileText, Lock, Search } from "lucide-react";
+import {
+  ArrowRight,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  Download,
+  FileText,
+  Lock,
+  RefreshCw,
+  Search,
+} from "lucide-react";
 import { formatMoney } from "../lib/format";
 import { authHeaders } from "../lib/supplierAuthApi";
 
@@ -23,7 +33,8 @@ interface Rfq {
   referenceNumber: string;
   requesterName: string;
   requesterEmail: string;
-  status: string; // "sent" | "quoted" | "accepted"
+  /** sent → quoted (final) → accepted, or quoted → revision_requested (buyer asked) → quoted */
+  status: string; // "sent" | "quoted" | "revision_requested" | "accepted"
   currency: string | null;
   dueDate: string | null;
   requiredDeliveryDate: string | null;
@@ -32,10 +43,35 @@ interface Rfq {
   deliveryAddress: string | null;
   isRead: boolean;
   createdAt: string;
+  revisionNote?: string | null;
+  revisionCount?: number;
 }
 
-type RfqState = "awaiting" | "overdue" | "quoted";
-type TabKey = "awaiting" | "quoted" | "overdue" | "all";
+interface Attachment {
+  id: string;
+  fileName: string;
+  sizeBytes: number;
+}
+
+interface SentQuote {
+  id: string;
+  currency: string | null;
+  totalPrice: number | string | null;
+  leadTimeDays: number | null;
+  validUntil: string | null;
+  notes: string | null;
+  createdAt: string;
+  lineItemQuotes: { productName: string; quantity: number; unitPrice: number; lineTotal: number }[];
+}
+
+interface RfqDetail {
+  rfq: Rfq;
+  attachments: Attachment[];
+  quote: SentQuote | null;
+}
+
+type RfqState = "revision" | "awaiting" | "overdue" | "quoted";
+type TabKey = "awaiting" | "revision" | "quoted" | "overdue" | "all";
 
 const inputClass =
   "w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-[#3d6bff] focus:bg-white focus:ring-2 focus:ring-[#3d6bff]/15";
@@ -61,6 +97,29 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
+/** Files need the bearer token, so a plain link won't work: fetch the file and save it. */
+async function downloadFile(rfqId: string, file: Attachment) {
+  const res = await fetch(`${API_BASE}/rfqs/me/${rfqId}/files/${file.id}`, { headers: authHeaders() });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? "Couldn't download the file");
+  }
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = file.fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function formatDate(value: string | null | undefined): string {
   if (!value) return "—";
   const d = new Date(value);
@@ -71,8 +130,12 @@ function formatDate(value: string | null | undefined): string {
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-/** quoted or accepted → "quoted"; not quoted and reply-by date before today → "overdue"; otherwise "awaiting". */
+/**
+ * revision_requested → "revision" (the buyer wants a new quote: needs action);
+ * quoted or accepted → "quoted"; not quoted and reply-by date before today → "overdue"; otherwise "awaiting".
+ */
 function getState(rfq: Rfq): RfqState {
+  if (rfq.status === "revision_requested") return "revision";
   if (rfq.status === "quoted" || rfq.status === "accepted") return "quoted";
   if (rfq.dueDate) {
     const due = new Date(rfq.dueDate);
@@ -83,14 +146,14 @@ function getState(rfq: Rfq): RfqState {
   return "awaiting";
 }
 
-const STATE_ORDER: Record<RfqState, number> = { awaiting: 0, overdue: 1, quoted: 2 };
+const STATE_ORDER: Record<RfqState, number> = { revision: 0, awaiting: 1, overdue: 2, quoted: 3 };
 
 function dueTime(rfq: Rfq): number {
   const t = rfq.dueDate ? new Date(rfq.dueDate).getTime() : NaN;
   return Number.isNaN(t) ? Number.MAX_SAFE_INTEGER : t;
 }
 
-/** Actionable first (nearest deadline first), then overdue, then already quoted. */
+/** Actionable first (revision requests, then nearest deadline), then overdue, then already quoted. */
 function sortRfqs(list: Rfq[]): Rfq[] {
   return [...list].sort((a, b) => {
     const s = STATE_ORDER[getState(a)] - STATE_ORDER[getState(b)];
@@ -98,11 +161,17 @@ function sortRfqs(list: Rfq[]): Rfq[] {
   });
 }
 
-const STATE_BADGE: Record<RfqState, { label: string; className: string }> = {
-  awaiting: { label: "Awaiting quote", className: "bg-amber-50 text-amber-700" },
-  overdue: { label: "Overdue", className: "bg-red-50 text-red-700" },
-  quoted: { label: "Quoted", className: "bg-emerald-50 text-emerald-700" },
-};
+function badgeFor(rfq: Rfq): { label: string; className: string } {
+  const state = getState(rfq);
+  if (state === "revision") return { label: "Revision requested", className: "bg-orange-50 text-orange-700" };
+  if (state === "overdue") return { label: "Overdue", className: "bg-red-50 text-red-700" };
+  if (state === "quoted") {
+    return rfq.status === "accepted"
+      ? { label: "Accepted", className: "bg-emerald-100 text-emerald-800" }
+      : { label: "Quoted", className: "bg-emerald-50 text-emerald-700" };
+  }
+  return { label: "Awaiting quote", className: "bg-amber-50 text-amber-700" };
+}
 
 /** The lead time the supplier advertised, so the form can start from it (they only confirm it). */
 function advertisedLeadTime(rfq: Rfq): number | null {
@@ -116,21 +185,119 @@ function advertisedLeadTime(rfq: Rfq): number | null {
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Quote form                                                                */
+/*  Sent quote (read-only): shown once a quote is final                       */
 /* -------------------------------------------------------------------------- */
 
-function QuoteForm({ rfq, onSent }: { rfq: Rfq; onSent: () => void }) {
+function SentQuotePanel({ rfq, quote, justSent }: { rfq: Rfq; quote: SentQuote | null; justSent: boolean }) {
+  const accepted = rfq.status === "accepted";
+  const currency = quote?.currency ?? rfq.currency ?? "INR";
+  const total = quote?.totalPrice != null ? Number(quote.totalPrice) : null;
+
+  return (
+    <div
+      className={`space-y-3 rounded-lg border p-4 ${
+        accepted ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white"
+      }`}
+    >
+      <div className="flex items-start gap-2">
+        <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-emerald-600" />
+        <div>
+          <h3 className="text-sm font-semibold text-slate-900">
+            {accepted ? "Quote accepted" : justSent ? "Quote sent" : "Your quote has been sent"}
+          </h3>
+          <p className="mt-0.5 text-xs text-slate-600">
+            {accepted
+              ? "The buyer accepted your quote and placed an order. You can manage the order from your dashboard."
+              : "It's final and can't be changed. If the buyer asks for changes, you'll get one chance to send a revised quote."}
+          </p>
+        </div>
+      </div>
+
+      {quote ? (
+        <>
+          <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
+            <div>
+              <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Total</dt>
+              <dd className="font-semibold text-slate-900">{total !== null ? formatMoney(total, currency) : "—"}</dd>
+            </div>
+            <div>
+              <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Lead time</dt>
+              <dd className="text-slate-800">{quote.leadTimeDays != null ? `${quote.leadTimeDays} days` : "—"}</dd>
+            </div>
+            <div>
+              <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Valid until</dt>
+              <dd className="text-slate-800">{formatDate(quote.validUntil)}</dd>
+            </div>
+          </dl>
+
+          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+            <table className="w-full min-w-[420px] text-left text-sm">
+              <thead>
+                <tr className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  <th className="px-4 py-2">Item</th>
+                  <th className="px-4 py-2 text-right">Qty</th>
+                  <th className="px-4 py-2 text-right">Unit price</th>
+                  <th className="px-4 py-2 text-right">Line total</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {quote.lineItemQuotes.map((li, i) => (
+                  <tr key={i}>
+                    <td className="px-4 py-2 font-medium text-slate-900">{li.productName}</td>
+                    <td className="px-4 py-2 text-right tabular-nums text-slate-700">{li.quantity}</td>
+                    <td className="px-4 py-2 text-right tabular-nums text-slate-700">
+                      {formatMoney(Number(li.unitPrice), currency)}
+                    </td>
+                    <td className="px-4 py-2 text-right font-medium tabular-nums text-slate-900">
+                      {formatMoney(Number(li.lineTotal), currency)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {quote.notes && <p className="text-sm text-slate-700">{quote.notes}</p>}
+        </>
+      ) : (
+        <p className="text-xs text-slate-500">Quote details aren&apos;t available.</p>
+      )}
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Quote form: only for "sent" and "revision_requested"                      */
+/* -------------------------------------------------------------------------- */
+
+function QuoteForm({
+  rfq,
+  previous,
+  onSent,
+}: {
+  rfq: Rfq;
+  /** The quote being revised (when the buyer asked for changes), used to pre-fill the form. */
+  previous: SentQuote | null;
+  onSent: () => void;
+}) {
+  const revising = rfq.status === "revision_requested";
+
   // Agent-raised RFQs carry the supplier's advertised price on every line. Those prices are fixed:
   // the form shows them read-only, and the server ignores any other value.
   const priceLocked = rfq.lineItems.length > 0 && rfq.lineItems.every((li) => typeof li.unitPrice === "number");
   // The advertised lead time is fixed too, when the RFQ tells us what it was.
   const leadLocked = priceLocked && advertisedLeadTime(rfq) !== null;
 
-  const [currency, setCurrency] = useState(rfq.currency ?? "INR");
+  const [currency, setCurrency] = useState(previous?.currency ?? rfq.currency ?? "INR");
   const [prices, setPrices] = useState<string[]>(() =>
-    rfq.lineItems.map((li) => (priceLocked && typeof li.unitPrice === "number" ? String(li.unitPrice) : ""))
+    rfq.lineItems.map((li, i) => {
+      if (priceLocked && typeof li.unitPrice === "number") return String(li.unitPrice);
+      const prev = revising ? previous?.lineItemQuotes[i]?.unitPrice : undefined;
+      return prev != null ? String(Number(prev)) : "";
+    })
   );
   const [leadTime, setLeadTime] = useState(() => {
+    if (revising && previous?.leadTimeDays != null) return String(previous.leadTimeDays);
     const d = advertisedLeadTime(rfq);
     return d === null ? "" : String(d);
   });
@@ -138,23 +305,6 @@ function QuoteForm({ rfq, onSent }: { rfq: Rfq; onSent: () => void }) {
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sent, setSent] = useState(false);
-
-  // The buyer has accepted: an order exists and the quote can no longer change.
-  if (rfq.status === "accepted") {
-    return (
-      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-        <p className="flex items-center gap-1.5 font-semibold">
-          <CheckCircle2 size={15} />
-          Quote accepted
-        </p>
-        <p className="mt-1 text-emerald-700">
-          The buyer accepted your quote and placed an order, so it can no longer be changed. You can manage the
-          order from your dashboard.
-        </p>
-      </div>
-    );
-  }
 
   const lineTotals = rfq.lineItems.map((li, i) => {
     const p = Number(prices[i]);
@@ -164,7 +314,6 @@ function QuoteForm({ rfq, onSent }: { rfq: Rfq; onSent: () => void }) {
 
   async function submit() {
     setError(null);
-    setSent(false);
 
     const allPriced = rfq.lineItems.every((_, i) => Number(prices[i]) > 0);
     if (!allPriced) return setError("Enter a unit price for every item.");
@@ -172,6 +321,14 @@ function QuoteForm({ rfq, onSent }: { rfq: Rfq; onSent: () => void }) {
     if (leadTime.trim() === "" || !Number.isInteger(lead) || lead < 0) {
       return setError("Enter the lead time as a whole number of days.");
     }
+
+    // A sent quote is final, so make the supplier confirm.
+    const ok = window.confirm(
+      revising
+        ? "Send your revised quote? This is your one revision. You can't change it afterwards."
+        : "Send this quote? Once sent it can't be changed unless the buyer asks for a revision."
+    );
+    if (!ok) return;
 
     setSubmitting(true);
     try {
@@ -191,8 +348,7 @@ function QuoteForm({ rfq, onSent }: { rfq: Rfq; onSent: () => void }) {
           })),
         }),
       });
-      setSent(true);
-      onSent();
+      onSent(); // the RFQ becomes "quoted", so this form is replaced by the read-only quote
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -202,14 +358,26 @@ function QuoteForm({ rfq, onSent }: { rfq: Rfq; onSent: () => void }) {
 
   return (
     <div className="space-y-4 rounded-lg border border-slate-200 bg-white p-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <h3 className="text-sm font-semibold text-slate-900">
-          {rfq.status === "quoted" ? "Update your quote" : "Send your quote"}
+          {revising ? "Send your revised quote" : "Send your quote"}
         </h3>
-        {rfq.status === "quoted" && (
-          <span className="text-xs text-slate-500">Sending again replaces your earlier quote.</span>
-        )}
+        <span className="text-xs text-slate-500">
+          {revising ? "This is your one revision." : "Once sent, a quote can't be changed."}
+        </span>
       </div>
+
+      {revising && (
+        <div className="flex items-start gap-2 rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm text-orange-900">
+          <RefreshCw size={15} className="mt-0.5 shrink-0" />
+          <div>
+            <p className="font-medium">The buyer asked for changes</p>
+            <p className="mt-0.5 whitespace-pre-wrap text-orange-800">
+              {rfq.revisionNote || "No details were given. Check the prices and reply."}
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-2">
         {rfq.lineItems.map((li, i) => (
@@ -322,12 +490,6 @@ function QuoteForm({ rfq, onSent }: { rfq: Rfq; onSent: () => void }) {
           {error}
         </p>
       )}
-      {sent && !error && (
-        <p role="status" className="flex items-center gap-1.5 text-sm text-emerald-700">
-          <CheckCircle2 size={15} />
-          Quote sent.
-        </p>
-      )}
 
       <div className="flex items-center justify-between border-t border-slate-100 pt-3">
         <p className="text-sm text-slate-600">
@@ -340,7 +502,7 @@ function QuoteForm({ rfq, onSent }: { rfq: Rfq; onSent: () => void }) {
           disabled={submitting}
           className="rounded-lg bg-[#3d6bff] px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-[#3d6bff]/90 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {submitting ? "Sending…" : rfq.status === "quoted" ? "Update quote" : "Send quote"}
+          {submitting ? "Sending…" : revising ? "Send revised quote" : "Send quote"}
         </button>
       </div>
     </div>
@@ -366,6 +528,9 @@ export function RfqInbox({ limit, viewAllHref, showTabs = false }: RfqInboxProps
   const [openId, setOpenId] = useState<string | null>(null);
   const [tab, setTab] = useState<TabKey>("awaiting");
   const [query, setQuery] = useState("");
+  const [details, setDetails] = useState<Record<string, RfqDetail>>({});
+  const [justSentId, setJustSentId] = useState<string | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
 
   const isPreview = limit !== undefined;
 
@@ -379,30 +544,50 @@ export function RfqInbox({ limit, viewAllHref, showTabs = false }: RfqInboxProps
     }
   }, []);
 
+  /** Full detail for one RFQ: files and the quote the supplier sent. Opening it also marks it read. */
+  const loadDetail = useCallback(async (id: string) => {
+    try {
+      const d = await api<RfqDetail>(`/rfqs/me/${id}`);
+      setDetails((prev) => ({ ...prev, [id]: { rfq: d.rfq, attachments: d.attachments ?? [], quote: d.quote ?? null } }));
+      setRfqs((prev) => prev?.map((r) => (r.id === id ? { ...r, isRead: true } : r)) ?? prev);
+    } catch {
+      /* the list still works without the extras */
+    }
+  }, []);
+
   useEffect(() => {
     load();
   }, [load]);
 
   async function toggle(rfq: Rfq) {
+    setFileError(null);
     if (openId === rfq.id) {
       setOpenId(null);
       return;
     }
     setOpenId(rfq.id);
-    if (!rfq.isRead) {
-      try {
-        await api(`/rfqs/me/${rfq.id}`); // opening an RFQ marks it read on the server
-        setRfqs((prev) => prev?.map((r) => (r.id === rfq.id ? { ...r, isRead: true } : r)) ?? prev);
-      } catch {
-        /* not critical */
-      }
+    await loadDetail(rfq.id);
+  }
+
+  async function handleSent(id: string) {
+    setJustSentId(id);
+    await load(); // status is now "quoted"
+    await loadDetail(id); // fetch the quote that was just stored
+  }
+
+  async function handleDownload(rfqId: string, file: Attachment) {
+    setFileError(null);
+    try {
+      await downloadFile(rfqId, file);
+    } catch (err) {
+      setFileError((err as Error).message);
     }
   }
 
   const unread = rfqs?.filter((r) => !r.isRead).length ?? 0;
 
   const counts = useMemo(() => {
-    const c = { awaiting: 0, quoted: 0, overdue: 0, all: rfqs?.length ?? 0 };
+    const c = { awaiting: 0, revision: 0, quoted: 0, overdue: 0, all: rfqs?.length ?? 0 };
     rfqs?.forEach((r) => {
       c[getState(r)] += 1;
     });
@@ -414,8 +599,11 @@ export function RfqInbox({ limit, viewAllHref, showTabs = false }: RfqInboxProps
     let list = sortRfqs(rfqs);
 
     if (isPreview) {
-      // Preview: hide stale/overdue ones unless nothing else is left.
-      const active = list.filter((r) => getState(r) === "awaiting");
+      // Preview: only requests that need action, unless nothing else is left.
+      const active = list.filter((r) => {
+        const s = getState(r);
+        return s === "awaiting" || s === "revision";
+      });
       list = active.length > 0 ? active : list;
       return list.slice(0, limit);
     }
@@ -439,6 +627,7 @@ export function RfqInbox({ limit, viewAllHref, showTabs = false }: RfqInboxProps
 
   const tabs: { key: TabKey; label: string }[] = [
     { key: "awaiting", label: "Awaiting quote" },
+    { key: "revision", label: "Revision requested" },
     { key: "quoted", label: "Quoted" },
     { key: "overdue", label: "Overdue" },
     { key: "all", label: "All" },
@@ -465,6 +654,11 @@ export function RfqInbox({ limit, viewAllHref, showTabs = false }: RfqInboxProps
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {counts.revision > 0 && (
+            <span className="rounded-full bg-orange-100 px-2.5 py-0.5 text-xs font-medium text-orange-700">
+              {counts.revision} revision{counts.revision === 1 ? "" : "s"} requested
+            </span>
+          )}
           {unread > 0 && (
             <span className="rounded-full bg-[#3d6bff] px-2.5 py-0.5 text-xs font-medium text-white">
               {unread} new
@@ -538,8 +732,10 @@ export function RfqInbox({ limit, viewAllHref, showTabs = false }: RfqInboxProps
       {visible.map((rfq) => {
         const isOpen = !isPreview && openId === rfq.id;
         const state = getState(rfq);
-        const badge = STATE_BADGE[state];
+        const badge = badgeFor(rfq);
         const summary = rfq.lineItems.map((li) => `${li.quantity} × ${li.productName}`).join(", ");
+        const detail = details[rfq.id];
+        const canQuote = rfq.status === "sent" || rfq.status === "revision_requested";
 
         const rowContent = (
           <>
@@ -642,7 +838,53 @@ export function RfqInbox({ limit, viewAllHref, showTabs = false }: RfqInboxProps
                   </table>
                 </div>
 
-                <QuoteForm key={rfq.id} rfq={rfq} onSent={load} />
+                {/* CAD models and drawings the buyer attached */}
+                {detail && detail.attachments.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                      Drawings & files
+                    </p>
+                    <ul className="space-y-1.5">
+                      {detail.attachments.map((f) => (
+                        <li
+                          key={f.id}
+                          className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                        >
+                          <span className="truncate text-slate-800">{f.fileName}</span>
+                          <span className="flex shrink-0 items-center gap-3">
+                            <span className="text-xs text-slate-400">{formatFileSize(f.sizeBytes)}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleDownload(rfq.id, f)}
+                              className="inline-flex items-center gap-1 text-xs font-medium text-[#3d6bff] hover:underline"
+                            >
+                              <Download size={13} /> Download
+                            </button>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    {fileError && (
+                      <p role="alert" className="text-xs text-red-600">
+                        {fileError}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Quote: a form while a quote is expected, read-only once it's sent */}
+                {!detail ? (
+                  <p className="text-sm text-slate-500">Loading…</p>
+                ) : canQuote ? (
+                  <QuoteForm
+                    key={`${rfq.id}-${rfq.status}`}
+                    rfq={rfq}
+                    previous={detail.quote}
+                    onSent={() => handleSent(rfq.id)}
+                  />
+                ) : (
+                  <SentQuotePanel rfq={rfq} quote={detail.quote} justSent={justSentId === rfq.id} />
+                )}
               </div>
             )}
           </div>

@@ -137,3 +137,32 @@ export async function cancelSupplierOrder(orderId: string) {
   });
   return parseErrorOr<{ order: SupplierOrder }>(res, "Failed to cancel the order");
 }
+/** Buyer accepts the supplier's quote. The server creates the pending order; the buyer pays on Billing. */
+export async function acceptQuoteForRfq(args: {
+  rfqId: string;
+  quoteId: string;
+  deliveryAddress: string;
+  notes?: string;
+}) {
+  const res = await buyerFetch(`/rfq-orders/${args.rfqId}/accept`, {
+    method: "POST",
+    body: JSON.stringify({
+      quoteId: args.quoteId,
+      deliveryAddress: args.deliveryAddress,
+      notes: args.notes,
+    }),
+  });
+  return parseErrorOr<{ order: { id: string; status: string; total: number; currency: string } }>(
+    res,
+    "Couldn't accept the quote"
+  );
+}
+
+/** Buyer reopens a received quote ("bargain reset"). The supplier can then send exactly one new quote. */
+export async function requestQuoteRevision(args: { rfqId: string; note: string }) {
+  const res = await buyerFetch(`/rfq-orders/${args.rfqId}/request-revision`, {
+    method: "POST",
+    body: JSON.stringify({ note: args.note }),
+  });
+  return parseErrorOr<{ notified: boolean }>(res, "Couldn't request a revision");
+}
