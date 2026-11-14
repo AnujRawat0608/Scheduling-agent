@@ -68,7 +68,7 @@ app.use("/api/offers", offerImagesRouter);
 app.use("/api/rfqs/by-task", rfqTaskQuotesRouter);
 app.use("/api/rfqs", rfqRouter);
 app.use("/api/rfq-orders", rfqAcceptRouter);
-app.use("/api/rfq-revisions", rfqRevisionRouter);
+app.use("/api/rfq-orders", rfqRevisionRouter);
 app.use("/api", tariffRouter);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
