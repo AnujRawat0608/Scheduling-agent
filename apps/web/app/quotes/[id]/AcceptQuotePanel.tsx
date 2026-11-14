@@ -11,7 +11,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { CircleCheck, TriangleAlert, ShoppingCart, RefreshCw, Hourglass } from "lucide-react";
-import { acceptQuoteForRfq, requestQuoteRevision } from "../../../lib/supplierOrdersApi";
+import { acceptQuoteForRfq, requestQuoteRevision, withdrawQuoteRevision } from "../../../lib/supplierOrdersApi";
 import { formatMoney } from "../../../lib/format";
 import type { QuoteDetail } from "../../../lib/quotesAPI";
 
@@ -52,6 +52,11 @@ export default function AcceptQuotePanel({ rfq }: { rfq: QuoteDetail }) {
     },
   });
 
+  const withdraw = useMutation({
+    mutationFn: withdrawQuoteRevision,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["quote", rfq.id] }),
+  });
+
   /* ---- Accepted ---- */
   if (rfq.status === "accepted") {
     return (
@@ -84,6 +89,19 @@ export default function AcceptQuotePanel({ rfq }: { rfq: QuoteDetail }) {
           The quote above is the previous one and can&apos;t be accepted. This page updates automatically when
           the supplier replies.
         </p>
+        {withdraw.isError && (
+          <p role="alert" className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            {(withdraw.error as Error).message}
+          </p>
+        )}
+        <button
+          type="button"
+          onClick={() => withdraw.mutate({ rfqId: rfq.id })}
+          disabled={withdraw.isPending}
+          className="mt-3 rounded-md border border-amber-300 bg-white px-4 py-2 text-xs font-medium text-amber-900 transition hover:border-amber-400 disabled:opacity-50"
+        >
+          {withdraw.isPending ? "Withdrawing…" : "Withdraw request & keep the previous quote"}
+        </button>
       </section>
     );
   }
@@ -107,6 +125,13 @@ export default function AcceptQuotePanel({ rfq }: { rfq: QuoteDetail }) {
         <ShoppingCart size={16} className="text-[#f97316]" />
         <h2 className="text-sm font-medium text-neutral-700">Accept this quote</h2>
       </div>
+
+      {rfq.revisionReply && (
+        <div className="mb-4 rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-800">
+          <p className="text-xs font-medium text-neutral-500">The supplier kept their original quote</p>
+          <p className="mt-0.5 whitespace-pre-wrap">{rfq.revisionReply}</p>
+        </div>
+      )}
 
       {response.totalPrice != null && (
         <p className="mb-4 text-sm text-neutral-600">

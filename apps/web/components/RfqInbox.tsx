@@ -45,6 +45,8 @@ interface Rfq {
   createdAt: string;
   revisionNote?: string | null;
   revisionCount?: number;
+  /** The supplier's reason, set when they declined a revision request and kept the original quote. */
+  revisionReply?: string | null;
 }
 
 interface Attachment {
@@ -213,6 +215,12 @@ function SentQuotePanel({ rfq, quote, justSent }: { rfq: Rfq; quote: SentQuote |
         </div>
       </div>
 
+      {rfq.revisionReply && !accepted && (
+        <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          You kept your original quote after the buyer&apos;s revision request: &ldquo;{rfq.revisionReply}&rdquo;
+        </p>
+      )}
+
       {quote ? (
         <>
           <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
@@ -274,11 +282,14 @@ function QuoteForm({
   rfq,
   previous,
   onSent,
+  onDeclined,
 }: {
   rfq: Rfq;
   /** The quote being revised (when the buyer asked for changes), used to pre-fill the form. */
   previous: SentQuote | null;
   onSent: () => void;
+  /** Called after the supplier keeps their original quote instead of revising it. */
+  onDeclined: () => void;
 }) {
   const revising = rfq.status === "revision_requested";
 
@@ -304,6 +315,10 @@ function QuoteForm({
   const [validUntil, setValidUntil] = useState("");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [declining, setDeclining] = useState(false);
+  const [declineNote, setDeclineNote] = useState("");
+  const [declineBusy, setDeclineBusy] = useState(false);
+  const [declineError, setDeclineError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const lineTotals = rfq.lineItems.map((li, i) => {
@@ -353,6 +368,23 @@ function QuoteForm({
       setError((err as Error).message);
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  /** "Revision not accepted": keep the original quote and tell the buyer why. */
+  async function declineRevision() {
+    setDeclineError(null);
+    setDeclineBusy(true);
+    try {
+      await api(`/rfqs/me/${rfq.id}/decline-revision`, {
+        method: "POST",
+        body: JSON.stringify({ note: declineNote.trim() || null }),
+      });
+      onDeclined(); // the RFQ is "quoted" again, so this form is replaced by the read-only quote
+    } catch (err) {
+      setDeclineError((err as Error).message);
+    } finally {
+      setDeclineBusy(false);
     }
   }
 
@@ -505,6 +537,67 @@ function QuoteForm({
           {submitting ? "Sending…" : revising ? "Send revised quote" : "Send quote"}
         </button>
       </div>
+
+      {/* The supplier can't meet the buyer's request: keep the original quote */}
+      {revising && (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          {!declining ? (
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-slate-600">
+                Can&apos;t meet the buyer&apos;s request? Your original quote stays as it is.
+              </p>
+              <button
+                type="button"
+                onClick={() => setDeclining(true)}
+                className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-slate-400"
+              >
+                Keep original quote
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <label className="block space-y-1">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Reason for the buyer (optional)
+                </span>
+                <textarea
+                  value={declineNote}
+                  onChange={(e) => setDeclineNote(e.target.value)}
+                  rows={2}
+                  maxLength={1000}
+                  placeholder="e.g. This is already our best price for this quantity."
+                  className={`${inputClass} resize-none`}
+                />
+              </label>
+              {declineError && (
+                <p role="alert" className="text-sm text-red-600">
+                  {declineError}
+                </p>
+              )}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={declineRevision}
+                  disabled={declineBusy}
+                  className="rounded-lg bg-slate-800 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-slate-700 disabled:opacity-50"
+                >
+                  {declineBusy ? "Sending…" : "Confirm: keep original quote"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDeclining(false);
+                    setDeclineError(null);
+                  }}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-slate-400"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -573,6 +666,11 @@ export function RfqInbox({ limit, viewAllHref, showTabs = false }: RfqInboxProps
     setJustSentId(id);
     await load(); // status is now "quoted"
     await loadDetail(id); // fetch the quote that was just stored
+  }
+
+  async function handleDeclined(id: string) {
+    await load(); // status is back to "quoted"
+    await loadDetail(id);
   }
 
   async function handleDownload(rfqId: string, file: Attachment) {
@@ -881,6 +979,7 @@ export function RfqInbox({ limit, viewAllHref, showTabs = false }: RfqInboxProps
                     rfq={rfq}
                     previous={detail.quote}
                     onSent={() => handleSent(rfq.id)}
+                    onDeclined={() => handleDeclined(rfq.id)}
                   />
                 ) : (
                   <SentQuotePanel rfq={rfq} quote={detail.quote} justSent={justSentId === rfq.id} />

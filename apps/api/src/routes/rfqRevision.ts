@@ -63,6 +63,7 @@ rfqRevisionRouter.post("/:rfqId/request-revision", requireProcurerAuth, async (r
         status: "revision_requested",
         revisionCount: sql`${rfqs.revisionCount} + 1`,
         revisionNote: note,
+        revisionReply: null, // clear any earlier "kept original quote" answer
         revisionRequestedAt: new Date(),
         updatedAt: new Date(),
       })
@@ -110,5 +111,45 @@ rfqRevisionRouter.post("/:rfqId/request-revision", requireProcurerAuth, async (r
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Could not request a revision" });
+  }
+});
+
+/**
+ * POST /api/rfq-orders/:rfqId/withdraw-revision
+ * The buyer changes their mind (or the supplier hasn't replied): the supplier's ORIGINAL quote becomes
+ * acceptable again. The request still counts toward MAX_REVISIONS, so it can't be used to spam the supplier.
+ */
+rfqRevisionRouter.post("/:rfqId/withdraw-revision", requireProcurerAuth, async (req, res) => {
+  try {
+    const rfqId = req.params.rfqId;
+    if (!UUID_RE.test(rfqId)) return res.status(404).json({ error: "RFQ not found" });
+
+    // Atomic: only moves revision_requested -> quoted, and only for the buyer who owns the RFQ.
+    const [updated] = await db
+      .update(rfqs)
+      .set({ status: "quoted", updatedAt: new Date() })
+      .where(
+        and(
+          eq(rfqs.id, rfqId),
+          eq(rfqs.procurerId, req.procurer!.procurerId),
+          eq(rfqs.status, "revision_requested")
+        )
+      )
+      .returning();
+
+    if (!updated) {
+      const [rfq] = await db
+        .select({ id: rfqs.id })
+        .from(rfqs)
+        .where(and(eq(rfqs.id, rfqId), eq(rfqs.procurerId, req.procurer!.procurerId)))
+        .limit(1);
+      if (!rfq) return res.status(404).json({ error: "RFQ not found" });
+      return res.status(409).json({ error: "This revision request is no longer open. Refresh the page." });
+    }
+
+    res.json({ rfq: updated });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Could not withdraw the revision request" });
   }
 });

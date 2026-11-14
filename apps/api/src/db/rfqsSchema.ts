@@ -45,6 +45,8 @@ export const rfqs = pgTable("rfqs", {
   revisionCount: integer("revision_count").notNull().default(0),
   revisionNote: text("revision_note"),
   revisionRequestedAt: timestamp("revision_requested_at"),
+  /** Set when the supplier declines a revision request and keeps the original quote (their reason). */
+  revisionReply: text("revision_reply"),
 
   currency: text("currency"),
   dueDate: timestamp("due_date"),

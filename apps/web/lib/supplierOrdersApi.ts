@@ -166,3 +166,10 @@ export async function requestQuoteRevision(args: { rfqId: string; note: string }
   });
   return parseErrorOr<{ notified: boolean }>(res, "Couldn't request a revision");
 }
+
+
+/** Buyer withdraws a pending revision request, so the supplier's previous quote can be accepted again. */
+export async function withdrawQuoteRevision(args: { rfqId: string }) {
+  const res = await buyerFetch(`/rfq-orders/${args.rfqId}/withdraw-revision`, { method: "POST" });
+  return parseErrorOr<{ rfq: { id: string; status: string } }>(res, "Couldn't withdraw the revision request");
+}

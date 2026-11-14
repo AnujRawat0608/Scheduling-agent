@@ -1,5 +1,6 @@
 import { procurerAuthHeaders } from "./procurerAuthApi";
 
+
 export type VerificationStatus = "pending" | "verified" | "rejected";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
@@ -134,6 +135,8 @@ export type Quote = QuoteDraft & {
   createdAt: string;
   revisionCount?: number;
   revisionNote?: string | null;
+  revisionReply?: string | null;
+  revisionRequestedAt?: string | null;
 };
 
 /** The detail shape returned by GET /api/rfqs/:id — the Quote itself, plus

@@ -453,6 +453,65 @@ rfqRouter.post("/me/:id/quote", requireSupplierAuth, async (req, res) => {
 });
 
 /**
+ * POST /api/rfqs/me/:id/decline-revision    Body: { note? }
+ * The supplier can't (or won't) change their quote after the buyer asked for a revision. The ORIGINAL quote
+ * stands (status goes back to "quoted") and the buyer is told why, so the RFQ never gets stuck waiting.
+ */
+rfqRouter.post("/me/:id/decline-revision", requireSupplierAuth, async (req, res) => {
+  try {
+    if (!UUID_RE.test(req.params.id)) return res.status(404).json({ error: "RFQ not found" });
+
+    const note = typeof req.body?.note === "string" ? req.body.note.trim().slice(0, 1000) : "";
+    const reply = note || "No reason given.";
+
+    // Atomic: only moves revision_requested -> quoted, and only for THIS supplier's RFQ.
+    const [updated] = await db
+      .update(rfqs)
+      .set({ status: "quoted", revisionReply: reply, updatedAt: new Date() })
+      .where(
+        and(
+          eq(rfqs.id, req.params.id),
+          eq(rfqs.supplierId, req.supplier!.supplierId),
+          eq(rfqs.status, "revision_requested")
+        )
+      )
+      .returning();
+    if (!updated) {
+      return res.status(409).json({ error: "There's no open revision request to decline on this RFQ." });
+    }
+
+    // Tell the buyer. A mail failure never undoes the answer; `notified` tells the UI.
+    let notified = false;
+    try {
+      const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const link = `${process.env.APP_URL}/quotes/${updated.id}`;
+      const subject = `Supplier kept the original quote for RFQ ${updated.referenceNumber}`;
+      const html = `
+        <div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;">
+          <h2 style="color:#ea580c;">The supplier kept their original quote</h2>
+          <p>${esc(updated.supplierName ?? "The supplier")} can't change their quote for RFQ
+             <strong>${esc(updated.referenceNumber)}</strong>.</p>
+          <p><strong>Their reply:</strong><br>${esc(reply)}</p>
+          <p><a href="${link}">Review the quote</a>. You can still accept it${
+            updated.revisionCount < 2 ? " or ask again" : ""
+          }.</p>
+        </div>`;
+      const text =
+        `The supplier kept their original quote for RFQ ${updated.referenceNumber}.\n` +
+        `Their reply: ${reply}\nReview it here: ${link}`;
+      await sendMailBounded({ to: updated.requesterEmail, subject, html, text });
+      notified = true;
+    } catch (mailErr) {
+      console.error(`Could not notify buyer about declined revision for RFQ ${updated.id}`, mailErr);
+    }
+
+    res.json({ rfq: updated, notified });
+  } catch (err) {
+    fail500(res, err);
+  }
+});
+
+/**
  * GET /api/rfqs/:id
  * Procurer-facing: fetch a single RFQ (the one they just sent) along with
  * the supplier's quote history (newest first) and attached files. No auth,
