@@ -23,7 +23,7 @@ import {
  * saveQuote payload type in lib/quotesAPI.ts with the new fields.
  */
 
-const CURRENCY_OPTIONS = ["INR", "USD", "CNY", "EUR", "GBP", "AED", "SGD"];
+const CURRENCY_OPTIONS = ["INR", "USD", "CNY", "EUR", "GBP", "AED", "SGD","CNY", "TWD", "HKD"];
 const UNIT_OPTIONS = ["Pcs", "Box", "Kg", "Litre", "Lot"];
 const INCOTERMS = ["EXW", "FCA", "FAS", "FOB", "CFR", "CIF", "CPT", "CIP", "DAP", "DPU", "DDP"];
 const PAYMENT_TERMS_OPTIONS = [

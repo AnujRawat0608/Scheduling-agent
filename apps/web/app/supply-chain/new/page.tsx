@@ -42,6 +42,9 @@ const CURRENCIES = [
   { code: "GBP", symbol: "£", label: "GBP – British Pound" },
   { code: "AED", symbol: "AED", label: "AED – UAE Dirham" },
   { code: "SGD", symbol: "S$", label: "SGD – Singapore Dollar" },
+  { code: "CNY", symbol: "¥", label: "CNY – Chinese Yuan" },
+  { code: "TWD", symbol: "NT$", label: "TWD – New Taiwan Dollar" },
+  { code: "HKD", symbol: "HK$", label: "HKD – Hong Kong Dollar" },
 ];
 
 const CATEGORY_OPTIONS = [

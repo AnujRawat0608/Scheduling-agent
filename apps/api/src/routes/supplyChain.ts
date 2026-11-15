@@ -15,8 +15,7 @@ const LEGACY_IMAGE_URL_RE = /^\/uploads\/products\/[\w-]+\.(jpg|png)$/;
 
 // Currencies suppliers may price in. Adding one later is a one-line change here
 // (plus a rate for it in the fx_rates table). Keep to 2-decimal currencies for now.
-const SUPPORTED_CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED", "SGD"];
-
+const SUPPORTED_CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED", "SGD", "CNY", "TWD", "HKD"];
 // Existing clients don't send a currency yet, so a missing value defaults to USD
 // (matches what the Add Product form showed). An unsupported value is rejected.
 const DEFAULT_CURRENCY = "USD";

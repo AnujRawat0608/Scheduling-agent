@@ -4,8 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
 
 // Keep in sync with the API's supported currencies.
-export const DISPLAY_CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED", "SGD"];
-
+export const DISPLAY_CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED", "SGD", "CNY", "TWD", "HKD"];
 const STORAGE_KEY = "procurement:display-currency";
 
 export interface FxRates {

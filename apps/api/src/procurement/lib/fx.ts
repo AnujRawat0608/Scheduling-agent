@@ -5,7 +5,7 @@ export { convert } from "./fxMath.js";
 export type { RateTable } from "./fxMath.js";
 
 // Keep in sync with the list in routes/supplyChain.ts
-export const SUPPORTED_CURRENCIES = ["USD", "INR", "EUR", "GBP", "AED", "SGD"] as const;
+export const SUPPORTED_CURRENCIES = ["USD", "INR", "EUR", "GBP", "AED", "SGD", "CNY", "TWD", "HKD"] as const;
 
 
 

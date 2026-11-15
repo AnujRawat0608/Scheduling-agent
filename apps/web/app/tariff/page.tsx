@@ -8,7 +8,7 @@ import { COUNTRIES } from "../../lib/countries";
 import { formatMoney } from "../../lib/format";
 import { estimateTariff, type DutyEstimate, type RestrictionNote } from "../../lib/tariffApi";
 
-const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED", "SGD"];
+const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED", "SGD", "CNY", "TWD", "HKD"] as const;
 
 // One place to change the palette (swap `goods` to #EA580C to match your brand orange).
 const C = { goods: "#2563eb", freight: "#f59e0b", duty: "#ef4444", fees: "#16a34a" };
