@@ -119,6 +119,56 @@ function Card({ label = "Example", children }: { label?: string; children: React
   );
 }
 
+/** A real screen recording. File lives in apps/web/public/demos/ */
+function Demo({
+  src,
+  label = "Real recording",
+  priority = false,
+}: {
+  src: string; // e.g. "/demos/hero.webm"
+  label?: string;
+  priority?: boolean;
+}) {
+  return (
+    <figure className="overflow-hidden rounded-xl border border-white/10 bg-white/[0.03]">
+      <video
+        className="block h-auto w-full motion-reduce:hidden"
+        autoPlay
+        muted
+        loop
+        playsInline
+        preload={priority ? "auto" : "metadata"}
+        aria-label="Screen recording of Metis sourcing a part"
+      >
+        <source src={src} type="video/webm" />
+      </video>
+      <figcaption className="px-4 py-2 text-[12px] text-white/60">{label}</figcaption>
+    </figure>
+  );
+}
+
+/** A real screenshot. File lives in apps/web/public/demos/ */
+function Shot({
+  src,
+  alt,
+  width,
+  height,
+  label = "Real screenshot",
+}: {
+  src: string;
+  alt: string;
+  width: number;
+  height: number;
+  label?: string;
+}) {
+  return (
+    <figure className="overflow-hidden rounded-xl border border-white/10 bg-white/[0.03]">
+      <Image src={src} alt={alt} width={width} height={height} className="block h-auto w-full" />
+      <figcaption className="px-4 py-2 text-[12px] text-white/60">{label}</figcaption>
+    </figure>
+  );
+}
+
 type Step = {
   num: string;
   label: string;
@@ -257,9 +307,19 @@ export default function Home() {
       <style>{"html, body { background: #000; }"}</style>
 
       {/* Logo, top-left. Image file must live at apps/web/public/metis-icon.png */}
-      <div className="fixed top-5 left-6 z-20">
-        <Image src="/metis-icon.png" alt="Metis" width={36} height={36} priority />
-      </div>
+      <Link
+        href="/"
+        aria-label="Metis home"
+        className={`fixed top-5 left-6 z-20 flex items-center gap-3 rounded ${focusRing}`}
+      >
+        <Image src="/metis-icon.png" alt="" width={36} height={36} priority />
+        <span
+          className="text-[15px] font-bold tracking-[0.3em] text-white"
+          style={{ fontFamily: "var(--font-display)" }}
+        >
+          METIS
+        </span>
+      </Link>
 
       <Link
         href={TRY_LIVE_HREF}
@@ -268,39 +328,49 @@ export default function Home() {
         Try it live
       </Link>
 
-      {/* HERO */}
-      <section className="max-w-[1100px] mx-auto px-6 pt-28 pb-24 text-center">
+      {/* HERO: text on the left, demo video on the right (stacks on mobile) */}
+      <section className="max-w-[1100px] mx-auto px-6 pt-28 pb-24">
         <Reveal>
-          <div className="inline-flex items-center gap-2 text-[13px] text-white/50 border border-[#3d6bff]/30 bg-[#3d6bff]/[0.06] rounded-full px-3.5 py-1.5 mb-8">
-            <span className="h-1.5 w-1.5 rounded-full bg-[#3d6bff] shadow-[0_0_8px_1px_#3d6bff]" />
-            For teams that source physical parts
+          <div className="grid grid-cols-1 items-center gap-12 text-center lg:grid-cols-[1fr_460px] lg:text-left">
+            <div>
+              <div className="inline-flex items-center gap-2 text-[13px] text-white/50 border border-[#3d6bff]/30 bg-[#3d6bff]/[0.06] rounded-full px-3.5 py-1.5 mb-8">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#3d6bff] shadow-[0_0_8px_1px_#3d6bff]" />
+                For teams that source physical parts
+              </div>
+              <h1
+                className="font-semibold tracking-tight leading-[1.05] text-[42px] md:text-[56px] mb-6"
+                style={{ fontFamily: "var(--font-display)" }}
+              >
+                Procurement, without the chase.
+              </h1>
+              <p className="text-white/50 text-lg max-w-[560px] mx-auto lg:mx-0 mb-10 leading-relaxed">
+                Describe the part, the quantity and the date. Metis finds suppliers in our network
+                and on the web, compares them on price, lead time and your deadline, checks the
+                shipping route for disruption, and waits for your approval before anything goes
+                out.
+              </p>
+              <div className="flex flex-wrap items-center justify-center gap-3 lg:justify-start">
+                <Cta href={PILOT_HREF}>Join the free pilot</Cta>
+                <Cta href={TRY_LIVE_HREF} variant="secondary">
+                  Try it live
+                </Cta>
+              </div>
+              <p className="mt-6 text-[14px] text-white/50">
+                Selling parts?{" "}
+                <Link
+                  href={SUPPLIER_REGISTER_HREF}
+                  className={`rounded text-[#7aa4ff] underline underline-offset-4 hover:text-white ${focusRing}`}
+                >
+                  Register as a supplier
+                </Link>
+              </p>
+            </div>
+
+            {/* Hero demo video: apps/web/public/demos/hero.webm */}
+            <div className="mx-auto w-full max-w-[460px]">
+              <Demo src="/demos/hero.webm" priority />
+            </div>
           </div>
-          <h1
-            className="font-semibold tracking-tight leading-[1.05] text-[42px] md:text-[68px] mb-6"
-            style={{ fontFamily: "var(--font-display)" }}
-          >
-            Procurement, without the chase.
-          </h1>
-          <p className="text-white/50 text-lg max-w-[600px] mx-auto mb-10 leading-relaxed">
-            Describe the part, the quantity and the date. Metis finds suppliers in our network and
-            on the web, compares them on price, lead time and your deadline, checks the shipping
-            route for disruption, and waits for your approval before anything goes out.
-          </p>
-          <div className="flex flex-wrap items-center justify-center gap-3">
-            <Cta href={PILOT_HREF}>Join the free pilot</Cta>
-            <Cta href={TRY_LIVE_HREF} variant="secondary">
-              Try it live
-            </Cta>
-          </div>
-          <p className="mt-6 text-[14px] text-white/50">
-            Selling parts?{" "}
-            <Link
-              href={SUPPLIER_REGISTER_HREF}
-              className={`rounded text-[#7aa4ff] underline underline-offset-4 hover:text-white ${focusRing}`}
-            >
-              Register as a supplier
-            </Link>
-          </p>
         </Reveal>
       </section>
 
@@ -345,59 +415,42 @@ export default function Home() {
       <section id="suppliers" className="border-b border-white/10">
         <div className="max-w-[1100px] mx-auto px-6 py-24">
           <Reveal>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
-              <div>
-                <div
-                  className="text-sm text-[#7aa4ff] mb-4 tracking-wide"
-                  style={{ fontFamily: "var(--font-display)" }}
-                >
-                  For suppliers
-                </div>
-                <h2
-                  className="font-semibold tracking-tight text-[28px] md:text-[36px] mb-4 leading-tight"
-                  style={{ fontFamily: "var(--font-display)" }}
-                >
-                  Showcase your products to buyers.
-                </h2>
-                <p className="text-white/50 text-[16px] leading-relaxed max-w-[440px]">
-                  Register your business and list your products with price, minimum order quantity
-                  and lead time. Buyers searching for your parts will find them. When a buyer sends
-                  an RFQ, you get an email and reply with your quote from your dashboard. Listing is
-                  free during the pilot.
-                </p>
-                <div className="mt-8 flex flex-wrap items-center gap-3">
-                  <Cta href={SUPPLIER_REGISTER_HREF}>Register as a supplier</Cta>
-                  <Cta href={SUPPLIER_LOGIN_HREF} variant="secondary">
-                    Supplier log in
-                  </Cta>
-                </div>
+            <div className="max-w-[640px]">
+              <div
+                className="text-sm text-[#7aa4ff] mb-4 tracking-wide"
+                style={{ fontFamily: "var(--font-display)" }}
+              >
+                For suppliers
               </div>
-              <div>
-                <Card label="Example · supplier dashboard">
-                  <div className="mb-2 text-[13px] text-white/60">Product catalog</div>
-                  <div className="space-y-2">
-                    {[
-                      { name: "M4 stainless bolt", detail: "MOQ 100 · 3 days", price: "$0.12" },
-                      { name: "M6 hex nut", detail: "MOQ 200 · 2 days", price: "$0.05" },
-                    ].map((p) => (
-                      <div
-                        key={p.name}
-                        className="flex items-center justify-between gap-3 border-b border-white/5 pb-2 text-sm text-white/70"
-                      >
-                        <span>{p.name}</span>
-                        <span className="text-[11px] text-white/50">
-                          {p.detail} · {p.price}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="mb-2 mt-5 text-[13px] text-white/60">Requests for quote</div>
-                  <div className="flex items-center justify-between gap-3 text-sm text-white/70">
-                    <span>200 × M4 stainless bolt</span>
-                    <Pill tone="warn">Awaiting quote</Pill>
-                  </div>
-                </Card>
+              <h2
+                className="font-semibold tracking-tight text-[28px] md:text-[36px] mb-4 leading-tight"
+                style={{ fontFamily: "var(--font-display)" }}
+              >
+                Showcase your products to buyers.
+              </h2>
+              <p className="text-white/50 text-[16px] leading-relaxed">
+                Register your business and list your products with price, minimum order quantity
+                and lead time. Buyers searching for your parts will find them. When a buyer sends
+                an RFQ, you get an email and reply with your quote from your dashboard. Listing is
+                free during the pilot.
+              </p>
+              <div className="mt-8 flex flex-wrap items-center gap-3">
+                <Cta href={SUPPLIER_REGISTER_HREF}>Register as a supplier</Cta>
+                <Cta href={SUPPLIER_LOGIN_HREF} variant="secondary">
+                  Supplier log in
+                </Cta>
               </div>
+            </div>
+
+            {/* Supplier dashboard screenshot: apps/web/public/demos/supplier-dashboard.png */}
+            <div className="mt-14">
+              <Shot
+                src="/demos/supplier-dashboard.png"
+                alt="Metis supplier dashboard showing open RFQs, quote activity and profile health"
+                width={1898}
+                height={660}
+                label="Real screenshot · supplier dashboard"
+              />
             </div>
           </Reveal>
         </div>
