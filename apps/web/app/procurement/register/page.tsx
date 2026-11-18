@@ -185,23 +185,21 @@ export default function ProcurerRegisterPage() {
     <main className="min-h-screen bg-white">
       {/* Top bar */}
       <header className="border-b border-neutral-100">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#EA580C]/10 text-[#EA580C]">
-              <Briefcase size={16} />
-            </span>
-            <div>
-              <p className="text-sm font-semibold text-neutral-900">Procurement portal</p>
-            </div>
-          </div>
-          <p className="text-sm text-neutral-500">
-            Already have an account?{" "}
-            <Link href="/procurement/login" className="font-medium text-[#EA580C] hover:underline">
-              Sign in
-            </Link>
-          </p>
-        </div>
-      </header>
+  <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+    <Link
+      href="/"
+      className="text-sm font-bold uppercase tracking-[0.3em] text-neutral-900"
+    >
+      Metis
+    </Link>
+    <p className="text-sm text-neutral-500">
+      Already have an account?{" "}
+      <Link href="/procurement/login" className="font-medium text-[#EA580C] hover:underline">
+        Sign in
+      </Link>
+    </p>
+  </div>
+</header>
 
       <div className="mx-auto max-w-6xl px-6 py-12">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-start">
@@ -279,20 +277,20 @@ export default function ProcurerRegisterPage() {
               <StepCard
                 step="Step two"
                 icon={Briefcase}
-                title="Tell us about your company"
+                title="Tell us about your business"
                 description="This information helps suppliers know who they're quoting."
               >
                 <div className="grid grid-cols-2 gap-4">
-                  <Field label="Company name" span2>
+                  <Field label="Business name" span2>
                     <input
                       required
                       value={companyName}
                       onChange={(e) => setCompanyName(e.target.value)}
-                      placeholder="Acme Manufacturing Pvt Ltd"
+                      placeholder="Acme Components Co., Ltd"
                       className={inputClass}
                     />
                   </Field>
-                  <Field label="Country (where you receive goods)">
+                  <Field label="Country">
                     <select
                       required
                       autoComplete="off"
@@ -312,7 +310,7 @@ export default function ProcurerRegisterPage() {
                     <input
                       value={contactName}
                       onChange={(e) => setContactName(e.target.value)}
-                      placeholder="Riya Sharma"
+                      placeholder="Full name"
                       className={inputClass}
                     />
                   </Field>
@@ -320,23 +318,23 @@ export default function ProcurerRegisterPage() {
                     <input
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
-                      placeholder="+91 98765 43210"
+                      placeholder="Include country code"
                       className={inputClass}
                     />
                   </Field>
-                  <Field label="GST number" optional>
+                  <Field label="Tax / VAT / GST number" optional>
                     <input
                       value={gstNumber}
                       onChange={(e) => setGstNumber(e.target.value)}
-                      placeholder="27ABCDE1234F1Z5"
+                      placeholder="Business registration or tax ID"
                       className={inputClass}
                     />
                   </Field>
-                  <Field label="Pincode" optional>
+                  <Field label="Postal code" optional>
                     <input
                       value={pincode}
                       onChange={(e) => setPincode(e.target.value)}
-                      placeholder="411001"
+                      placeholder="e.g. 518000"
                       className={inputClass}
                     />
                   </Field>
@@ -349,7 +347,7 @@ export default function ProcurerRegisterPage() {
                       <input
                         value={address}
                         onChange={(e) => setAddress(e.target.value)}
-                        placeholder="Plot 12, MIDC Industrial Area"
+                        placeholder="Street address"
                         className={inputWithIconClass}
                       />
                     </div>
@@ -358,15 +356,15 @@ export default function ProcurerRegisterPage() {
                     <input
                       value={city}
                       onChange={(e) => setCity(e.target.value)}
-                      placeholder="Pune"
+                      placeholder="City"
                       className={inputClass}
                     />
                   </Field>
-                  <Field label="State" optional>
+                  <Field label="State / Province" optional>
                     <input
                       value={state}
                       onChange={(e) => setState(e.target.value)}
-                      placeholder="Maharashtra"
+                      placeholder="e.g. Guangdong"
                       className={inputClass}
                     />
                   </Field>
