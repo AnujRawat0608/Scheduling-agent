@@ -1,8 +1,10 @@
 ﻿"use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Image from "next/image";
 import Link from "next/link";
+import { Maximize2, X } from "lucide-react";
 import { Space_Grotesk, Inter } from "next/font/google";
 
 // Edit these to change where the buttons go.
@@ -119,7 +121,12 @@ function Card({ label = "Example", children }: { label?: string; children: React
   );
 }
 
-/** A real screen recording. File lives in apps/web/public/demos/ */
+/**
+ * A real screen recording. File lives in apps/web/public/demos/
+ * Has an "enlarge" button: the video grows to about 1100px wide (90% of the screen on small
+ * screens) over a dimmed page. It is drawn through a portal to document.body because the
+ * Reveal wrapper uses a CSS transform, which would break position: fixed for anything inside it.
+ */
 function Demo({
   src,
   label = "Real recording",
@@ -129,21 +136,105 @@ function Demo({
   label?: string;
   priority?: boolean;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const [startAt, setStartAt] = useState(0);
+  const inlineRef = useRef<HTMLVideoElement>(null);
+
+  const open = () => {
+    setStartAt(inlineRef.current?.currentTime ?? 0); // continue from the same moment
+    inlineRef.current?.pause();
+    setExpanded(true);
+  };
+
+  const close = () => {
+    setExpanded(false);
+    inlineRef.current?.play().catch(() => {});
+  };
+
+  // Esc closes, and the page behind doesn't scroll while open
+  useEffect(() => {
+    if (!expanded) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    window.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [expanded]);
+
   return (
-    <figure className="overflow-hidden rounded-xl border border-white/10 bg-white/[0.03]">
-      <video
-        className="block h-auto w-full motion-reduce:hidden"
-        autoPlay
-        muted
-        loop
-        playsInline
-        preload={priority ? "auto" : "metadata"}
-        aria-label="Screen recording of Metis sourcing a part"
-      >
-        <source src={src} type="video/webm" />
-      </video>
-      <figcaption className="px-4 py-2 text-[12px] text-white/60">{label}</figcaption>
-    </figure>
+    <>
+      <figure className="group relative overflow-hidden rounded-xl border border-white/10 bg-white/[0.03]">
+        <video
+          ref={inlineRef}
+          className="block h-auto w-full motion-reduce:hidden"
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload={priority ? "auto" : "metadata"}
+          aria-label="Screen recording of Metis sourcing a part"
+        >
+          <source src={src} type="video/webm" />
+        </video>
+
+        <button
+          type="button"
+          onClick={open}
+          aria-label="Enlarge video"
+          className={`absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-lg bg-black/60 text-white backdrop-blur transition hover:bg-black/80 motion-reduce:hidden opacity-100 lg:opacity-0 lg:group-hover:opacity-100 focus-visible:opacity-100 ${focusRing}`}
+        >
+          <Maximize2 size={18} aria-hidden />
+        </button>
+
+        <figcaption className="px-4 py-2 text-[12px] text-white/60">{label}</figcaption>
+      </figure>
+
+      {expanded &&
+        createPortal(
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Enlarged demo video"
+            onClick={close}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm md:p-8"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="relative w-[min(1100px,90vw)] overflow-hidden rounded-xl border border-white/10 bg-black shadow-[0_30px_80px_-10px_rgba(0,0,0,0.8)]"
+            >
+              <video
+                className="block max-h-[85vh] w-full"
+                autoPlay
+                muted
+                loop
+                playsInline
+                controls
+                onLoadedMetadata={(e) => {
+                  e.currentTarget.currentTime = startAt;
+                }}
+              >
+                <source src={src} type="video/webm" />
+              </video>
+
+              <button
+                type="button"
+                onClick={close}
+                aria-label="Close video"
+                autoFocus
+                className={`absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-lg bg-black/60 text-white backdrop-blur transition hover:bg-black/80 ${focusRing}`}
+              >
+                <X size={18} aria-hidden />
+              </button>
+            </div>
+          </div>,
+          document.body
+        )}
+    </>
   );
 }
 
