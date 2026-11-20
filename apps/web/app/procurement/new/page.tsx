@@ -806,7 +806,7 @@ function NewProcurementInner() {
           {/* News for the chokepoints on this request's lanes (collapsible) */}
           {showLaneNews && (
             <CollapsibleNews title="news on your shipping routes" storageKey="news-lane-open">
-              <RiskNewsFeed chokepoints={riskChokepointNames} title="News on your shipping routes" limit={8} />
+              <RiskNewsFeed chokepoints={riskChokepointNames} title="News on your shipping routes" limit={8} collapsible />
             </CollapsibleNews>
           )}
 
@@ -1289,7 +1289,7 @@ function NewProcurementInner() {
       {!showLaneNews && (
         <div className="mt-6 rounded-xl border border-neutral-200 bg-white px-5 py-3 shadow-sm">
           <CollapsibleNews title="latest supply chain risk news" storageKey="news-general-open">
-            <RiskNewsFeed title="Latest supply chain risk news" limit={6} />
+            <RiskNewsFeed title="Latest supply chain risk news" limit={6} collapsible />
           </CollapsibleNews>
         </div>
       )}

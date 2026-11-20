@@ -12,8 +12,8 @@
  * (or none) the app uses. Needs: react, lucide-react, Tailwind.
  */
 
-import { useEffect, useState } from "react";
-import { ExternalLink } from "lucide-react";
+import { useEffect, useId, useState } from "react";
+import { ChevronDown, ExternalLink } from "lucide-react";
 
 export type RiskEvent = {
   id?: string;
@@ -134,6 +134,8 @@ export function RiskNewsFeed({
   chokepoint,
   chokepoints,
   linkHoverClass,
+  collapsible = false,
+  defaultOpen = false,
   hours = 72,
   minSeverity = 2,
   limit = 15,
@@ -146,6 +148,10 @@ export function RiskNewsFeed({
   /** Several names, e.g. every chokepoint on an order's lanes. Events for any of them are shown. */
   chokepoints?: string[];
   linkHoverClass?: string;
+  /** Show only the header (title, count, arrow) until the user clicks it open. */
+  collapsible?: boolean;
+  /** Only used with `collapsible`: start expanded. */
+  defaultOpen?: boolean;
   hours?: number;
   minSeverity?: number;
   limit?: number;
@@ -155,6 +161,9 @@ export function RiskNewsFeed({
   const [events, setEvents] = useState<RiskEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState(defaultOpen);
+  const panelId = useId();
+  const expanded = !collapsible || open;
 
   // A string, not an array, so the effect below only re-runs when the NAMES change
   // (a new array with the same names on every render would re-fetch in a loop).
@@ -194,22 +203,65 @@ export function RiskNewsFeed({
   }, [apiBase, namesKey, hours, minSeverity, limit, refreshMs]);
 
   const usesPortWatch = events.some((e) => e.source === "IMF_PORTWATCH");
+  const highCount = events.filter((e) => e.severity >= 4).length;
+  const loaded = !loading && !error;
+
+  const headerContent = (
+    <>
+      <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="text-sm font-semibold text-gray-900">{title}</span>
+        {loaded && events.length > 0 && (
+          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+            {events.length}
+          </span>
+        )}
+        {/* Hidden critical news must not go unnoticed behind the arrow */}
+        {collapsible && !expanded && loaded && highCount > 0 && (
+          <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">
+            {highCount} high severity
+          </span>
+        )}
+      </span>
+      <span className="flex shrink-0 items-center gap-2 text-xs text-gray-500">
+        last {hours}h
+        {collapsible && (
+          <ChevronDown
+            className={`h-4 w-4 transition-transform ${expanded ? "rotate-180" : ""}`}
+            aria-hidden="true"
+          />
+        )}
+      </span>
+    </>
+  );
 
   return (
     <section className="rounded-lg border border-gray-200 bg-white p-4">
-      <div className="mb-2 flex items-baseline justify-between">
-        <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
-        <span className="text-xs text-gray-500">last {hours}h</span>
-      </div>
+      {collapsible ? (
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={expanded}
+          aria-controls={panelId}
+          className="flex w-full items-center justify-between gap-3 text-left"
+        >
+          {headerContent}
+        </button>
+      ) : (
+        <div className="flex items-baseline justify-between gap-3">{headerContent}</div>
+      )}
 
-      {loading && <p className="text-sm text-gray-500">Loading…</p>}
-      {!loading && error && <p className="text-sm text-red-600">{error}</p>}
-      {!loading && !error && <EventList events={events} linkHoverClass={linkHoverClass} />}
+      {expanded && (
+        <div id={panelId} className="mt-2">
+          {loading && <p className="text-sm text-gray-500">Loading…</p>}
+          {!loading && error && <p className="text-sm text-red-600">{error}</p>}
+          {!loading && !error && <EventList events={events} linkHoverClass={linkHoverClass} />}
 
-      <p className="mt-3 text-xs text-gray-400">
-        Based on publicly reported events. Summaries are AI-generated from headlines and may be inaccurate.
-        {usesPortWatch && " Ship traffic data: UN Global Platform; IMF PortWatch."}
-      </p>
+          <p className="mt-3 text-xs text-gray-400">
+            Based on publicly reported events. Summaries are AI-generated from headlines and may be inaccurate.
+            {usesPortWatch && " Ship traffic data: UN Global Platform; IMF PortWatch."}
+          </p>
+        </div>
+      )}
     </section>
   );
 }

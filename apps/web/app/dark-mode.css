@@ -180,3 +180,219 @@
 .dark .divide-neutral-100 > :not([hidden]) ~ :not([hidden]),
 .dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]),
 .dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: #222a38; }
+
+/* ======================================================================
+   Supplier dashboard fixes: hover states, emerald tints, skeletons
+   ====================================================================== */
+
+/* Hover text colours. The base text rules above don't cover ":hover" variants, so
+   "hover:text-slate-900" stayed near-black on a dark row and the label vanished. */
+.dark .hover\:text-slate-900:hover,
+.dark .hover\:text-gray-900:hover,
+.dark .hover\:text-neutral-900:hover { color: #f1f5f9; }
+.dark .hover\:text-slate-800:hover,
+.dark .hover\:text-gray-800:hover,
+.dark .hover\:text-neutral-800:hover { color: #e2e8f0; }
+.dark .hover\:text-slate-700:hover,
+.dark .hover\:text-gray-700:hover,
+.dark .hover\:text-neutral-700:hover { color: #cbd5e1; }
+.dark .hover\:text-red-600:hover { color: #f87171; }
+
+/* Hover backgrounds and borders (slate/gray scales) */
+.dark .hover\:bg-slate-50:hover,
+.dark .hover\:bg-gray-50:hover { background-color: #1b2230; }
+.dark .hover\:bg-slate-100:hover,
+.dark .hover\:bg-gray-100:hover,
+.dark .hover\:bg-neutral-100:hover { background-color: #222a38; }
+.dark [class*="hover:bg-slate-50/"]:hover { background-color: rgba(27, 34, 48, 0.7); }
+.dark .hover\:border-slate-300:hover,
+.dark .hover\:border-gray-300:hover { border-color: #3a4558; }
+
+/* Focus state of form fields (white when focused in light mode) */
+.dark .focus\:bg-white:focus { background-color: #141a24; }
+
+/* Notification dot ring should match the page behind it */
+.dark .ring-white { --tw-ring-color: #0b0f17; }
+
+/* Skeleton loaders and other translucent slate fills */
+.dark [class*="bg-slate-200/"] { background-color: rgba(42, 51, 66, 0.7); }
+.dark .text-slate-300 { color: #4b5568; }
+
+/* Emerald (green) tints */
+.dark .bg-emerald-50,
+.dark [class*="bg-emerald-50/"] { background-color: rgba(16, 185, 129, 0.12); }
+.dark .bg-emerald-100 { background-color: rgba(16, 185, 129, 0.2); }
+.dark .border-emerald-200,
+.dark .border-emerald-300 { border-color: rgba(16, 185, 129, 0.4); }
+.dark .text-emerald-600,
+.dark .text-emerald-700 { color: #34d399; }
+
+/* Amber / red variants used here */
+.dark .text-amber-600 { color: #fbbf24; }
+.dark [class*="bg-red-50/"] { background-color: rgba(239, 68, 68, 0.1); }
+.dark .border-red-300 { border-color: rgba(239, 68, 68, 0.45); }
+.dark .hover\:text-red-600:hover { color: #f87171; }
+
+/* ======================================================================
+   Status chips and badges: soft dark tints instead of pastel-white pills
+   (Shipped, Confirmed, Revision requested, etc.). Each colour family gets a
+   translucent tinted background, a matching border/ring, and a lighter text colour.
+   ====================================================================== */
+
+.dark .bg-purple-50,
+.dark [class*="bg-purple-50/"] { background-color: rgba(168, 85, 247, 0.12); }
+.dark .bg-purple-100,
+.dark [class*="bg-purple-100/"] { background-color: rgba(168, 85, 247, 0.20); }
+.dark .bg-purple-200 { background-color: rgba(168, 85, 247, 0.28); }
+.dark .border-purple-100,
+.dark .border-purple-200,
+.dark .border-purple-300 { border-color: rgba(168, 85, 247, 0.40); }
+.dark .ring-purple-100,
+.dark .ring-purple-200,
+.dark .ring-purple-300 { --tw-ring-color: rgba(168, 85, 247, 0.40); }
+.dark .text-purple-500,
+.dark .text-purple-600,
+.dark .text-purple-700,
+.dark .text-purple-800,
+.dark .text-purple-900 { color: #d8b4fe; }
+.dark .bg-violet-50,
+.dark [class*="bg-violet-50/"] { background-color: rgba(139, 92, 246, 0.12); }
+.dark .bg-violet-100,
+.dark [class*="bg-violet-100/"] { background-color: rgba(139, 92, 246, 0.20); }
+.dark .bg-violet-200 { background-color: rgba(139, 92, 246, 0.28); }
+.dark .border-violet-100,
+.dark .border-violet-200,
+.dark .border-violet-300 { border-color: rgba(139, 92, 246, 0.40); }
+.dark .ring-violet-100,
+.dark .ring-violet-200,
+.dark .ring-violet-300 { --tw-ring-color: rgba(139, 92, 246, 0.40); }
+.dark .text-violet-500,
+.dark .text-violet-600,
+.dark .text-violet-700,
+.dark .text-violet-800,
+.dark .text-violet-900 { color: #c4b5fd; }
+.dark .bg-fuchsia-50,
+.dark [class*="bg-fuchsia-50/"] { background-color: rgba(217, 70, 239, 0.12); }
+.dark .bg-fuchsia-100,
+.dark [class*="bg-fuchsia-100/"] { background-color: rgba(217, 70, 239, 0.20); }
+.dark .bg-fuchsia-200 { background-color: rgba(217, 70, 239, 0.28); }
+.dark .border-fuchsia-100,
+.dark .border-fuchsia-200,
+.dark .border-fuchsia-300 { border-color: rgba(217, 70, 239, 0.40); }
+.dark .ring-fuchsia-100,
+.dark .ring-fuchsia-200,
+.dark .ring-fuchsia-300 { --tw-ring-color: rgba(217, 70, 239, 0.40); }
+.dark .text-fuchsia-500,
+.dark .text-fuchsia-600,
+.dark .text-fuchsia-700,
+.dark .text-fuchsia-800,
+.dark .text-fuchsia-900 { color: #f0abfc; }
+.dark .bg-pink-50,
+.dark [class*="bg-pink-50/"] { background-color: rgba(236, 72, 153, 0.12); }
+.dark .bg-pink-100,
+.dark [class*="bg-pink-100/"] { background-color: rgba(236, 72, 153, 0.20); }
+.dark .bg-pink-200 { background-color: rgba(236, 72, 153, 0.28); }
+.dark .border-pink-100,
+.dark .border-pink-200,
+.dark .border-pink-300 { border-color: rgba(236, 72, 153, 0.40); }
+.dark .ring-pink-100,
+.dark .ring-pink-200,
+.dark .ring-pink-300 { --tw-ring-color: rgba(236, 72, 153, 0.40); }
+.dark .text-pink-500,
+.dark .text-pink-600,
+.dark .text-pink-700,
+.dark .text-pink-800,
+.dark .text-pink-900 { color: #f9a8d4; }
+.dark .bg-rose-50,
+.dark [class*="bg-rose-50/"] { background-color: rgba(244, 63, 94, 0.12); }
+.dark .bg-rose-100,
+.dark [class*="bg-rose-100/"] { background-color: rgba(244, 63, 94, 0.20); }
+.dark .bg-rose-200 { background-color: rgba(244, 63, 94, 0.28); }
+.dark .border-rose-100,
+.dark .border-rose-200,
+.dark .border-rose-300 { border-color: rgba(244, 63, 94, 0.40); }
+.dark .ring-rose-100,
+.dark .ring-rose-200,
+.dark .ring-rose-300 { --tw-ring-color: rgba(244, 63, 94, 0.40); }
+.dark .text-rose-500,
+.dark .text-rose-600,
+.dark .text-rose-700,
+.dark .text-rose-800,
+.dark .text-rose-900 { color: #fda4af; }
+.dark .bg-orange-50,
+.dark [class*="bg-orange-50/"] { background-color: rgba(249, 115, 22, 0.12); }
+.dark .bg-orange-100,
+.dark [class*="bg-orange-100/"] { background-color: rgba(249, 115, 22, 0.20); }
+.dark .bg-orange-200 { background-color: rgba(249, 115, 22, 0.28); }
+.dark .border-orange-100,
+.dark .border-orange-200,
+.dark .border-orange-300 { border-color: rgba(249, 115, 22, 0.40); }
+.dark .ring-orange-100,
+.dark .ring-orange-200,
+.dark .ring-orange-300 { --tw-ring-color: rgba(249, 115, 22, 0.40); }
+.dark .text-orange-500,
+.dark .text-orange-600,
+.dark .text-orange-700,
+.dark .text-orange-800,
+.dark .text-orange-900 { color: #fdba74; }
+.dark .bg-cyan-50,
+.dark [class*="bg-cyan-50/"] { background-color: rgba(6, 182, 212, 0.12); }
+.dark .bg-cyan-100,
+.dark [class*="bg-cyan-100/"] { background-color: rgba(6, 182, 212, 0.20); }
+.dark .bg-cyan-200 { background-color: rgba(6, 182, 212, 0.28); }
+.dark .border-cyan-100,
+.dark .border-cyan-200,
+.dark .border-cyan-300 { border-color: rgba(6, 182, 212, 0.40); }
+.dark .ring-cyan-100,
+.dark .ring-cyan-200,
+.dark .ring-cyan-300 { --tw-ring-color: rgba(6, 182, 212, 0.40); }
+.dark .text-cyan-500,
+.dark .text-cyan-600,
+.dark .text-cyan-700,
+.dark .text-cyan-800,
+.dark .text-cyan-900 { color: #67e8f9; }
+.dark .bg-teal-50,
+.dark [class*="bg-teal-50/"] { background-color: rgba(20, 184, 166, 0.12); }
+.dark .bg-teal-100,
+.dark [class*="bg-teal-100/"] { background-color: rgba(20, 184, 166, 0.20); }
+.dark .bg-teal-200 { background-color: rgba(20, 184, 166, 0.28); }
+.dark .border-teal-100,
+.dark .border-teal-200,
+.dark .border-teal-300 { border-color: rgba(20, 184, 166, 0.40); }
+.dark .ring-teal-100,
+.dark .ring-teal-200,
+.dark .ring-teal-300 { --tw-ring-color: rgba(20, 184, 166, 0.40); }
+.dark .text-teal-500,
+.dark .text-teal-600,
+.dark .text-teal-700,
+.dark .text-teal-800,
+.dark .text-teal-900 { color: #5eead4; }
+.dark .bg-lime-50,
+.dark [class*="bg-lime-50/"] { background-color: rgba(132, 204, 22, 0.12); }
+.dark .bg-lime-100,
+.dark [class*="bg-lime-100/"] { background-color: rgba(132, 204, 22, 0.20); }
+.dark .bg-lime-200 { background-color: rgba(132, 204, 22, 0.28); }
+.dark .border-lime-100,
+.dark .border-lime-200,
+.dark .border-lime-300 { border-color: rgba(132, 204, 22, 0.40); }
+.dark .ring-lime-100,
+.dark .ring-lime-200,
+.dark .ring-lime-300 { --tw-ring-color: rgba(132, 204, 22, 0.40); }
+.dark .text-lime-500,
+.dark .text-lime-600,
+.dark .text-lime-700,
+.dark .text-lime-800,
+.dark .text-lime-900 { color: #bef264; }
+.dark .ring-amber-200, .dark .ring-amber-300 { --tw-ring-color: rgba(245, 158, 11, 0.4); }
+.dark .ring-green-200, .dark .ring-green-300 { --tw-ring-color: rgba(34, 197, 94, 0.4); }
+.dark .ring-emerald-200, .dark .ring-emerald-300 { --tw-ring-color: rgba(16, 185, 129, 0.4); }
+.dark .ring-red-200, .dark .ring-red-300 { --tw-ring-color: rgba(239, 68, 68, 0.4); }
+.dark .ring-blue-200, .dark .ring-blue-300,
+.dark .ring-indigo-200, .dark .ring-indigo-300 { --tw-ring-color: rgba(96, 130, 255, 0.45); }
+.dark .ring-slate-200, .dark .ring-gray-200, .dark .ring-neutral-200 { --tw-ring-color: #2a3342; }
+.dark .text-green-600 { color: #4ade80; }
+.dark .text-yellow-600, .dark .text-yellow-800 { color: #facc15; }
+.dark .text-amber-900 { color: #fbbf24; }
+.dark .text-red-900 { color: #f87171; }
+.dark .text-emerald-800, .dark .text-emerald-900 { color: #34d399; }
+.dark .text-green-900 { color: #4ade80; }

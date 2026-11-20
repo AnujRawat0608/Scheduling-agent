@@ -7,6 +7,7 @@ import Link from "next/link";
 import { IncomingOrders } from "../../../components/IncomingOrders";
 import { RfqInbox } from "../../../components/RfqInbox";
 import { formatMoney } from "../../../lib/format";
+import { ThemeToggle } from "../../../components/ThemeToggle";
 import {
   AlertCircle,
   Bell,
@@ -740,6 +741,7 @@ export default function SupplierDashboardPage() {
       {/* Account controls — rendered into the right end of the global METIS header row */}
       <div className="absolute right-0 top-[calc(-1*var(--site-h))] z-50 flex h-[var(--site-h)] items-center pr-4 sm:pr-6">
           <div className="flex items-center gap-1 sm:gap-2">
+            <ThemeToggle />
             <a
               href="mailto:support@metis.com"
               aria-label="Help"

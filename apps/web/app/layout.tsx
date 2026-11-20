@@ -51,7 +51,9 @@ function AppHeader() {
         </Link>
 
         <div className="flex items-center gap-4">
-          <ThemeToggle />
+          {/* The supplier dashboard draws its own account controls (including a theme toggle)
+              over the right end of this bar, so skip it here to avoid two stacked on top of each other. */}
+          {!pathname.startsWith("/suppliers/dashboard") && <ThemeToggle />}
           {/* Supplier pages get their own menu later; no buyer profile on them. */}
           {isBuyerPage && (
             <>
