@@ -6,6 +6,7 @@ import { MapPin, Plane, Ship, Truck, TrainFront, AlertTriangle, CheckCircle2, He
 import WorldMapPicker from "../../components/WorldMapPicker";
 import GlobePicker from "../../components/GlobePicker";
 import { assessRouteRisk, type RouteRiskResponse, type ModeAssessment, type RiskStatus } from "../../lib/riskApi";
+import { RiskNewsFeed } from "../../components/RiskNews";
 
 type PickMode = "origin" | "destination";
 
@@ -21,6 +22,7 @@ const STATUS_STYLES: Record<RiskStatus, string> = {
   yellow: "bg-amber-100 text-amber-700",
   red: "bg-red-100 text-red-700",
   unknown: "bg-neutral-100 text-neutral-500",
+  no_data: "bg-neutral-100 text-neutral-500",
 };
 
 export default function RoutingPage() {
@@ -193,6 +195,7 @@ export default function RoutingPage() {
           )}
         </div>
       )}
+      <RiskNewsFeed />
     </main>
   );
 }

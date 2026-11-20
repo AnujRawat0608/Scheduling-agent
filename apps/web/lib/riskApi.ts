@@ -10,7 +10,7 @@
 
 const RISK_API_BASE_URL = process.env.NEXT_PUBLIC_RISK_API_URL ?? "http://localhost:8000";
 
-export type RiskStatus = "green" | "yellow" | "red" | "unknown";
+export type RiskStatus = "green" | "yellow" | "red" | "unknown" | "no_data";
 export type FreightMode = "sea" | "air" | "road" | "rail";
 
 export type Chokepoint = {

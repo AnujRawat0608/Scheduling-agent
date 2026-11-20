@@ -16,7 +16,7 @@ import { findApprovalTarget, buildRfqMailHref } from "../../../lib/procurementSo
 import { Paperclip, ArrowUp, X, ExternalLink, Check, ChevronDown, AlertTriangle, Calculator } from "lucide-react";
 import { AgentActivity } from "../../../components/AgentActivity";
 import { RfqQuoteStatus } from "../../../components/RfqQuoteStatus";
-
+import { RiskNewsFeed } from "../../../components/RiskNews";
 
 import {
   createProcurementTask,
@@ -295,22 +295,22 @@ function NewProcurementInner() {
     ? (approve.variables?.source ?? null)
     : null;
 
-    const [rejecting, setRejecting] = useState(false);
-const [rejectCategory, setRejectCategory] = useState<RejectCategory>("price");
-const [rejectNote, setRejectNote] = useState("");
+  const [rejecting, setRejecting] = useState(false);
+  const [rejectCategory, setRejectCategory] = useState<RejectCategory>("price");
+  const [rejectNote, setRejectNote] = useState("");
 
-const reject = useMutation({
-  mutationFn: () =>
-    rejectProcurementTask(activeTaskId as string, {
-      category: rejectCategory,
-      note: rejectNote.trim(),
-    }),
-  onSuccess: () => {
-    setRejecting(false);
-    setRejectNote("");
-    qc.invalidateQueries({ queryKey: ["procurement", activeTaskId] });
-  },
-});
+  const reject = useMutation({
+    mutationFn: () =>
+      rejectProcurementTask(activeTaskId as string, {
+        category: rejectCategory,
+        note: rejectNote.trim(),
+      }),
+    onSuccess: () => {
+      setRejecting(false);
+      setRejectNote("");
+      qc.invalidateQueries({ queryKey: ["procurement", activeTaskId] });
+    },
+  });
 
   // Blocks a second approval while one is in flight, without greying out the other buttons.
   function startApprove(plan: number | undefined, source: string) {
@@ -499,6 +499,18 @@ const reject = useMutation({
   const isLocked = !!state && ["purchasing", "rfq_sent", "done"].includes(state.status);
   const isProcessing = !!state && ["extracting", "sourcing", "comparing"].includes(state.status);
 
+  // Chokepoints on this request's lanes, so the news shown is about THESE routes.
+  const riskByCountry = state?.riskAssessment as Record<string, RiskAssessment> | null | undefined;
+  const riskChokepointNames = Array.from(
+    new Set(
+      Object.values(riskByCountry ?? {}).flatMap((r) => (r?.chokepoints ?? []).map((c) => c.name))
+    )
+  );
+
+  // Lane-specific news shows inside the results when the risk check found chokepoints.
+  // Otherwise the general news feed at the bottom of the page is shown instead.
+  const showLaneNews = state?.riskCheckStatus === "ok" && riskChokepointNames.length > 0;
+
   return (
     <main className="min-h-screen w-full bg-slate-100 px-6 pb-16 pt-8">
       <GlobalRiskOverview affectedSuppliers={activeTaskId ? affectedSuppliers : undefined} />
@@ -511,18 +523,18 @@ const reject = useMutation({
           </div>
 
           <div className="flex items-center gap-1.5">
-  <SourceTab label="From your PLM" disabled />
-  <SourceTab label="Paste a BOM" active={mode === "bom"} onClick={() => setMode("bom")} />
-  <SourceTab label="Just type it" active={mode === "type"} onClick={() => setMode("type")} />
-  <span className="mx-1 h-5 w-px bg-neutral-200" aria-hidden />
-  <Link
-    href="/tariff"
-    className="flex items-center gap-1 text-[11px] font-medium text-neutral-500 transition hover:text-[#EA580C]"
-  >
-    <Calculator size={12} />
-    Tariff Estimator
-  </Link>
-</div>
+            <SourceTab label="From your PLM" disabled />
+            <SourceTab label="Paste a BOM" active={mode === "bom"} onClick={() => setMode("bom")} />
+            <SourceTab label="Just type it" active={mode === "type"} onClick={() => setMode("type")} />
+            <span className="mx-1 h-5 w-px bg-neutral-200" aria-hidden />
+            <Link
+              href="/tariff"
+              className="flex items-center gap-1 text-[11px] font-medium text-neutral-500 transition hover:text-[#EA580C]"
+            >
+              <Calculator size={12} />
+              Tariff Estimator
+            </Link>
+          </div>
         </div>
 
         {/* Request options */}
@@ -791,6 +803,13 @@ const reject = useMutation({
             />
           )}
 
+          {/* News for the chokepoints on this request's lanes (collapsible) */}
+          {showLaneNews && (
+            <CollapsibleNews title="news on your shipping routes" storageKey="news-lane-open">
+              <RiskNewsFeed chokepoints={riskChokepointNames} title="News on your shipping routes" limit={8} />
+            </CollapsibleNews>
+          )}
+
           {!isResultError && <AgentActivity status={state?.status} state={state} />}
 
           {/* Consolidated view — the recommended plan, plus other viable combinations */}
@@ -801,72 +820,72 @@ const reject = useMutation({
               </h3>
               <PlanCard plan={state.recommendedPlan} show={money} highlight />
 
-           {state.status === "awaiting_approval" && (
-  <div className="space-y-3">
-    <div className="flex items-center gap-3">
-      <button
-        onClick={() => startApprove(undefined, "recommended")}
-        disabled={approvingSource === "recommended" || reject.isPending}
-        className="rounded-md bg-[#EA580C] px-4 py-2 text-xs font-medium text-white transition hover:bg-[#EA580C]/90 disabled:opacity-40"
-      >
-        {approvingSource === "recommended" ? "Approving…" : "Approve this plan"}
-      </button>
-      <button
-        onClick={() => setRejecting((r) => !r)}
-        disabled={approve.isPending || reject.isPending}
-        className="rounded-md border border-neutral-300 px-4 py-2 text-xs font-medium text-neutral-700 transition hover:bg-neutral-50 disabled:opacity-40"
-      >
-        Reject
-      </button>
-      {approve.isError && (
-        <span className="text-xs text-red-600">{(approve.error as Error).message}</span>
-      )}
-    </div>
+              {state.status === "awaiting_approval" && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => startApprove(undefined, "recommended")}
+                      disabled={approvingSource === "recommended" || reject.isPending}
+                      className="rounded-md bg-[#EA580C] px-4 py-2 text-xs font-medium text-white transition hover:bg-[#EA580C]/90 disabled:opacity-40"
+                    >
+                      {approvingSource === "recommended" ? "Approving…" : "Approve this plan"}
+                    </button>
+                    <button
+                      onClick={() => setRejecting((r) => !r)}
+                      disabled={approve.isPending || reject.isPending}
+                      className="rounded-md border border-neutral-300 px-4 py-2 text-xs font-medium text-neutral-700 transition hover:bg-neutral-50 disabled:opacity-40"
+                    >
+                      Reject
+                    </button>
+                    {approve.isError && (
+                      <span className="text-xs text-red-600">{(approve.error as Error).message}</span>
+                    )}
+                  </div>
 
-    {rejecting && (
-      <div className="space-y-2.5 rounded-lg border border-neutral-200 bg-neutral-50 p-3.5">
-        <p className="text-xs font-medium text-neutral-800">Why are you rejecting this plan?</p>
-        <SelectField
-          label="Reason"
-          value={rejectCategory}
-          onChange={(v) => setRejectCategory(v as RejectCategory)}
-        >
-          {REJECT_REASONS.map((r) => (
-            <option key={r.value} value={r.value}>
-              {r.label}
-            </option>
-          ))}
-        </SelectField>
-        <input
-          value={rejectNote}
-          onChange={(e) => setRejectNote(e.target.value)}
-          placeholder="Add a note (optional)"
-          aria-label="Rejection note"
-          className="h-8 w-full rounded-lg border border-neutral-200 bg-white px-3 text-xs text-neutral-900 outline-none focus:border-[#EA580C] focus:ring-2 focus:ring-[#EA580C]/20"
-        />
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => reject.mutate()}
-            disabled={reject.isPending}
-            className="rounded-md bg-red-600 px-3 py-1.5 text-[11px] font-medium text-white transition hover:bg-red-700 disabled:opacity-40"
-          >
-            {reject.isPending ? "Rejecting…" : "Confirm reject"}
-          </button>
-          <button
-            onClick={() => setRejecting(false)}
-            disabled={reject.isPending}
-            className="text-[11px] font-medium text-neutral-500 hover:text-neutral-800"
-          >
-            Cancel
-          </button>
-        </div>
-        {reject.isError && (
-          <p className="text-xs text-red-600">{(reject.error as Error).message}</p>
-        )}
-      </div>
-    )}
-  </div>
-)}
+                  {rejecting && (
+                    <div className="space-y-2.5 rounded-lg border border-neutral-200 bg-neutral-50 p-3.5">
+                      <p className="text-xs font-medium text-neutral-800">Why are you rejecting this plan?</p>
+                      <SelectField
+                        label="Reason"
+                        value={rejectCategory}
+                        onChange={(v) => setRejectCategory(v as RejectCategory)}
+                      >
+                        {REJECT_REASONS.map((r) => (
+                          <option key={r.value} value={r.value}>
+                            {r.label}
+                          </option>
+                        ))}
+                      </SelectField>
+                      <input
+                        value={rejectNote}
+                        onChange={(e) => setRejectNote(e.target.value)}
+                        placeholder="Add a note (optional)"
+                        aria-label="Rejection note"
+                        className="h-8 w-full rounded-lg border border-neutral-200 bg-white px-3 text-xs text-neutral-900 outline-none focus:border-[#EA580C] focus:ring-2 focus:ring-[#EA580C]/20"
+                      />
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => reject.mutate()}
+                          disabled={reject.isPending}
+                          className="rounded-md bg-red-600 px-3 py-1.5 text-[11px] font-medium text-white transition hover:bg-red-700 disabled:opacity-40"
+                        >
+                          {reject.isPending ? "Rejecting…" : "Confirm reject"}
+                        </button>
+                        <button
+                          onClick={() => setRejecting(false)}
+                          disabled={reject.isPending}
+                          className="text-[11px] font-medium text-neutral-500 hover:text-neutral-800"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                      {reject.isError && (
+                        <p className="text-xs text-red-600">{(reject.error as Error).message}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {state.alternativePlans && state.alternativePlans.length > 0 && (
                 <details className="rounded-lg border border-neutral-200">
@@ -977,8 +996,7 @@ const reject = useMutation({
                                     : approvalTarget.index + 1
                                   : null;
 
-                                // Is this row the supplier that was actually approved?
-                               // Is this the exact quote that was approved? Once the order is placed, the approved plan
+                                // Is this the exact quote that was approved? Once the order is placed, the approved plan
                                 // becomes state.recommendedPlan (humanApproval.ts swaps it in), so plan 0 is the approved one.
                                 // While the order is still being placed, trust the click made in this session.
                                 const isApprovedRow =
@@ -1009,7 +1027,7 @@ const reject = useMutation({
 
                                 return (
                                   <tr key={rowKey} className={q.isBest ? "bg-green-50/40" : "hover:bg-slate-50"}>
-                                                                       {/* Supplier */}
+                                    {/* Supplier */}
                                     <td className="px-4 py-3 font-medium">
                                       {href ? (
                                         <a
@@ -1036,7 +1054,6 @@ const reject = useMutation({
                                       )}
 
                                       <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                                        
                                         {isWeb ? (
                                           <span
                                             title={`Found on the web. Extraction confidence ${Math.round((q.confidence ?? 0) * 100)}%. Prices are indicative until the supplier confirms.`}
@@ -1267,6 +1284,16 @@ const reject = useMutation({
         </div>
       )}
 
+      {/* General risk news: shown whenever the lane-specific news above is not (no request yet,
+          risk analysis off, domestic lane, or no chokepoints found). Collapsible. */}
+      {!showLaneNews && (
+        <div className="mt-6 rounded-xl border border-neutral-200 bg-white px-5 py-3 shadow-sm">
+          <CollapsibleNews title="latest supply chain risk news" storageKey="news-general-open">
+            <RiskNewsFeed title="Latest supply chain risk news" limit={6} />
+          </CollapsibleNews>
+        </div>
+      )}
+
       <footer className="mt-6 flex items-center justify-center gap-1 text-xs text-neutral-400">
         <span>Sourced against your supply chain catalog</span>
         <span>·</span>
@@ -1279,6 +1306,59 @@ const reject = useMutation({
         </Link>
       </footer>
     </main>
+  );
+}
+
+/** Small toggle with a chevron that shows or hides its children.
+ *  Starts collapsed so the page stays short, and remembers the buyer's choice in the browser. */
+function CollapsibleNews({
+  title,
+  storageKey,
+  children,
+}: {
+  title: string;
+  storageKey: string;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved !== null) setOpen(saved === "1");
+    } catch {
+      /* storage unavailable: just use the default */
+    }
+  }, [storageKey]);
+
+  function toggle() {
+    setOpen((o) => {
+      const next = !o;
+      try {
+        localStorage.setItem(storageKey, next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }
+
+  return (
+    <div>
+      <button
+        onClick={toggle}
+        aria-expanded={open}
+        className="flex items-center gap-1.5 text-[11px] font-medium text-neutral-500 transition hover:text-neutral-800"
+      >
+        <ChevronDown
+          size={14}
+          className={`transition-transform ${open ? "rotate-180" : ""}`}
+          aria-hidden
+        />
+        {open ? "Hide" : "Show"} {title}
+      </button>
+      {open && <div className="mt-2">{children}</div>}
+    </div>
   );
 }
 
