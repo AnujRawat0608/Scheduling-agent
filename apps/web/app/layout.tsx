@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { Providers } from "./providers";
 import { Dock } from "./Dock";
 import { ProcurerUserMenu } from "../components/ProcurerUserMenu";
+import { ThemeToggle } from "../components/ThemeToggle";
 import { Analytics } from "@vercel/analytics/next";
 
 // Pages that get the METIS bar. To add a new page, add its path here.
@@ -23,6 +24,10 @@ const HIDE_ON = [
 
 // Sections that belong to buyers. Only these get the buyer's profile menu.
 const BUYER_SECTIONS = ["/procurement", "/catalog"];
+
+// Runs before the page paints, so there is no white flash when dark mode is on.
+// Dark is the default. It only stays light if the user picked light with the toggle.
+const THEME_SCRIPT = `try{if(localStorage.getItem("theme")!=="light")document.documentElement.classList.add("dark")}catch(e){document.documentElement.classList.add("dark")}`;
 
 function AppHeader() {
   const pathname = usePathname();
@@ -44,18 +49,22 @@ function AppHeader() {
         >
           METIS
         </Link>
-        {/* Supplier pages get their own menu later; no buyer profile on them. */}
-        {isBuyerPage && (
-  <div className="flex items-center gap-4">
-    <Link
-      href="/procurement"
-      className="rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 transition hover:border-neutral-300"
-    >
-      My orders &amp; quotes
-    </Link>
-    <ProcurerUserMenu />
-  </div>
-)}
+
+        <div className="flex items-center gap-4">
+          <ThemeToggle />
+          {/* Supplier pages get their own menu later; no buyer profile on them. */}
+          {isBuyerPage && (
+            <>
+              <Link
+                href="/procurement"
+                className="rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 transition hover:border-neutral-300"
+              >
+                My orders &amp; quotes
+              </Link>
+              <ProcurerUserMenu />
+            </>
+          )}
+        </div>
       </div>
     </header>
   );
@@ -63,7 +72,10 @@ function AppHeader() {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
       <body>
         <Providers>
           <AppHeader />

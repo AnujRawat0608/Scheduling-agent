@@ -1,0 +1,182 @@
+/* Dark mode for every page, without editing each page's classes.
+   When <html> has class "dark", the light Tailwind utilities the app already uses
+   are remapped to dark equivalents. Works with Tailwind v3 and v4.
+   Import this once, at the bottom of globals.css:  @import "./dark-mode.css"; */
+
+.dark {
+  color-scheme: dark;
+}
+
+.dark body {
+  background-color: #0b0f17;
+  color: #e2e8f0;
+}
+
+/* ---------- Surfaces ---------- */
+.dark .bg-slate-100 { background-color: #0b0f17; }
+.dark .bg-white { background-color: #141a24; }
+.dark .bg-neutral-50,
+.dark .bg-slate-50,
+.dark .hover\:bg-slate-50:hover,
+.dark .hover\:bg-neutral-50:hover { background-color: #1b2230; }
+.dark .bg-neutral-100 { background-color: #222a38; }
+
+/* ---------- Borders and dividers ---------- */
+.dark .border-neutral-100 { border-color: #222a38; }
+.dark .border-neutral-200 { border-color: #2a3342; }
+.dark .border-neutral-300,
+.dark .border-dashed.border-neutral-300,
+.dark .hover\:border-neutral-300:hover { border-color: #3a4558; }
+.dark .divide-neutral-200 > * { border-color: #2a3342; }
+.dark .bg-neutral-200 { background-color: #2a3342; }
+
+/* ---------- Text ---------- */
+.dark .text-neutral-900,
+.dark .hover\:text-neutral-900:hover { color: #f1f5f9; }
+.dark .text-neutral-800,
+.dark .hover\:text-neutral-800:hover { color: #e2e8f0; }
+.dark .text-neutral-700,
+.dark .hover\:text-neutral-700:hover { color: #cbd5e1; }
+.dark .text-neutral-600 { color: #b6c2d3; }
+.dark .text-neutral-500 { color: #94a3b8; }
+.dark .text-neutral-400 { color: #7c8aa0; }
+.dark .text-neutral-300 { color: #5b6678; }
+.dark .placeholder\:text-neutral-400::placeholder { color: #7c8aa0; }
+
+/* ---------- Status colours (soft tinted backgrounds, brighter text) ---------- */
+.dark .bg-green-50,
+.dark .bg-green-50\/40 { background-color: rgba(34, 197, 94, 0.10); }
+.dark .bg-green-100 { background-color: rgba(34, 197, 94, 0.18); }
+.dark .border-green-200 { border-color: rgba(34, 197, 94, 0.35); }
+.dark .text-green-700,
+.dark .text-green-800 { color: #4ade80; }
+
+.dark .bg-amber-50 { background-color: rgba(245, 158, 11, 0.10); }
+.dark .bg-amber-100 { background-color: rgba(245, 158, 11, 0.18); }
+.dark .border-amber-200 { border-color: rgba(245, 158, 11, 0.35); }
+.dark .text-amber-700,
+.dark .text-amber-800 { color: #fbbf24; }
+
+.dark .bg-red-50 { background-color: rgba(239, 68, 68, 0.10); }
+.dark .bg-red-100 { background-color: rgba(239, 68, 68, 0.18); }
+.dark .border-red-200 { border-color: rgba(239, 68, 68, 0.35); }
+.dark .text-red-600,
+.dark .text-red-700,
+.dark .text-red-800 { color: #f87171; }
+
+.dark .bg-yellow-100 { background-color: rgba(234, 179, 8, 0.18); }
+.dark .text-yellow-700 { color: #facc15; }
+
+/* Solid buttons keep their colour, and their white text, in both modes. */
+.dark .hover\:bg-red-700:hover { background-color: #b91c1c; }
+
+/* ---------- Translucent header (bg-white/90 in layout.tsx) ---------- */
+.dark .bg-white\/90 { background-color: rgba(20, 26, 36, 0.9); }
+
+/* ---------- Catch-all for translucent light backgrounds ----------
+   Classes like bg-white/90 or bg-neutral-50/60 are separate classes, so the rules above
+   don't match them, and a see-through white over a dark page shows up as light grey.
+   These attribute selectors catch every opacity variant at once. */
+.dark [class*="bg-white/"] { background-color: rgba(20, 26, 36, 0.92); }
+.dark [class*="bg-neutral-50/"],
+.dark [class*="bg-slate-50/"],
+.dark [class*="bg-gray-50/"] { background-color: rgba(27, 34, 48, 0.92); }
+.dark [class*="bg-neutral-100/"],
+.dark [class*="bg-slate-100/"],
+.dark [class*="bg-gray-100/"] { background-color: rgba(34, 42, 56, 0.92); }
+
+/* Same palette for the gray/zinc scales, in case a component uses them instead of neutral/slate */
+.dark .bg-gray-50,
+.dark .bg-zinc-50 { background-color: #1b2230; }
+.dark .bg-gray-100,
+.dark .bg-zinc-100 { background-color: #222a38; }
+.dark .bg-gray-200,
+.dark .bg-slate-200,
+.dark .bg-zinc-200 { background-color: #2a3342; }
+.dark .border-gray-200,
+.dark .border-slate-200,
+.dark .border-zinc-200 { border-color: #2a3342; }
+.dark .border-gray-300,
+.dark .border-slate-300 { border-color: #3a4558; }
+.dark .text-gray-900,
+.dark .text-slate-900 { color: #f1f5f9; }
+.dark .text-gray-800,
+.dark .text-slate-800 { color: #e2e8f0; }
+.dark .text-gray-700,
+.dark .text-slate-700 { color: #cbd5e1; }
+.dark .text-gray-600,
+.dark .text-slate-600 { color: #b6c2d3; }
+.dark .text-gray-500,
+.dark .text-slate-500 { color: #94a3b8; }
+.dark .text-gray-400,
+.dark .text-slate-400 { color: #7c8aa0; }
+
+/* ---------- Form fields without their own background ----------
+   With color-scheme: dark, plain inputs get the browser's default grey (#3b3b3b),
+   which looks out of place. Inputs that set a bg- class (bg-white, bg-transparent) are untouched. */
+.dark :where(input, textarea, select):not([class*="bg-"]) {
+  background-color: #1b2230;
+  color: #e2e8f0;
+  border-color: #2a3342;
+}
+.dark :where(input, textarea):not([class*="bg-"])::placeholder { color: #7c8aa0; }
+.dark :where(input, textarea, select) { caret-color: #f1f5f9; }
+
+/* ---------- Selected / highlighted rows (blue, indigo, sky, violet tints) ---------- */
+.dark .bg-blue-50,
+.dark .bg-indigo-50,
+.dark .bg-sky-50,
+.dark .bg-violet-50,
+.dark [class*="bg-blue-50/"],
+.dark [class*="bg-indigo-50/"] { background-color: rgba(59, 91, 255, 0.14); }
+.dark .bg-blue-100,
+.dark .bg-indigo-100,
+.dark .bg-sky-100,
+.dark .bg-violet-100,
+.dark [class*="bg-blue-100/"],
+.dark [class*="bg-indigo-100/"] { background-color: rgba(59, 91, 255, 0.24); }
+.dark .border-blue-200,
+.dark .border-blue-300,
+.dark .border-indigo-200,
+.dark .border-indigo-300 { border-color: rgba(96, 130, 255, 0.5); }
+.dark .text-blue-700,
+.dark .text-blue-800,
+.dark .text-blue-900,
+.dark .text-indigo-700,
+.dark .text-indigo-800,
+.dark .text-indigo-900 { color: #bfd0ff; }
+
+/* ---------- Very light borders and dividers (the bright lines between form rows) ---------- */
+.dark .border-gray-100,
+.dark .border-slate-100,
+.dark .border-zinc-100 { border-color: #222a38; }
+.dark .divide-gray-100 > *,
+.dark .divide-slate-100 > *,
+.dark .divide-neutral-100 > *,
+.dark .divide-gray-200 > *,
+.dark .divide-slate-200 > * { border-color: #2a3342; }
+.dark .border-white,
+.dark [class*="border-white/"] { border-color: #2a3342; }
+
+/* ======================================================================
+   Mail page fixes (exact classes found in app/mail/page.tsx)
+   ====================================================================== */
+
+/* Selected message card uses an arbitrary light colour: bg-[#eef2ff] */
+.dark .bg-\[\#eef2ff\] { background-color: rgba(61, 107, 255, 0.16); }
+
+/* Compose fields sit on the card, so they should be see-through, not browser-grey.
+   (Overrides the filled style from the earlier input rule.) */
+.dark :where(input, textarea):not([class*="bg-"]) { background-color: transparent; }
+
+/* Tailwind v3 placeholder-* classes */
+.dark .placeholder-neutral-400::placeholder { color: #7c8aa0; }
+
+/* Row dividers: Tailwind v3 sets divide colours with a more specific selector than
+   ".dark .divide-… > *", so the light lines kept winning. Match its selector shape. */
+.dark .divide-neutral-200 > :not([hidden]) ~ :not([hidden]),
+.dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]),
+.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) { border-color: #2a3342; }
+.dark .divide-neutral-100 > :not([hidden]) ~ :not([hidden]),
+.dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]),
+.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: #222a38; }

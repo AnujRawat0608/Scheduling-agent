@@ -6,3 +6,5 @@ body {
   color: #171717;
   background: #ffffff;
 }
+
+@import "./dark-mode.css";
