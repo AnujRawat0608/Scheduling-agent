@@ -1,7 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { Inbox } from "lucide-react";
+import { ArrowRight, Inbox } from "lucide-react";
 import { fetchMySupplierOrders, type SupplierOrder } from "../lib/supplierOrdersApi";
 import { formatMoney } from "../lib/format";
 
@@ -11,14 +12,24 @@ const STATUS_STYLES: Record<string, string> = {
   delivered: "bg-emerald-50 text-emerald-700",
 };
 
-const MAX_SHOWN = 10;
+const DEFAULT_LIMIT = 10;
 
 /**
  * Orders buyers have placed with the logged-in supplier AND confirmed on their side.
  * Read-only: the buyer confirms an order, the supplier fulfils it. Pending orders
  * (not yet confirmed by the buyer) and cancelled ones are not listed, only counted.
+ *
+ * Props (both optional, so existing usages keep working):
+ *  - limit:       how many orders to show (default 10). The dashboard passes 3.
+ *  - viewAllHref: when set, a "View all N orders" link is shown if the list is cut off.
  */
-export function IncomingOrders() {
+export function IncomingOrders({
+  limit = DEFAULT_LIMIT,
+  viewAllHref,
+}: {
+  limit?: number;
+  viewAllHref?: string;
+} = {}) {
   const { data, isLoading, error } = useQuery({
     queryKey: ["supplier-orders-mine"],
     queryFn: fetchMySupplierOrders,
@@ -32,7 +43,8 @@ export function IncomingOrders() {
   const orders = all
     .filter((o) => o.status !== "pending" && o.status !== "cancelled")
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  const shown = orders.slice(0, MAX_SHOWN);
+  const shown = orders.slice(0, limit);
+  const isCutOff = orders.length > limit;
 
   return (
     <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
@@ -114,11 +126,22 @@ export function IncomingOrders() {
           </ul>
         )}
 
-        {orders.length > MAX_SHOWN && (
-          <p className="border-t border-slate-100 px-6 py-3 text-xs text-slate-400">
-            Showing the latest {MAX_SHOWN} of {orders.length} confirmed orders.
-          </p>
-        )}
+        {isCutOff &&
+          (viewAllHref ? (
+            <div className="border-t border-slate-100 px-6 py-3 text-center">
+              <Link
+                href={viewAllHref}
+                className="inline-flex items-center gap-1 text-xs font-medium text-[#3d6bff] hover:underline"
+              >
+                View all {orders.length} orders
+                <ArrowRight size={13} />
+              </Link>
+            </div>
+          ) : (
+            <p className="border-t border-slate-100 px-6 py-3 text-xs text-slate-400">
+              Showing the latest {limit} of {orders.length} confirmed orders.
+            </p>
+          ))}
       </div>
     </section>
   );

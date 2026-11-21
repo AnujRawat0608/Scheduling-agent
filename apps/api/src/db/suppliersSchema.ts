@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, timestamp, jsonb, boolean, numeric } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, integer, timestamp, jsonb, boolean, numeric, unique } from "drizzle-orm/pg-core";
 
 
 export const suppliers = pgTable("suppliers", {
@@ -119,17 +119,26 @@ unitPrice: numeric("unit_price", { precision: 12, scale: 2 }),
   subtotal: numeric("subtotal", { precision: 12, scale: 2 }),   // unitPrice × quantity, tax excluded
 taxAmount: numeric("tax_amount", { precision: 12, scale: 2 }),});
 
-export const supplierCertifications = pgTable("supplier_certifications", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  supplierId: uuid("supplier_id").notNull(),
-  certType: text("cert_type").notNull(),
-  certNumber: text("cert_number"),
-  issuedBy: text("issued_by"),
-  validUntil: timestamp("valid_until"),
-  documentUrl: text("document_url"),
-  verified: boolean("verified").notNull().default(false),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+export const supplierCertifications = pgTable(
+  "supplier_certifications",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    supplierId: uuid("supplier_id")
+      .notNull()
+      .references(() => suppliers.id, { onDelete: "cascade" }),
+    certType: text("cert_type").notNull(), // "iso9001" | "tradeLicense" | "insurance"
+    certNumber: text("cert_number"),
+    issuedBy: text("issued_by"),
+    validUntil: timestamp("valid_until"),
+    documentUrl: text("document_url"), // storage key/path, not a public link
+    documentName: text("document_name"), // original file name, shown in the dropzone
+    verified: boolean("verified").notNull().default(false),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => ({
+    onePerType: unique("supplier_cert_one_per_type").on(t.supplierId, t.certType),
+  })
+);
 
 export const supplierVerificationEvents = pgTable("supplier_verification_events", {
   id: uuid("id").defaultRandom().primaryKey(),

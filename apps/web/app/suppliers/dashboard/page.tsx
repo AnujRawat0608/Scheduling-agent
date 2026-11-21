@@ -62,10 +62,10 @@ const inputClass =
   "w-full rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-[#3d6bff] focus:bg-white focus:ring-2 focus:ring-[#3d6bff]/15 disabled:cursor-not-allowed disabled:text-slate-500 disabled:hover:border-slate-200";
 
 const btnSecondary =
-  "inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3d6bff]/40";
+  "inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3d6bff]/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-slate-200 disabled:hover:text-slate-700";
 
 const btnPrimary =
-  "inline-flex items-center gap-2 rounded-xl bg-[#3d6bff] px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-[#2f58e0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3d6bff]/40 disabled:cursor-not-allowed disabled:opacity-50";
+  "inline-flex items-center gap-2 rounded-xl bg-[#3d6bff] px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-[#2f58e0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3d6bff]/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-[#3d6bff]";
 
 const BUSINESS_TYPES = [
   "Manufacturer",
@@ -85,6 +85,9 @@ const MAX_CERT_BYTES = 5 * 1024 * 1024;
 
 type View = "overview" | "catalog" | "profile";
 const VIEWS: View[] = ["overview", "catalog", "profile"];
+
+/** A certificate already stored on the server. */
+type SavedCert = { id: string; fileName: string; uploadedAt: string };
 
 /**
  * Optional dashboard numbers. Wire these to your RFQ / order endpoints.
@@ -274,15 +277,25 @@ function NavItem({
   );
 }
 
+function fmtUploadDate(value: string): string {
+  const d = new Date(value);
+  return Number.isNaN(d.getTime())
+    ? ""
+    : d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
 function CertificateDropzone({
   label,
   file,
+  saved,
   error,
   onSelect,
   onClear,
 }: {
   label: string;
   file: File | null;
+  /** A certificate already stored on the server for this slot. */
+  saved: SavedCert | null;
   error: string | null;
   onSelect: (file: File | null) => void;
   onClear: () => void;
@@ -294,6 +307,8 @@ function CertificateDropzone({
           error
             ? "border-red-300 bg-red-50/50"
             : file
+            ? "border-amber-300 bg-amber-50/40"
+            : saved
             ? "border-emerald-300 bg-emerald-50/40"
             : "border-slate-300 bg-slate-50/60 hover:border-[#3d6bff] hover:bg-[#3d6bff]/5"
         }`}
@@ -302,14 +317,26 @@ function CertificateDropzone({
           type="file"
           accept=".pdf,.jpg,.jpeg,application/pdf,image/jpeg"
           className="sr-only"
-          onChange={(e) => onSelect(e.target.files?.[0] ?? null)}
+          onChange={(e) => {
+            onSelect(e.target.files?.[0] ?? null);
+            // Allow picking the same file again after removing it.
+            e.target.value = "";
+          }}
         />
         {file ? (
           <>
-            <FileText size={22} className="text-emerald-600" />
+            <FileText size={22} className="text-amber-600" />
             <span className="max-w-full truncate text-xs font-medium text-slate-800">{file.name}</span>
             <span className="text-[11px] text-slate-500">
-              {(file.size / 1024).toFixed(0)} KB · click to replace
+              {(file.size / 1024).toFixed(0)} KB · not saved yet · click to replace
+            </span>
+          </>
+        ) : saved ? (
+          <>
+            <FileText size={22} className="text-emerald-600" />
+            <span className="max-w-full truncate text-xs font-medium text-slate-800">{saved.fileName}</span>
+            <span className="text-[11px] text-slate-500">
+              Uploaded {fmtUploadDate(saved.uploadedAt)} · Supplier-declared · click to replace
             </span>
           </>
         ) : (
@@ -393,7 +420,6 @@ type FormState = {
   businessType: string;
   yearEstablished: string;
   totalEmployees: string;
-  totalAnnualRevenue: string;
   mainProducts: string;
   certifications: string;
 };
@@ -413,7 +439,6 @@ function profileToForm(p: SupplierProfile): FormState {
     businessType: p.businessType ?? "",
     yearEstablished: p.yearEstablished?.toString() ?? "",
     totalEmployees: p.totalEmployees ?? "",
-    totalAnnualRevenue: p.totalAnnualRevenue ?? "",
     mainProducts: p.mainProducts ?? "",
     certifications: p.certifications ?? "",
   };
@@ -474,9 +499,10 @@ export default function SupplierDashboardPage() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
-  // Certificate uploads (UI-only for now — see Compliance section)
+  // Certificates: files picked but not saved yet, and files already stored on the server.
   const [certFiles, setCertFiles] = useState<Record<string, File | null>>({});
   const [certErrors, setCertErrors] = useState<Record<string, string | null>>({});
+  const [savedCerts, setSavedCerts] = useState<SavedCert[]>([]);
 
   /* ------------------------------ data loading ----------------------------- */
 
@@ -537,12 +563,39 @@ export default function SupplierDashboardPage() {
     };
   }, [supplier]);
 
+  // Certificates already stored for this supplier. Fails quietly until the endpoint exists.
+  const supplierId = supplier?.id;
+  useEffect(() => {
+    if (!supplierId) return;
+    let cancelled = false;
+    fetch(`${API_BASE}/suppliers/me/certificates`, { headers: { ...authHeaders() } })
+      .then((r) => {
+        if (!r.ok) throw new Error("Request failed");
+        return r.json() as Promise<{ certificates: SavedCert[] }>;
+      })
+      .then((d) => {
+        if (!cancelled) setSavedCerts(d.certificates ?? []);
+      })
+      .catch(() => {
+        // Not available yet — the dropzones just start empty.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [supplierId]);
+
   /* ----------------------------- derived values ---------------------------- */
 
   const isDirty = useMemo(() => {
     if (!supplier || !form) return false;
     return JSON.stringify(profileToForm(supplier)) !== JSON.stringify(form);
   }, [supplier, form]);
+
+  // Files picked but not saved yet
+  const pendingCerts = Object.entries(certFiles).filter(([, f]) => f) as [string, File][];
+
+  // One flag for both kinds of change: text fields and certificate files
+  const hasChanges = isDirty || pendingCerts.length > 0;
 
   const completeness = useMemo(() => {
     if (!form) return 0;
@@ -578,12 +631,19 @@ export default function SupplierDashboardPage() {
       form.state,
       form.pincode,
     ];
+    // Count a slot once whether the file is saved or only selected
+    const certIds = new Set<string>([
+      ...savedCerts.map((c) => c.id),
+      ...Object.entries(certFiles)
+        .filter(([, f]) => f)
+        .map(([id]) => id),
+    ]);
     return {
       details: detailFields.every((v) => v.trim() !== ""),
       catalog: products.length > 0,
-      certs: Object.values(certFiles).filter(Boolean).length,
+      certs: CERT_SLOTS.filter((s) => certIds.has(s.id)).length,
     };
-  }, [form, products, certFiles]);
+  }, [form, products, certFiles, savedCerts]);
 
   /* -------------------------------- effects -------------------------------- */
 
@@ -593,15 +653,16 @@ export default function SupplierDashboardPage() {
     return () => clearTimeout(t);
   }, [saveSuccess]);
 
+  // Warn before leaving with unsaved text changes or unsaved certificate files
   useEffect(() => {
-    if (!isDirty) return;
+    if (!hasChanges) return;
     const handler = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = "";
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
-  }, [isDirty]);
+  }, [hasChanges]);
 
   /* -------------------------------- handlers ------------------------------- */
 
@@ -618,6 +679,8 @@ export default function SupplierDashboardPage() {
   function handleDiscard() {
     if (!supplier) return;
     setForm(profileToForm(supplier));
+    setCertFiles({});
+    setCertErrors({});
     setSaveError(null);
   }
 
@@ -632,11 +695,11 @@ export default function SupplierDashboardPage() {
 
   async function handleSave(e?: React.FormEvent) {
     e?.preventDefault();
-    if (!form) return;
+    if (!form || !hasChanges) return;
 
     // Validate here (not via the `required` attribute) so saving also works
-    // from the sticky bar while another tab is showing.
-    if (!form.businessName.trim() || !form.region.trim()) {
+    // from the save bar while another tab is showing.
+    if (isDirty && (!form.businessName.trim() || !form.region.trim())) {
       setSaveError("Company name and region are required.");
       go("profile");
       return;
@@ -647,27 +710,46 @@ export default function SupplierDashboardPage() {
     setSaveSuccess(false);
 
     try {
-      const updated = await updateMyProfile({
-        businessName: form.businessName,
-        region: form.region,
-        contactName: form.contactName || null,
-        phone: form.phone || null,
-        gstNumber: form.gstNumber || null,
-        address: form.address || null,
-        city: form.city || null,
-        state: form.state || null,
-        pincode: form.pincode || null,
-        companyOverview: form.companyOverview || null,
-        businessType: form.businessType || null,
-        yearEstablished: form.yearEstablished ? Number(form.yearEstablished) : null,
-        totalEmployees: form.totalEmployees || null,
-        totalAnnualRevenue: form.totalAnnualRevenue || null,
-        mainProducts: form.mainProducts || null,
-        certifications: form.certifications || null,
-      });
+      // 1. Profile fields, only if they changed
+      if (isDirty) {
+        const updated = await updateMyProfile({
+          businessName: form.businessName,
+          region: form.region,
+          contactName: form.contactName || null,
+          phone: form.phone || null,
+          gstNumber: form.gstNumber || null,
+          address: form.address || null,
+          city: form.city || null,
+          state: form.state || null,
+          pincode: form.pincode || null,
+          companyOverview: form.companyOverview || null,
+          businessType: form.businessType || null,
+          yearEstablished: form.yearEstablished ? Number(form.yearEstablished) : null,
+          totalEmployees: form.totalEmployees || null,
+          mainProducts: form.mainProducts || null,
+          certifications: form.certifications || null,
+        });
+        setSupplier(updated.supplier);
+        setForm(profileToForm(updated.supplier));
+      }
 
-      setSupplier(updated.supplier);
-      setForm(profileToForm(updated.supplier));
+      // 2. Certificates, only if files were selected
+      if (pendingCerts.length > 0) {
+        const fd = new FormData();
+        pendingCerts.forEach(([id, file]) => fd.append(id, file));
+
+        const res = await fetch(`${API_BASE}/suppliers/me/certificates`, {
+          method: "POST",
+          headers: { ...authHeaders() }, // no Content-Type: the browser sets the multipart boundary
+          body: fd,
+        });
+        if (!res.ok) throw new Error((await res.text()) || "Certificate upload failed");
+
+        const data = (await res.json()) as { certificates: SavedCert[] };
+        setSavedCerts(data.certificates ?? []);
+        setCertFiles({});
+      }
+
       setSaveSuccess(true);
     } catch (err) {
       setSaveError((err as Error).message);
@@ -913,7 +995,7 @@ export default function SupplierDashboardPage() {
                 <Card
                   icon={ShieldCheck}
                   title="Profile health"
-                                    action={
+                  action={
                     <button
                       type="button"
                       onClick={() => go("profile")}
@@ -984,10 +1066,10 @@ export default function SupplierDashboardPage() {
               {hasActivity ? (
                 <div className="grid items-start gap-6 2xl:grid-cols-2">
                   <RfqInbox limit={3} viewAllHref="/suppliers/rfqs" />
-                  <IncomingOrders />
+                  <IncomingOrders limit={3} viewAllHref="/suppliers/orders" />
                 </div>
               ) : (
-                <IncomingOrders />
+                <IncomingOrders limit={3} viewAllHref="/suppliers/orders" />
               )}
             </div>
           )}
@@ -1207,14 +1289,6 @@ export default function SupplierDashboardPage() {
                       className={inputClass}
                     />
                   </Field>
-                  <Field label="Total annual revenue" span2>
-                    <input
-                      value={form.totalAnnualRevenue}
-                      onChange={(e) => updateField("totalAnnualRevenue", e.target.value)}
-                      placeholder="US$1 Million - US$2.5 Million"
-                      className={inputClass}
-                    />
-                  </Field>
                   <Field label="Main products" span2>
                     <input
                       value={form.mainProducts}
@@ -1237,19 +1311,15 @@ export default function SupplierDashboardPage() {
               <Card
                 icon={ShieldCheck}
                 title="Compliance & certificates"
-                description="Upload documents to build buyer trust."
+                description="Upload documents to build buyer trust. Files are saved with the Save changes button below."
               >
-                {/*
-                  NOTE: uploads are UI-only for now. Once you have an upload endpoint,
-                  send `certFiles[id]` as multipart FormData in handleSave (or a
-                  dedicated handler) and store the returned URLs on the profile.
-                */}
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                   {CERT_SLOTS.map((slot) => (
                     <CertificateDropzone
                       key={slot.id}
                       label={slot.label}
                       file={certFiles[slot.id] ?? null}
+                      saved={savedCerts.find((c) => c.id === slot.id) ?? null}
                       error={certErrors[slot.id] ?? null}
                       onSelect={(f) => handleCertSelect(slot.id, f)}
                       onClear={() => handleCertSelect(slot.id, null)}
@@ -1259,6 +1329,48 @@ export default function SupplierDashboardPage() {
               </Card>
             </form>
           )}
+          {/* Save bar — sits at the bottom of the page content; buttons are disabled until something changes
+              (a text field or a certificate file) */}
+          <div className="mt-8 rounded-2xl border border-slate-200 bg-white">
+            <div className="px-4 py-3 sm:px-5">
+              {saveError && (
+                <div
+                  role="alert"
+                  className="mb-3 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+                >
+                  <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                  <span>Couldn&apos;t save your changes: {saveError}</span>
+                </div>
+              )}
+              <div className="flex items-center justify-between gap-3">
+                <p className="flex items-center gap-2 text-sm text-slate-600">
+                  <span
+                    className={`h-2 w-2 rounded-full ${hasChanges ? "bg-amber-500" : "bg-slate-300"}`}
+                    aria-hidden
+                  />
+                  {hasChanges ? "You have unsaved changes" : "No changes to save"}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleDiscard}
+                    disabled={!hasChanges || isSaving}
+                    className={btnSecondary}
+                  >
+                    Discard
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!hasChanges || isSaving}
+                    onClick={() => handleSave()}
+                    className={btnPrimary}
+                  >
+                    {isSaving ? "Saving…" : "Save changes"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </main>
         </div>
       </div>
@@ -1271,42 +1383,6 @@ export default function SupplierDashboardPage() {
         >
           <CheckCircle2 size={16} />
           Changes saved
-        </div>
-      )}
-
-      {/* Sticky save bar — only while there are unsaved edits, on any tab */}
-      {isDirty && (
-        <div className="fixed inset-x-4 bottom-28 z-30 mx-auto max-w-2xl rounded-2xl border border-slate-200 bg-white shadow-xl">
-          <div className="px-4 py-3 sm:px-5">
-            {saveError && (
-              <div
-                role="alert"
-                className="mb-3 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
-              >
-                <AlertCircle size={16} className="mt-0.5 shrink-0" />
-                <span>Couldn't save your changes: {saveError}</span>
-              </div>
-            )}
-            <div className="flex items-center justify-between gap-3">
-              <p className="flex items-center gap-2 text-sm text-slate-600">
-                <span className="h-2 w-2 rounded-full bg-amber-500" aria-hidden />
-                You have unsaved changes
-              </p>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleDiscard}
-                  disabled={isSaving}
-                  className={`${btnSecondary} disabled:opacity-50`}
-                >
-                  Discard
-                </button>
-                <button type="button" disabled={isSaving} onClick={() => handleSave()} className={btnPrimary}>
-                  {isSaving ? "Saving…" : "Save changes"}
-                </button>
-              </div>
-            </div>
-          </div>
         </div>
       )}
     </div>

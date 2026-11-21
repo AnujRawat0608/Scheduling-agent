@@ -16,7 +16,8 @@ export const rfqs = pgTable("rfqs", {
   id: uuid("id").defaultRandom().primaryKey(),
 
   /** Null only for an external supplier who hasn't onboarded yet (set when they submit their quote). */
-  supplierId: uuid("supplier_id").references(() => suppliers.id),
+  supplierId: uuid("supplier_id"),
+  procurersId: uuid("procurer_id"),
 
   /** "directory" = picked from the supplier list / created by the agent; "external" = invited by email. */
   supplierType: text("supplier_type").notNull().default("directory"),
