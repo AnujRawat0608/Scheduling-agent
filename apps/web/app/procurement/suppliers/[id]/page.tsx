@@ -149,10 +149,14 @@ export default function SupplierScorecardPage() {
   const params = useParams<{ id: string }>();
   const [authed, setAuthed] = useState(false);
 
-  useEffect(() => {
-    if (hasProcurerToken()) setAuthed(true);
-    else router.replace("/procurement/login");
-  }, [router]);
+useEffect(() => {
+  if (hasProcurerToken()) setAuthed(true);
+  else router.replace("/procurement/login");
+}, [router]);
+
+useEffect(() => {
+  window.scrollTo(0, 0);   
+}, []);
 
   const { data, isLoading, isError, error } = useSupplierTrust(authed ? params.id : null);
 
