@@ -17,6 +17,7 @@ import { Paperclip, ArrowUp, X, ExternalLink, Check, ChevronDown, AlertTriangle,
 import { AgentActivity } from "../../../components/AgentActivity";
 import { RfqQuoteStatus } from "../../../components/RfqQuoteStatus";
 import { RiskNewsFeed } from "../../../components/RiskNews";
+import { SupplierTrustCell } from "../../../components/SupplierTrustCell";
 
 import {
   createProcurementTask,
@@ -1147,9 +1148,9 @@ function NewProcurementInner() {
                                     {/* Compliance — no backend field exists yet. Add
                                         complianceVerified?: boolean and complianceDocs?: string[]
                                         to SupplierQuote to replace this placeholder with real data. */}
-                                    <td className="px-4 py-3 text-[10px] text-neutral-400">
-                                      Not tracked yet
-                                    </td>
+                                    <td className="px-4 py-3">
+                                    <SupplierTrustCell supplierId={q.supplierId} isWeb={isWeb} />
+                                  </td>
 
                                     {/* Action: approve the exact plan that uses this supplier for
                                         this item (when one exists), otherwise trigger an RFQ. */}

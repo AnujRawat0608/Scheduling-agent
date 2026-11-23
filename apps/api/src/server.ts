@@ -24,6 +24,7 @@ import { rfqTaskQuotesRouter } from "./routes/rfqTaskQuotes.js";
 import { rfqAcceptRouter } from "./routes/rfqAccept.js";
 import { tariffRouter } from "./routes/tariff.js";
 import { rfqRevisionRouter } from "./routes/rfqRevision.js";
+import { supplierTrustRouter } from "./routes/supplierTrust.js";
 
 
 
@@ -70,6 +71,7 @@ app.use("/api/rfqs", rfqRouter);
 app.use("/api/rfq-orders", rfqAcceptRouter);
 app.use("/api/rfq-orders", rfqRevisionRouter);
 app.use("/api", tariffRouter);
+app.use("/api", supplierTrustRouter);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
