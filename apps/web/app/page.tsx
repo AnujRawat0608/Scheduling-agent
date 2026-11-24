@@ -6,13 +6,15 @@ import Image from "next/image";
 import Link from "next/link";
 import { Maximize2, X } from "lucide-react";
 import { Space_Grotesk, Inter } from "next/font/google";
+import { getCalApi } from "@calcom/embed-react";
 
 // Edit these to change where the buttons go.
 const CONTACT_EMAIL = "iamanuj681@gmail.com"; // use a mailbox you own; an address on your own domain is better long term
 const TRY_LIVE_HREF = "/start"; // asks whether the visitor is a buyer or a supplier
 const SUPPLIER_REGISTER_HREF = "/suppliers/register";
 const SUPPLIER_LOGIN_HREF = "/suppliers/login";
-const PILOT_HREF = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent("Metis free pilot")}`;
+// Your Cal.com link: "<username>/<event-slug>", e.g. "anuj/metis-walkthrough"
+const CAL_LINK = "https://cal.com/anuj-rawat-vfzyzd/30min";
 
 const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
@@ -93,6 +95,20 @@ function Cta({
     <Link href={href} className={className}>
       {children}
     </Link>
+  );
+}
+
+/** Opens the Cal.com booking popup. Cal is initialised once in Home via getCalApi. */
+function BookCallButton({ children }: { children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      data-cal-link={CAL_LINK}
+      data-cal-config='{"layout":"month_view"}'
+      className={`inline-block rounded-full bg-[#3d6bff] px-7 py-3.5 text-[15px] font-medium text-white shadow-[0_8px_24px_-6px_rgba(61,107,255,0.5)] transition-colors hover:bg-[#3d6bff]/90 ${focusRing}`}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -269,6 +285,14 @@ type Step = {
 };
 
 export default function Home() {
+  // Initialise the Cal.com popup once; every BookCallButton on the page picks it up.
+  useEffect(() => {
+    (async () => {
+      const cal = await getCalApi();
+      cal("ui", { theme: "dark", layout: "month_view" });
+    })();
+  }, []);
+
   const steps: Step[] = [
     {
       num: "01",
@@ -441,11 +465,14 @@ export default function Home() {
                 out.
               </p>
               <div className="flex flex-wrap items-center justify-center gap-3 lg:justify-start">
-                <Cta href={PILOT_HREF}>Join the free pilot</Cta>
+                <BookCallButton>Book a walkthrough</BookCallButton>
                 <Cta href={TRY_LIVE_HREF} variant="secondary">
                   Try it live
                 </Cta>
               </div>
+              <p className="mt-4 text-[13px] text-white/40">
+                20 minutes with the founder · a few free pilot spots open
+              </p>
               <p className="mt-6 text-[14px] text-white/50">
                 Selling parts?{" "}
                 <Link
@@ -579,7 +606,7 @@ export default function Home() {
             weekly call about what worked and what didn&apos;t.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3">
-            <Cta href={PILOT_HREF}>Join the free pilot</Cta>
+            <BookCallButton>Book a walkthrough</BookCallButton>
             <Cta href={TRY_LIVE_HREF} variant="secondary">
               Try it live
             </Cta>

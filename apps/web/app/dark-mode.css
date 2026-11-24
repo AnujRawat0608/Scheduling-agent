@@ -396,3 +396,34 @@
 .dark .text-red-900 { color: #f87171; }
 .dark .text-emerald-800, .dark .text-emerald-900 { color: #34d399; }
 .dark .text-green-900 { color: #4ade80; }
+
+/* ======================================================================
+   Tariff / import duty estimator (app/tariff/page.tsx)
+   That page uses hardcoded hex colours, written as Tailwind arbitrary classes,
+   plus fill colours on the route SVG. None of them matched earlier rules.
+   ====================================================================== */
+
+/* Card surfaces */
+.dark .bg-\[\#f5f6fa\] { background-color: #141a24; }   /* main card, result cards */
+.dark .bg-\[\#f8f9fc\] { background-color: #10151e; }   /* controls section */
+
+/* Inputs, selects and the Air/Ocean pill track */
+.dark .bg-\[\#eceff6\] { background-color: #1b2230; }
+
+/* Label chips ("Total estimated landed cost", etc.) and the duty-rate badge */
+.dark .bg-\[\#e3e8f6\] { background-color: rgba(61, 107, 255, 0.16); }
+
+/* Empty breakdown bar track */
+.dark .bg-\[\#e5e7eb\] { background-color: #2a3342; }
+
+/* Section dividers and table lines */
+.dark .border-\[\#e6e8ef\],
+.dark .border-\[\#e0e4ee\] { border-color: #2a3342; }
+.dark .divide-\[\#e6e8ef\] > :not([hidden]) ~ :not([hidden]),
+.dark .divide-\[\#e6e8ef\] > * { border-color: #2a3342; }
+
+/* Route graphic. The SVG colours are fill attributes, and CSS beats attributes,
+   so these only need a selector scoped to that one SVG. */
+.dark svg[aria-label="Shipping route and duty point"] [fill="#fff"] { fill: #141a24; }
+.dark svg[aria-label="Shipping route and duty point"] [fill="#1f2430"] { fill: #e2e8f0; }
+.dark svg[aria-label="Shipping route and duty point"] [fill="#6b7280"] { fill: #94a3b8; }
