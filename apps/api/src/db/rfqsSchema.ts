@@ -17,7 +17,6 @@ export const rfqs = pgTable("rfqs", {
 
   /** Null only for an external supplier who hasn't onboarded yet (set when they submit their quote). */
   supplierId: uuid("supplier_id"),
-  procurersId: uuid("procurer_id"),
 
   /** "directory" = picked from the supplier list / created by the agent; "external" = invited by email. */
   supplierType: text("supplier_type").notNull().default("directory"),
@@ -86,4 +85,4 @@ export const rfqs = pgTable("rfqs", {
 
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+});    
