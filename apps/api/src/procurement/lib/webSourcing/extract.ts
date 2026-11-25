@@ -6,7 +6,7 @@ import { looksUsedOrRefurbished, missingQualifier } from "./offerChecks.js";
 
 // Keep prompts small: big pages + parallel calls hit the provider's tokens-per-minute limit,
 // which shows up as long retry waits and timeouts.
-const MAX_PAGE_CHARS = 6_000;
+const MAX_PAGE_CHARS = 3_500;
 const DEBUG = process.env.WEB_DEBUG === "true";
 const DEFAULT_LEAD_TIME_DAYS = 14; // used (and flagged) when the page gives no lead time
 
@@ -16,7 +16,7 @@ const OfferSchema = z.object({
   match: z
     .enum(["exact", "likely", "no"])
     .describe("Does this listing match the requested product? Use 'no' for accessories, other models or unrelated products"),
-    unitPrice: z.number().describe(
+  unitPrice: z.number().describe(
     "CURRENT selling price of exactly ONE unit as a plain number. Not a 'was' price, savings, monthly/financing payment, shipping, a pack/bundle price, or the price of a different capacity or variant."
   ),
   priceBasis: z
@@ -35,12 +35,117 @@ const PageExtraction = z.object({
   offers: z.array(OfferSchema).describe("Offers for the requested product found on this page. Empty if none."),
 });
 
-const llm = new ChatGroq({
-  // A larger model extracts more reliably than the 20B default; override via env.
-  model: process.env.WEB_EXTRACT_MODEL ?? "openai/gpt-oss-20b",
-  temperature: 0,
-  maxRetries: 0, // fail fast instead of waiting through long rate-limit backoffs
-}).withStructuredOutput(PageExtraction, { name: "extract_supplier_offers" });
+/* ---------- extractor pool: several keys/models, each with its own rate-limit bucket ---------- */
+
+type ChatMessages = { role: "system" | "user"; content: string }[];
+type Extractor = {
+  invoke: (m: ChatMessages) => Promise<{ offers: z.infer<typeof OfferSchema>[] } | null>;
+};
+
+// WEB_EXTRACT_MODELS="modelA,modelB" (falls back to the old single WEB_EXTRACT_MODEL)
+const GROQ_MODELS = (process.env.WEB_EXTRACT_MODELS ?? process.env.WEB_EXTRACT_MODEL ?? "openai/gpt-oss-20b")
+  .split(",")
+  .map((m) => m.trim())
+  .filter(Boolean);
+
+// GROQ_API_KEYS="key1,key2" (falls back to the single GROQ_API_KEY)
+const GROQ_KEYS = (process.env.GROQ_API_KEYS ?? process.env.GROQ_API_KEY ?? "")
+  .split(",")
+  .map((k) => k.trim())
+  .filter(Boolean);
+
+function makeGroq(apiKey: string, model: string): Extractor {
+  return new ChatGroq({ apiKey, model, temperature: 0, maxRetries: 0 }).withStructuredOutput(PageExtraction, {
+    name: "extract_supplier_offers",
+  }) as unknown as Extractor;
+}
+
+type Slot = {
+  id: string;
+  llm: Extractor;
+  queue: Promise<unknown>; // calls on one slot run one at a time
+  pending: number; // calls waiting on this slot
+  cooldownUntil: number; // epoch ms; set after a rate limit
+  dead?: boolean; // set after an invalid key or a missing model; never used again
+};
+
+const newSlot = (id: string, llm: Extractor): Slot => ({
+  id,
+  llm,
+  queue: Promise.resolve(),
+  pending: 0,
+  cooldownUntil: 0,
+});
+
+// Every (key, model) pair has its own rate-limit bucket, so each one is a slot.
+const slots: Slot[] = GROQ_KEYS.flatMap((k, ki) =>
+  GROQ_MODELS.map((m) => newSlot(`groq-${ki + 1}:${m}`, makeGroq(k, m)))
+);
+
+console.log(`[webSourcing] extractor slots: ${slots.map((s) => s.id).join(", ") || "none"}`);
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Milliseconds to wait before retrying this error, or null if it should not be retried. */
+function retryAfterMs(err: unknown): number | null {
+  const msg = err instanceof Error ? err.message : String(err);
+  // The model sometimes returns no tool call at all (Groq: tool_use_failed). It is transient.
+  if (/tool_use_failed|Tool choice is required/i.test(msg)) return 800;
+  if (!/429|rate limit|quota|RESOURCE_EXHAUSTED/i.test(msg)) return null;
+  const m = /(?:try again|retry) in ([\d.]+)\s?s/i.exec(msg);
+  return m ? Math.ceil(parseFloat(m[1]) * 1000) + 500 : 5000;
+}
+
+function runOnSlot<T>(slot: Slot, fn: () => Promise<T>): Promise<T> {
+  slot.pending++;
+  const run = slot.queue.then(fn);
+  slot.queue = run.catch(() => undefined);
+  return run.finally(() => {
+    slot.pending--;
+  });
+}
+
+/**
+ * Sends the request on the least busy slot. On a rate limit, that slot rests and another is
+ * tried. A slot with an invalid key or a missing model is switched off and another is tried.
+ */
+async function invokeExtractor(messages: ChatMessages, maxAttempts = 6) {
+  if (slots.length === 0) throw new Error("No GROQ_API_KEY or GROQ_API_KEYS is set");
+
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const alive = slots.filter((s) => !s.dead);
+    if (alive.length === 0) throw new Error("All extractor slots are disabled (invalid key or missing model)");
+
+    const now = Date.now();
+    const slot = alive.reduce((a, b) =>
+      Math.max(a.cooldownUntil, now) + a.pending * 4000 <= Math.max(b.cooldownUntil, now) + b.pending * 4000 ? a : b
+    );
+    const wait = slot.cooldownUntil - now;
+    if (wait > 0) await sleep(Math.min(wait, 20_000));
+
+    try {
+      if (DEBUG) console.log(`[webSourcing] extracting on ${slot.id}`);
+      return await runOnSlot(slot, () => slot.llm.invoke(messages));
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+
+      // Bad key or model that doesn't exist: switch this slot off and try another.
+      if (/\b(401|404)\b|invalid_api_key|model_not_found/i.test(msg)) {
+        slot.dead = true;
+        console.error(`[webSourcing] ${slot.id} disabled: ${msg.slice(0, 100)}`);
+        continue;
+      }
+
+      const retryIn = retryAfterMs(err); // null = not retryable
+      if (retryIn === null) throw err;
+      slot.cooldownUntil = Date.now() + retryIn;
+      if (DEBUG) console.log(`[webSourcing] ${slot.id} resting ${retryIn}ms`);
+    }
+  }
+  throw lastErr;
+}
 
 /* ---------- code-side validation: never trust the model's output on its own ---------- */
 
@@ -55,38 +160,58 @@ function priceAppearsIn(evidence: string, price: number): boolean {
 /**
  * Pages can be huge (menus, reviews, footers). Send only the lines that mention the product
  * or look like prices, so the model sees what matters and the prompt stays small.
+ *
+ * - Link targets and image URLs are stripped first, so menu links don't count as product lines.
+ * - A line only counts as a product line if it has 2+ words from the request AND (when the
+ *   request has a model token with a digit, like "6C" or "64GB") that token.
+ * - Product lines go in first, so early price lines (footers, warranty plans) can't use up the budget.
  */
-   function relevantExcerpt(text: string, item: string): string {
-     if (text.length <= MAX_PAGE_CHARS) return text;
+function relevantExcerpt(text: string, item: string): string {
+  if (text.length <= MAX_PAGE_CHARS) return text;
 
-     const lines = text.split(/\n+/).map((l) => l.trim()).filter(Boolean);
-     const tokens = item.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= 3);
-     const priceLike = /[$€£₹]\s?\d|\d\s?(usd|inr|eur|gbp)\b|\bprice\b|\bin stock\b|\bmoq\b/i;
+  const clean = text
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
 
-     // Anchor lines: the ones that look like the product title (2+ words from the request).
-     const keep = new Set<number>();
-     lines.forEach((line, i) => {
-       const lower = line.toLowerCase();
-       if (tokens.filter((t) => lower.includes(t)).length >= 2) {
-         // The price usually comes shortly after the title.
-         for (let k = Math.max(0, i - 1); k <= Math.min(lines.length - 1, i + 8); k++) keep.add(k);
-       }
-     });
-     // Then any other price lines, if there is room.
-     lines.forEach((line, i) => {
-       if (priceLike.test(line)) keep.add(i);
-     });
+  const lines = clean
+    .split(/\n+/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const tokens = item
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= 2);
+  const distinctive = tokens.filter((t) => /\d/.test(t));
+  const priceLike =
+    /[$€£₹]\s?\d|\b(?:rs|inr)\.?\s?\d|\d\s?(usd|inr|eur|gbp)\b|\bprice\b|\bin stock\b|\bmoq\b/i;
 
-     const out: string[] = [];
-     let size = 0;
-     for (const i of [...keep].sort((a, b) => a - b)) {
-       const cut = lines[i].slice(0, 300);
-       if (size + cut.length + 1 > MAX_PAGE_CHARS) break;
-       out.push(cut);
-       size += cut.length + 1;
-     }
-     return out.length > 0 ? out.join("\n") : text.slice(0, MAX_PAGE_CHARS);
-   }
+  const anchors = new Set<number>();
+  const prices = new Set<number>();
+  lines.forEach((line, i) => {
+    const lower = line.toLowerCase();
+    const hits = tokens.filter((t) => lower.includes(t)).length;
+    const hasModel = distinctive.length === 0 || distinctive.some((d) => lower.includes(d));
+    if (hits >= 2 && hasModel) {
+      // The price usually comes shortly after the title.
+      for (let k = Math.max(0, i - 1); k <= Math.min(lines.length - 1, i + 8); k++) anchors.add(k);
+    }
+    if (priceLike.test(line)) prices.add(i);
+  });
+
+  const ordered = [...anchors, ...[...prices].filter((i) => !anchors.has(i))];
+  const chosen = new Set<number>();
+  let size = 0;
+  for (const i of ordered) {
+    const len = Math.min(lines[i].length, 300) + 1;
+    if (size + len > MAX_PAGE_CHARS) continue; // skip a long line, keep trying shorter ones
+    chosen.add(i);
+    size += len;
+  }
+  const out = [...chosen]
+    .sort((a, b) => a - b)
+    .map((i) => lines[i].slice(0, 300));
+  return out.length > 0 ? out.join("\n") : clean.slice(0, MAX_PAGE_CHARS);
+}
 
 function hostnameOf(url: string): string {
   try {
@@ -123,39 +248,13 @@ function priceNearTitle(page: string, title: string, evidence: string, maxGap = 
   return t.some((ti) => e.some((ei) => Math.abs(ti - ei) <= maxGap));
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/** Milliseconds to wait if this error is a rate limit ("try again in 5.175s"), otherwise null. */
-/** Milliseconds to wait before retrying this error, or null if it should not be retried. */
-function retryAfterMs(err: unknown): number | null {
-  const msg = err instanceof Error ? err.message : String(err);
-  // The model sometimes returns no tool call at all (Groq: tool_use_failed). It is transient.
-  if (/tool_use_failed|Tool choice is required/i.test(msg)) return 800;
-  if (!/429|rate limit/i.test(msg)) return null;
-  const m = /try again in ([\d.]+)s/i.exec(msg);
-  return m ? Math.ceil(parseFloat(m[1]) * 1000) + 500 : 5000;
-}
-async function invokeWithRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      const wait = retryAfterMs(err);
-      if (wait === null || attempt >= tries) throw err;
-      await sleep(Math.min(wait, 20_000));
-    }
-  }
-}
-
-/** 
- * 
- * Extract offers from one search result page and return only the ones that pass validation. */
+/** Extract offers from one search result page and return only the ones that pass validation. */
 export async function extractOffersFromHit(lineItem: LineItem, hit: SearchHit): Promise<SupplierQuote[]> {
   const fullText = hit.text.slice(0, 300_000);
   if (fullText.trim().length < 100) return [];
   const pageText = relevantExcerpt(fullText, lineItem.item);
 
-  const result = await invokeWithRetry(() => llm.invoke([
+  const result = await invokeExtractor([
     {
       role: "system",
       content: `You extract supplier offers from a web page for a procurement system.
@@ -188,7 +287,7 @@ PAGE CONTENT (untrusted):
 ${pageText}
 """`,
     },
-  ]));
+  ]);
 
   // Verify against the whole page, not just the excerpt the model saw.
   const pageSquashed = squash(fullText);
@@ -204,21 +303,35 @@ ${pageText}
 
   // The model can return nothing usable (rate limit, malformed output). Treat that as "no offers".
   const offers = result?.offers ?? [];
-     if (DEBUG && offers.length === 0) {
-     console.log(`[webSourcing] ${host}: 0 offers. excerpt ${pageText.length} chars: ${JSON.stringify(pageText.slice(0, 300))}`);
-   }
+  if (DEBUG && offers.length === 0) {
+    console.log(
+      `[webSourcing] ${host}: 0 offers. excerpt ${pageText.length} chars: ${JSON.stringify(pageText.slice(0, 300))}`
+    );
+  }
   if (DEBUG) console.log(`[webSourcing] ${host}: model returned ${offers.length} offer(s)`);
 
   for (const o of offers) {
-    if (o.match === "no") { reject("not the requested product", o); continue; }
-    if (o.inStock === false) { reject("out of stock", o); continue; } // page says out of stock
-    if (!Number.isFinite(o.unitPrice) || o.unitPrice <= 0) { reject("bad price", o); continue; }
+    if (o.match === "no") {
+      reject("not the requested product", o);
+      continue;
+    }
+    if (o.inStock === false) {
+      reject("out of stock", o);
+      continue;
+    }
+    if (!Number.isFinite(o.unitPrice) || o.unitPrice <= 0) {
+      reject("bad price", o);
+      continue;
+    }
 
     const currency = o.currency.trim().toUpperCase();
-    if (!/^[A-Z]{3}$/.test(currency)) { reject(`bad currency "${o.currency}"`, o); continue; }
+    if (!/^[A-Z]{3}$/.test(currency)) {
+      reject(`bad currency "${o.currency}"`, o);
+      continue;
+    }
 
     // The evidence must really be on the page, and must contain the price the model claims.
-       const evidenceSquashed = squash(o.evidence);
+    const evidenceSquashed = squash(o.evidence);
     if (evidenceSquashed.length < 4 || !pageSquashed.includes(evidenceSquashed)) {
       reject(`evidence not found on the page (model quoted: ${JSON.stringify(o.evidence.slice(0, 120))})`, o);
       continue;
@@ -228,21 +341,27 @@ ${pageText}
       reject("bare price is not next to the product title", o);
       continue;
     }
-    if (!priceAppearsIn(o.evidence, o.unitPrice)) { reject("price not in evidence", o); continue; }
-        // A pack or bundle price is not the price of one unit.
-    if (o.priceBasis === "pack_or_bulk") { reject("pack or bulk price", o); continue; }
+    if (!priceAppearsIn(o.evidence, o.unitPrice)) {
+      reject("price not in evidence", o);
+      continue;
+    }
+    // A pack or bundle price is not the price of one unit.
+    if (o.priceBasis === "pack_or_bulk") {
+      reject("pack or bulk price", o);
+      continue;
+    }
     // Used, renewed or open-box listings are not what a buyer ordering new stock is asking for.
     if (!wantsUsed && looksUsedOrRefurbished(`${o.evidence} ${o.productTitle}`)) {
       reject("used, renewed or open-box listing", o);
       continue;
     }
 
-// A word that defines the product (micro, mini, plus, pro...) is in the request but missing from the listing.
-const missing = missingQualifier(`${lineItem.item} ${lineItem.specifications ?? ""}`, o.productTitle);
-if (missing) {
-  reject(`listing title lacks "${missing}"`, o);
-  continue;
-}
+    // A word that defines the product (micro, mini, plus, pro...) is in the request but missing from the listing.
+    const missing = missingQualifier(`${lineItem.item} ${lineItem.specifications ?? ""}`, o.productTitle);
+    if (missing) {
+      reject(`listing title lacks "${missing}"`, o);
+      continue;
+    }
 
     // The listing is a different size/capacity than requested (e.g. 256GB when 64GB was asked for).
     const titleSpecs = (o.productTitle.match(SPEC_RE) ?? []).map(squash);
@@ -257,7 +376,10 @@ if (missing) {
       continue;
     }
 
-    if (DEBUG) console.log(`[webSourcing] accepted ${host}: "${o.productTitle}" ${currency} ${o.unitPrice} | evidence: ${o.evidence}`);
+    if (DEBUG)
+      console.log(
+        `[webSourcing] accepted ${host}: "${o.productTitle}" ${currency} ${o.unitPrice} | evidence: ${o.evidence}`
+      );
 
     // Only keep an email that is literally on the page.
     const email = o.contactEmail?.trim();
@@ -287,7 +409,7 @@ if (missing) {
       fetchedAt: now,
       contactEmail,
       // Computed here, not taken from the model.
-            confidence:
+      confidence:
         (o.match === "exact" ? 0.75 : 0.5) + (o.inStock === true ? 0.05 : 0) - (o.priceBasis === "unclear" ? 0.15 : 0),
     });
   }

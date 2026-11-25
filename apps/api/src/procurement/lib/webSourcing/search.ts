@@ -127,17 +127,61 @@ class TavilySearch implements SearchProvider {
   }
 }
 
+const PER_PROVIDER_TIMEOUT_MS = Number(process.env.WEB_PROVIDER_TIMEOUT_MS ?? 40_000);
+
+/** Tries each provider in order and adds its results after the previous ones. */
+class SequentialSearch implements SearchProvider {
+  constructor(private readonly providers: { name: string; provider: SearchProvider }[]) {}
+
+async search(
+  query: string,
+  maxResults: number,
+  signal?: AbortSignal,
+  excludeDomains?: string[]
+): Promise<SearchHit[]> {
+  const out: SearchHit[] = [];
+  const seen = new Set<string>();
+
+  for (const { name, provider } of this.providers) {
+    // Caller cancelled: stop here instead of starting the next provider.
+    if (signal?.aborted) break;
+
+    // Aborts when EITHER the caller cancels OR this provider's own timeout passes.
+    const timeout = AbortSignal.timeout(PER_PROVIDER_TIMEOUT_MS);
+    const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
+
+    try {
+      const hits = await provider.search(query, maxResults, combined, excludeDomains);
+      let added = 0;
+      for (const hit of hits) {
+        const key = hit.url.replace(/[?#].*$/, "").replace(/\/$/, "").toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(hit);
+        added++;
+      }
+      console.log(`[webSourcing] ${name}: ${hits.length} result(s), ${added} new`);
+    } catch (err) {
+      if (signal?.aborted) break; // cancelled on purpose, not a provider failure
+      console.warn(`[webSourcing] ${name} failed:`, err instanceof Error ? err.message : err);
+    }
+  }
+  return out;
+}
+}
+
+
 /**
- * Prefers Firecrawl when FIRECRAWL_API_KEY is set; falls back to Tavily if only
- * TAVILY_API_KEY is set (so an existing deployment keeps working); returns null
- * when neither is configured, so web sourcing is simply unavailable.
+ * Uses every provider that has an API key, one after another, in this order:
+ * Firecrawl, then Tavily. One key = that provider alone. No keys = null, so web
+ * sourcing is simply unavailable.
  */
 export function getSearchProvider(): SearchProvider | null {
-  const firecrawlKey = process.env.FIRECRAWL_API_KEY;
-  if (firecrawlKey) return new FirecrawlSearch(firecrawlKey);
+  const providers: { name: string; provider: SearchProvider }[] = [];
+  // Order = the order they run in. Put your preferred provider first.
+  if (process.env.FIRECRAWL_API_KEY) providers.push({ name: "Firecrawl", provider: new FirecrawlSearch(process.env.FIRECRAWL_API_KEY) });
+  if (process.env.TAVILY_API_KEY) providers.push({ name: "Tavily", provider: new TavilySearch(process.env.TAVILY_API_KEY) });
 
-  const tavilyKey = process.env.TAVILY_API_KEY;
-  if (tavilyKey) return new TavilySearch(tavilyKey);
-
-  return null;
+  if (providers.length === 0) return null;
+  return providers.length === 1 ? providers[0].provider : new SequentialSearch(providers);
 }

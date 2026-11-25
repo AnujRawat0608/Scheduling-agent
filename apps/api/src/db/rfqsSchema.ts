@@ -86,3 +86,4 @@ export const rfqs = pgTable("rfqs", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });    
+
